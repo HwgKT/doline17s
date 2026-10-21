@@ -160,5 +160,6 @@ pio run -t monitor
 
 ## 🏆 Bản quyền & Tác giả
 - **Tác giả:** [congdoan23082006-svg](https://github.com/congdoan23082006-svg)
-- **Repository:** [ECcodedoline](https://github.com/congdoan23082006-svg/ECcodedoline.git)
+- **Organization:** [clb-robot-line-2026](https://github.com/clb-robot-line-2026)
+- **Repository:** [ECcodedoline](https://github.com/clb-robot-line-2026/ECcodedoline.git)
 - Giấy phép: MIT License.
