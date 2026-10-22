@@ -136,9 +136,6 @@ void sensor_finish_sweep_calibration(void) {
     }
     printf("--------------------------------------------------\n");
 
-    // Đặt mắt 0 và 15 bằng 0 vì không dùng
-    thresholds[0] = 0;
-    thresholds[15] = 0;
 
     if (valid) {
         calibrationReady = true;

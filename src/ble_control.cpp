@@ -289,22 +289,6 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Lệnh chuyển nhanh Profile Nấc 1: "STAGE1" hoặc "SAFE12"
-    if (cmd == "STAGE1" || cmd == "stage1" || cmd == "SAFE12" || cmd == "safe12") {
-        pid_set_tunings(1.55f, 0.0f, 3.4f);
-        pid_set_base_speed(175);
-        ble_send_string("DA CHUYEN -> NAC 1 (AN TOAN 12-13s): Base=175, Kp=1.55, Kd=3.4\n");
-        return;
-    }
-
-    // Lệnh chuyển nhanh Profile Nấc 2: "STAGE2" hoặc "RACE10"
-    if (cmd == "STAGE2" || cmd == "stage2" || cmd == "RACE10" || cmd == "race10") {
-        pid_set_tunings(1.75f, 0.0f, 4.2f);
-        pid_set_base_speed(205);
-        ble_send_string("DA CHUYEN -> NAC 2 (ULTRA RACE 10s): Base=205, Kp=1.75, Kd=4.2\n");
-        return;
-    }
-
     // Lệnh không nhận diện được
     ble_send_string("LENH KHONG HOP LE! Gui ? hoac HELP de xem tro giup.\n");
 }

@@ -584,6 +584,199 @@
       font-family: 'JetBrains Mono', monospace;
       margin-left: 4px;
     }
+
+    /* ULTRA-GRIP HERO BUTTON */
+    .btn-ultra-grip {
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(245, 158, 11, 0.5);
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.22) 0%, rgba(239, 68, 68, 0.22) 50%, rgba(139, 92, 246, 0.22) 100%);
+      box-shadow: 0 0 25px rgba(245, 158, 11, 0.25), inset 0 0 15px rgba(255, 255, 255, 0.05);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+      text-align: left;
+    }
+
+    .btn-ultra-grip:hover {
+      transform: translateY(-2px) scale(1.01);
+      border-color: #f59e0b;
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.35) 0%, rgba(239, 68, 68, 0.35) 50%, rgba(139, 92, 246, 0.35) 100%);
+      box-shadow: 0 0 35px rgba(245, 158, 11, 0.55), inset 0 0 20px rgba(245, 158, 11, 0.2);
+    }
+
+    .btn-ultra-grip:active {
+      transform: scale(0.98);
+    }
+
+    .grip-icon {
+      font-size: 26px;
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+      flex-shrink: 0;
+    }
+
+    .grip-text {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .grip-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .grip-badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      background: #ef4444;
+      color: #fff;
+      border-radius: 999px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+      animation: pulseGrip 1.8s infinite;
+    }
+
+    @keyframes pulseGrip {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
+    }
+
+    .grip-sub {
+      font-size: 11px;
+      color: #cbd5e1;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* PRESET PROFILES ROW */
+    .profile-chips {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .chip-btn {
+      padding: 8px 4px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+
+    .chip-btn span:first-child {
+      font-size: 14px;
+    }
+
+    .chip-btn:hover {
+      background: rgba(0, 242, 254, 0.12);
+      border-color: var(--accent-cyan);
+      color: #fff;
+      transform: translateY(-2px);
+    }
+
+    .chip-btn.active {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(239, 68, 68, 0.25));
+      border-color: #f59e0b;
+      color: #fbbf24;
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
+    }
+
+    /* PID TUNER MINI CARD */
+    .pid-tuner-card {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pid-tuner-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .pid-input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .pid-input-group label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .pid-input-group input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 6px 4px;
+      color: #fff;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      outline: none;
+      text-align: center;
+    }
+
+    .pid-input-group input:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 10px rgba(0, 242, 254, 0.3);
+    }
+
+    .btn-apply-pid {
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      border: none;
+      color: #061122;
+      font-weight: 700;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-apply-pid:hover {
+      box-shadow: 0 0 12px rgba(0, 242, 254, 0.5);
+      transform: translateY(-1px);
+    }
   </style>
 </head>
 
@@ -625,21 +818,34 @@
       <div class="card-title">
         <span>🎮 ĐIỀU KHIỂN ĐỘNG CƠ</span>
         <small style="font-weight: 400; color: var(--text-muted);">
-          Dùng phím: <span class="key-hint">W</span> <span class="key-hint">A</span> <span class="key-hint">S</span>
-          <span class="key-hint">D</span> hoặc <span class="key-hint">Mũi tên</span> | Dừng: <span
+          Phím: <span class="key-hint">W</span> <span class="key-hint">A</span> <span class="key-hint">S</span>
+          <span class="key-hint">D</span> | Siêu Bám: <span class="key-hint">G</span> | Dừng: <span
             class="key-hint">Space</span>
         </small>
       </div>
 
       <!-- AUTO PID MODE PANEL -->
       <div
-        style="background: rgba(0, 242, 254, 0.06); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+        style="background: rgba(0, 242, 254, 0.06); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 600; font-size: 13px; color: var(--accent-cyan);">🤖 CHẾ ĐỘ DÒ LINE TỰ ĐỘNG</span>
           <span id="pidModeBadge"
             style="font-size: 11px; padding: 3px 10px; border-radius: 999px; background: rgba(148, 163, 184, 0.2); color: #94a3b8; font-weight: 600;">LÁI
             TAY (MANUAL)</span>
         </div>
+
+        <!-- HERO BUTTON: SIÊU BÁM SÀN (PIN 3S) - BẬT AUTO LUÔN -->
+        <button class="btn-ultra-grip" id="btnUltraGrip" onclick="triggerUltraGrip()">
+          <div class="grip-icon">🏎️⚡</div>
+          <div class="grip-text">
+            <div class="grip-title">
+              <span>BẬT SIÊU BÁM SÀN (PIN 3S)</span>
+              <span class="grip-badge">AUTO CHẠY NGAY</span>
+            </div>
+            <div class="grip-sub">Base: 105 | Kp: 1.45 | Kd: 3.9 (Phím tắt: G)</div>
+          </div>
+        </button>
+
         <div style="display: flex; gap: 10px;">
           <button
             style="flex: 1; padding: 10px; border-radius: 10px; font-weight: 700; font-size: 13px; border: none; cursor: pointer; background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);"
@@ -652,6 +858,56 @@
             🛑 TẮT AUTO (M)
           </button>
         </div>
+
+        <!-- CHỌN NHANH PROFILE CÀI SẴN -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted);">
+            <span>Profiles tốc độ:</span>
+            <span id="activeProfileLabel" style="color: #fbbf24; font-weight: 600;">🔥 Siêu Bám Pin 3S</span>
+          </div>
+          <div class="profile-chips">
+            <button class="chip-btn active" id="chipGrip" onclick="selectProfile('GRIP')">
+              <span>🔥</span>
+              <span>Siêu Bám (105)</span>
+            </button>
+            <button class="chip-btn" id="chip3S" onclick="selectProfile('3S')">
+              <span>🛡️</span>
+              <span>Pin 3S (115)</span>
+            </button>
+            <button class="chip-btn" id="chip2S" onclick="selectProfile('2S')">
+              <span>🔋</span>
+              <span>Pin 2S (145)</span>
+            </button>
+            <button class="chip-btn" id="chipRace" onclick="selectProfile('RACE')">
+              <span>🏁</span>
+              <span>Race 10s (135)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- TINH CHỈNH PID TRỰC TIẾP TRÊN WEB -->
+        <div class="pid-tuner-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 11px; font-weight: 600; color: #cbd5e1;">🛠️ TINH CHỈNH PID & BASE SPEED</span>
+            <button class="btn-action-sm" style="padding: 2px 8px; font-size: 10px;" onclick="sendCommand('PID')">Đọc lại PID</button>
+          </div>
+          <div class="pid-tuner-grid">
+            <div class="pid-input-group">
+              <label>Kp (Nhạy)</label>
+              <input type="number" id="inputKp" step="0.05" value="1.45">
+            </div>
+            <div class="pid-input-group">
+              <label>Kd (Dập lắc)</label>
+              <input type="number" id="inputKd" step="0.1" value="3.90">
+            </div>
+            <div class="pid-input-group">
+              <label>Base Speed</label>
+              <input type="number" id="inputBase" step="5" value="105">
+            </div>
+          </div>
+          <button class="btn-apply-pid" onclick="applyCustomPid()">⚡ ÁP DỤNG THÔNG SỐ PID</button>
+        </div>
+
         <div
           style="font-size: 12px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 6px 10px; border-radius: 8px;">
           <span>Trường hợp hiện tại:</span>
@@ -1079,19 +1335,39 @@
         log(`Đã cập nhật cực tính: ${raw}`, 'rx');
       }
 
-      // 6. Nhận thông báo chuyển chế độ Auto / Manual
-      if (raw.includes('MODE: BAT CHAY TU DONG')) {
+      // 6. Nhận thông báo chuyển chế độ Auto / Manual / Siêu Bám
+      if (raw.includes('SIEU BAM') || raw.includes('ULTRA-GRIP')) {
+        const badge = document.getElementById('pidModeBadge');
+        badge.textContent = 'SIÊU BÁM (AUTO ON)';
+        badge.style.background = 'linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(239, 68, 68, 0.3))';
+        badge.style.color = '#fbbf24';
+        badge.style.border = '1px solid #f59e0b';
+        document.getElementById('currentCaseDisplay').textContent = 'Đang chạy Siêu Bám (Pin 3S)...';
+        setActiveProfileChip('chipGrip', '🔥 Siêu Bám Pin 3S');
+      } else if (raw.includes('MODE: BAT CHAY TU DONG') || raw.includes('BAT AUTO')) {
         const badge = document.getElementById('pidModeBadge');
         badge.textContent = 'DÒ LINE (AUTO)';
         badge.style.background = 'rgba(16, 185, 129, 0.2)';
         badge.style.color = '#34d399';
+        badge.style.border = 'none';
         document.getElementById('currentCaseDisplay').textContent = 'Đang bám line...';
-      } else if (raw.includes('MODE: CHUYEN SANG LAI TAY')) {
+      } else if (raw.includes('MODE: CHUYEN SANG LAI TAY') || raw.includes('MOTOR: STOP')) {
         const badge = document.getElementById('pidModeBadge');
         badge.textContent = 'LÁI TAY (MANUAL)';
         badge.style.background = 'rgba(148, 163, 184, 0.2)';
         badge.style.color = '#94a3b8';
+        badge.style.border = 'none';
         document.getElementById('currentCaseDisplay').textContent = 'Dừng xe';
+      }
+
+      // 7. Nhận phản hồi thông số PID từ ESP32: "PID: Kp=1.45 Ki=0.00 Kd=3.90 Base=105"
+      if (raw.includes('PID:') || raw.includes('PID SET:')) {
+        const kpMatch = raw.match(/Kp=([\d\.]+)/i);
+        const kdMatch = raw.match(/Kd=([\d\.]+)/i);
+        const baseMatch = raw.match(/(?:Base|baseSpeed)=(\d+)/i);
+        if (kpMatch && document.getElementById('inputKp')) document.getElementById('inputKp').value = kpMatch[1];
+        if (kdMatch && document.getElementById('inputKd')) document.getElementById('inputKd').value = kdMatch[1];
+        if (baseMatch && document.getElementById('inputBase')) document.getElementById('inputBase').value = baseMatch[1];
       }
     }
 
@@ -1146,6 +1422,8 @@
       } else if (key === 'D' || key === 'ARROWRIGHT') {
         highlightBtn('btnRight', true);
         sendCommand('R');
+      } else if (key === 'G') {
+        triggerUltraGrip();
       } else if (key === ' ' || key === 'ESCAPE') {
         highlightBtn('btnStop', true);
         sendCommand('S');
@@ -1214,6 +1492,67 @@
         sendCommand(val);
         input.value = '';
       }
+    }
+
+    // =================== CÁC HÀM XỬ LÝ SIÊU BÁM & PID ===================
+    function triggerUltraGrip() {
+      sendCommand('BAM');
+      setActiveProfileChip('chipGrip', '🔥 Siêu Bám Pin 3S');
+      document.getElementById('inputKp').value = '1.45';
+      document.getElementById('inputKd').value = '3.90';
+      document.getElementById('inputBase').value = '105';
+      
+      const badge = document.getElementById('pidModeBadge');
+      badge.textContent = 'SIÊU BÁM (AUTO ON)';
+      badge.style.background = 'linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(239, 68, 68, 0.3))';
+      badge.style.color = '#fbbf24';
+      badge.style.border = '1px solid #f59e0b';
+      log('Đã kích hoạt SIÊU BÁM SÀN (PIN 3S) & BẬT AUTO CHẠY NGAY!', 'rx');
+    }
+
+    function selectProfile(type) {
+      if (type === 'GRIP') {
+        triggerUltraGrip();
+      } else if (type === '3S') {
+        sendCommand('3S');
+        setActiveProfileChip('chip3S', '🛡️ Pin 3S Chuẩn');
+        document.getElementById('inputKp').value = '1.55';
+        document.getElementById('inputKd').value = '3.40';
+        document.getElementById('inputBase').value = '115';
+      } else if (type === '2S') {
+        sendCommand('2S');
+        setActiveProfileChip('chip2S', '🔋 Pin 2S An Toàn');
+        document.getElementById('inputKp').value = '1.55';
+        document.getElementById('inputKd').value = '3.40';
+        document.getElementById('inputBase').value = '145';
+      } else if (type === 'RACE') {
+        sendCommand('STAGE2');
+        setActiveProfileChip('chipRace', '🏁 Race 10s');
+        document.getElementById('inputKp').value = '1.65';
+        document.getElementById('inputKd').value = '3.80';
+        document.getElementById('inputBase').value = '135';
+      }
+    }
+
+    function setActiveProfileChip(chipId, labelText) {
+      ['chipGrip', 'chip3S', 'chip2S', 'chipRace'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.remove('active');
+      });
+      const activeEl = document.getElementById(chipId);
+      if (activeEl) activeEl.classList.add('active');
+      const label = document.getElementById('activeProfileLabel');
+      if (label) label.textContent = labelText;
+    }
+
+    function applyCustomPid() {
+      const kp = parseFloat(document.getElementById('inputKp').value);
+      const kd = parseFloat(document.getElementById('inputKd').value);
+      const base = parseInt(document.getElementById('inputBase').value);
+      if (!isNaN(kp)) sendCommand(`KP:${kp.toFixed(2)}`);
+      if (!isNaN(kd)) setTimeout(() => sendCommand(`KD:${kd.toFixed(2)}`), 60);
+      if (!isNaN(base)) setTimeout(() => sendCommand(`BASE:${base}`), 120);
+      log(`Gửi cấu hình PID mới: Kp=${kp}, Kd=${kd}, Base=${base}`, 'tx');
     }
   </script>
 </body>
