@@ -20,8 +20,8 @@ void setup() {
   // 2. Khởi tạo điều khiển 2 động cơ PWM
   motor_init();
 
-  // 3. Khởi tạo thuật toán PID Siêu Bám Line (Kp=2.2, Ki=0.0, Kd=10.0, Tốc độ chuẩn=100)
-  pid_init(2.2f, 0.0f, 10.0f, 100);
+  // 3. Khởi tạo PID với cấu hình mặc định
+  pid_init(2.2f, 0.0f, 10.0f, 120);
 
   // 4. Khởi tạo BLE Server điều khiển không dây
   ble_control_init("ESP32_LineRobot");
@@ -33,7 +33,7 @@ void setup() {
   Serial.println("  + 'INV': Dao cuc tinh cam bien (Den <-> Trang)");
   Serial.println("  + 'A': BAT chay tu dong PID | 'M': TAT ve lai tay");
   Serial.println("  + 'PWM': Xem toc do PWM 2 banh | 'PID': Xem thong so PID");
-  Serial.println("  + 'KP:2.0' | 'KD:2.8' | 'BASE:140': Chinh thong so PID");
+  Serial.println("  + 'KP:2.2' | 'KI:0' | 'KD:10' | 'BASE:120': Chinh thong so PID");
   Serial.println("  + 'F'/'B'/'L'/'R'/'S': Dieu khien tay tien/lui/trai/phai/dung");
 }
 

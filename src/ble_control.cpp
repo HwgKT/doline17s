@@ -20,7 +20,7 @@ static bool deviceConnected = false;
 static bool oldDeviceConnected = false;
 
 // Tốc độ điều khiển mặc định
-static uint8_t currentSpeed = 180;
+static uint8_t currentSpeed = 120;
 
 void ble_send_string(const char* message) {
     if (deviceConnected && pTxCharacteristic != nullptr) {
@@ -195,6 +195,7 @@ static void processBleCommand(const std::string& rxValue) {
         int val = atoi(cmd.c_str() + 2);
         if (val >= 0 && val <= 255) {
             currentSpeed = (uint8_t)val;
+            pid_set_base_speed((int16_t)val);
             char msg[48];
             snprintf(msg, sizeof(msg), "SPEED SET: %d\n", currentSpeed);
             ble_send_string(msg);
@@ -205,6 +206,7 @@ static void processBleCommand(const std::string& rxValue) {
         int val = atoi(cmd.c_str() + 6);
         if (val >= 0 && val <= 255) {
             currentSpeed = (uint8_t)val;
+            pid_set_base_speed((int16_t)val);
             char msg[48];
             snprintf(msg, sizeof(msg), "SPEED SET: %d\n", currentSpeed);
             ble_send_string(msg);
@@ -253,7 +255,7 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Chỉnh Kp (Cú pháp: "KP:2.0" hoặc "kp:2.2")
+    // Chỉnh Kp (Cú pháp: "KP:2.2")
     if (cmd.rfind("KP:", 0) == 0 || cmd.rfind("kp:", 0) == 0) {
         float val = atof(cmd.c_str() + 3);
         if (val >= 0.0f && val <= 50.0f) {
@@ -265,7 +267,19 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Chỉnh Kd (Cú pháp: "KD:2.8" hoặc "kd:3.0")
+    // Chỉnh Ki (Cú pháp: "KI:0.0")
+    if (cmd.rfind("KI:", 0) == 0 || cmd.rfind("ki:", 0) == 0) {
+        float val = atof(cmd.c_str() + 3);
+        if (val >= 0.0f && val <= 50.0f) {
+            pid_set_tunings(pid_get_kp(), val, pid_get_kd());
+            char msg[64];
+            snprintf(msg, sizeof(msg), "PID SET: Ki=%.2f\n", pid_get_ki());
+            ble_send_string(msg);
+        }
+        return;
+    }
+
+    // Chỉnh Kd (Cú pháp: "KD:10")
     if (cmd.rfind("KD:", 0) == 0 || cmd.rfind("kd:", 0) == 0) {
         float val = atof(cmd.c_str() + 3);
         if (val >= 0.0f && val <= 50.0f) {
@@ -277,11 +291,12 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Chỉnh baseSpeed (Cú pháp: "BASE:140" hoặc "base:130")
+    // Chỉnh baseSpeed (Cú pháp: "BASE:120")
     if (cmd.rfind("BASE:", 0) == 0 || cmd.rfind("base:", 0) == 0) {
         int val = atoi(cmd.c_str() + 5);
         if (val >= 0 && val <= 255) {
             pid_set_base_speed(val);
+            currentSpeed = (uint8_t)val;
             char msg[64];
             snprintf(msg, sizeof(msg), "PID SET: baseSpeed=%d\n", pid_get_base_speed());
             ble_send_string(msg);
@@ -369,7 +384,7 @@ void ble_control_update(void) {
 
     if (deviceConnected && !oldDeviceConnected) {
         oldDeviceConnected = deviceConnected;
-        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.0 | KD:2.8 | BASE:140: Chinh PID\n");
+        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
     }
 }
 

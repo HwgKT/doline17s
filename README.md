@@ -116,9 +116,11 @@ Bạn có thể gửi các lệnh sau từ máy tính (qua cáp USB 115200 baud)
 | **`C`** hoặc **`W`** | Bắt đầu chu trình **Lia Calib 4s** (lia qua vạch đen/trắng) |
 | **`K`** | Chốt kết thúc sớm chu trình Calib |
 | **`INV`** | Đảo cực tính cảm biến (Vạch đen nền trắng $\leftrightarrow$ Vạch trắng nền đen) |
-| **`BASE:xxx`** | Chỉnh tốc độ cơ sở (ví dụ: `BASE:180`) |
-| **`KP:x.x`** | Chỉnh hệ số tỉ lệ Kp (ví dụ: `KP:1.6`) |
-| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (ví dụ: `KD:3.6`) |
+| **`BASE:xxx`** | Chỉnh tốc độ cơ sở (mặc định `BASE:120`) |
+| **`KP:x.x`** | Chỉnh hệ số tỉ lệ Kp (mặc định `KP:2.2`) |
+| **`KI:x.x`** | Chỉnh hệ số tích phân Ki (mặc định `KI:0`) |
+| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:10`) |
+| **`V:xxx`** | Chỉnh tốc độ tay và tốc độ cơ sở PID (0–255) |
 | **`PWM`** | Xem giá trị PWM 2 bánh và sai số tức thời |
 | **`PID`** | Xem các thông số PID và Base Speed hiện tại |
 | **`F` / `B` / `L` / `R` / `S`** | Lái tay: Tiến / Lùi / Trái / Phải / Dừng xe |
