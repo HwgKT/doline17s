@@ -28,7 +28,15 @@ static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0.0f;
 static float integralError = 0.0f;
 static float lastCorrection = 0.0f;
-static unsigned long lastComputeTime = 0;
+static float filteredDerivative = 0.0f;
+static bool derivativeInitialized = false;
+static uint32_t lastComputeTimeUs = 0;
+
+// Giữ ý nghĩa gần tương đương Kd cũ ở chu kỳ danh định 5 ms,
+// nhưng bù theo dt thực để BLE/telemetry không làm D thay đổi theo tốc độ loop.
+#define PID_NOMINAL_DT_SEC 0.005f
+#define PID_MAX_DT_SEC     0.050f
+#define PID_D_FILTER_ALPHA 0.65f
 #define DASHED_LINE_TIMEOUT_MS  60    // Rút ngắn xuống 60ms để tránh phóng mù ra ngoài khi văng góc cua
 #define SHARP_TURN_TIMEOUT_MS   450   // Thời gian tối đa giữ cua 90 độ trước khi tự thoát an toàn
 #define SHARP_TURN_COOLDOWN_MS  80    // Thời gian miễn nhiễm sau khi thoát cua (tránh quay vòng tròn lặp lại)
@@ -63,7 +71,10 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.baseSpeed = baseSpeed;
     lastError = 0.0f;
     integralError = 0.0f;
-    lastComputeTime = millis();
+    lastCorrection = 0.0f;
+    filteredDerivative = 0.0f;
+    derivativeInitialized = false;
+    lastComputeTimeUs = micros();
     autoMode = false;
     currentCase = LINE_CASE_STOPPED;
     isLineCurrentlyLost = false;
@@ -104,7 +115,10 @@ void pid_set_auto_mode(bool enable) {
     } else {
         integralError = 0.0f;
         lastError = 0.0f;
-        lastComputeTime = millis();
+        lastCorrection = 0.0f;
+        filteredDerivative = 0.0f;
+        derivativeInitialized = false;
+        lastComputeTimeUs = micros();
     }
 }
 
@@ -362,10 +376,26 @@ void pid_line_follow_step(void) {
     // Nhận diện Case hiện tại
     currentCase = pid_detect_case(position, blackCount);
 
-    unsigned long now = millis();
-    float dt = (float)(now - lastComputeTime) / 1000.0f;
-    if (dt <= 0.0f || dt > 0.1f) dt = 0.01f;
-    lastComputeTime = now;
+    // Dùng micros() thay vì millis() để đo dt đủ mịn cho vòng điều khiển nhanh.
+    const uint32_t nowUs = micros();
+    float dt = (uint32_t)(nowUs - lastComputeTimeUs) * 1.0e-6f;
+    lastComputeTimeUs = nowUs;
+
+    // Nếu loop bị ngắt quãng dài, không dùng khoảng thời gian đó để tạo xung D lớn.
+    // Bỏ qua D ở mẫu đầu sau gián đoạn và khởi tạo lại bộ lọc.
+    const bool timingGap = (dt <= 0.0f || dt > PID_MAX_DT_SEC);
+    if (timingGap) {
+        dt = PID_NOMINAL_DT_SEC;
+        derivativeInitialized = false;
+        filteredDerivative = 0.0f;
+    }
+
+    // Các state không phải PID không được để lại D/correction cũ khi quay về bám line.
+    if (currentCase != LINE_CASE_NORMAL_PID) {
+        derivativeInitialized = false;
+        filteredDerivative = 0.0f;
+        lastCorrection = 0.0f;
+    }
 
     // =========================================================================
     // XỬ LÝ TỪNG CASE TRƯỜNG HỢP CỤ THỂ
@@ -391,10 +421,21 @@ void pid_line_follow_step(void) {
             if (integralError < -150.0f) integralError = -150.0f;
             float iTerm = pidConfig.Ki * integralError;
 
-            // 3. Khâu vi phân D (Kd = 10.0 đóng vai trò giảm chấn cực mạnh, dập tắt hoàn toàn rung lắc)
-            float deltaErr = error - lastError;
+            // 3. Khâu vi phân D:
+            // Chuẩn hóa theo dt thực nhưng lấy 5 ms làm chu kỳ tham chiếu để giữ
+            // gần đúng độ lớn Kd hiện tại; lọc thông thấp để giảm nhiễu ADC/centroid.
+            float dTerm = 0.0f;
+            if (derivativeInitialized && !timingGap) {
+                const float deltaErr = error - lastError;
+                const float dRaw = pidConfig.Kd * deltaErr * (PID_NOMINAL_DT_SEC / dt);
+                filteredDerivative = PID_D_FILTER_ALPHA * filteredDerivative +
+                                     (1.0f - PID_D_FILTER_ALPHA) * dRaw;
+                dTerm = filteredDerivative;
+            } else {
+                filteredDerivative = 0.0f;
+                derivativeInitialized = true;
+            }
             lastError = error;
-            float dTerm = pidConfig.Kd * deltaErr;
 
             // Tổng bù lái
             lastCorrection = pTerm + iTerm + dTerm;
@@ -404,12 +445,22 @@ void pid_line_follow_step(void) {
             int16_t currentBase = pidConfig.baseSpeed - (int16_t)(absErr * 0.55f);
             if (currentBase < 50) currentBase = 50;
 
+            // Giới hạn correction trước khi chia cho hai bánh để tránh một bánh
+            // bất ngờ đảo chiều do D/P quá lớn trong chế độ PID bình thường.
+            // Đảo chiều chỉ dùng ở các state cua gắt/tìm line đã được xử lý riêng.
+            int16_t correctionLimit = currentBase;
+            const int16_t headroom = pidConfig.maxSpeed - currentBase;
+            if (headroom < correctionLimit) correctionLimit = headroom;
+            if (correctionLimit < 0) correctionLimit = 0;
+            if (lastCorrection > (float)correctionLimit) lastCorrection = (float)correctionLimit;
+            if (lastCorrection < -(float)correctionLimit) lastCorrection = -(float)correctionLimit;
+
             int16_t leftSpeed  = currentBase + (int16_t)lastCorrection;
             int16_t rightSpeed = currentBase - (int16_t)lastCorrection;
 
-            // Giới hạn tốc độ trong dải an toàn
-            leftSpeed  = clamp_val(leftSpeed, pidConfig.minSpeed, pidConfig.maxSpeed);
-            rightSpeed = clamp_val(rightSpeed, pidConfig.minSpeed, pidConfig.maxSpeed);
+            // Sau khi giới hạn correction, hai bánh luôn nằm trong [0, maxSpeed].
+            leftSpeed  = clamp_val(leftSpeed, 0, pidConfig.maxSpeed);
+            rightSpeed = clamp_val(rightSpeed, 0, pidConfig.maxSpeed);
 
             motor_set_speeds(leftSpeed, rightSpeed);
             break;
