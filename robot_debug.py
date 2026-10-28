@@ -141,8 +141,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("ESP32 Line Robot — Bluetooth Classic SPP")
-        self.geometry("1350x900")
-        self.minsize(1090, 770)
+        self.geometry("1440x900")
+        self.minsize(1080, 720)
         self.configure(bg=BG)
         self.q = queue.Queue(maxsize=4096)  # bounded at 300 Hz
         self.reader = None
@@ -227,15 +227,39 @@ class App(tk.Tk):
         self.label(diag_bar, textvariable=self.loop_debug, fg=CYAN, bg=PANEL,
                    font=("Consolas", 10, "bold")).pack(anchor="w", padx=10, pady=5)
 
+        # Balanced 50/50 columns; bottom-right quarter reserved for SPP console.
         body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=12, pady=3)
+        body.pack(fill="both", expand=True, padx=8, pady=(0, 5))
+        body.grid_columnconfigure(0, weight=1, uniform="dashboard", minsize=490)
+        body.grid_columnconfigure(1, weight=1, uniform="dashboard", minsize=490)
+        body.grid_rowconfigure(0, weight=1)
         left = tk.Frame(body, bg=BG)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 12))
-        right = tk.Frame(body, bg=PANEL, width=440)
-        right.pack(side="right", fill="y")
-        right.pack_propagate(False)
-        panel = tk.Frame(right, bg=PANEL)
-        panel.pack(fill="both", expand=True, padx=12, pady=12)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        right = tk.Frame(body, bg=PANEL)
+        right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(0, weight=1, uniform="right_half", minsize=220)
+        right.grid_rowconfigure(1, weight=1, uniform="right_half", minsize=220)
+
+        # Upper controls scroll independently, preserving terminal space.
+        control_region = tk.Frame(right, bg=PANEL)
+        control_region.grid(row=0, column=0, sticky="nsew")
+        control_scroll = tk.Canvas(control_region, bg=PANEL, highlightthickness=0,
+                                   borderwidth=0, width=480, height=220)
+        control_bar = ttk.Scrollbar(control_region, orient="vertical",
+                                    command=control_scroll.yview)
+        control_scroll.configure(yscrollcommand=control_bar.set)
+        control_bar.pack(side="right", fill="y")
+        control_scroll.pack(side="left", fill="both", expand=True)
+        panel = tk.Frame(control_scroll, bg=PANEL, padx=8, pady=5)
+        panel_item = control_scroll.create_window((0, 0), window=panel, anchor="nw")
+        panel.bind("<Configure>", lambda _e: control_scroll.configure(
+            scrollregion=control_scroll.bbox("all")))
+        control_scroll.bind("<Configure>", lambda e: control_scroll.itemconfigure(
+            panel_item, width=e.width))
+
+        terminal_panel = tk.Frame(right, bg=PANEL, padx=8, pady=5)
+        terminal_panel.grid(row=1, column=0, sticky="nsew")
 
         self.label(panel, "ĐIỀU KHIỂN DÒ LINE", bg=PANEL,
                    font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 6))
@@ -353,7 +377,7 @@ class App(tk.Tk):
                    justify="left", anchor="w", wraplength=350).pack(fill="x", pady=5)
         self.label(panel, "Cực tính cố định: ADC đen > ADC trắng", bg=PANEL, fg=MUTED).pack(anchor="w")
 
-        terminal_heading = tk.Frame(panel, bg=PANEL)
+        terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
         self.label(terminal_heading, "Terminal TX / RX", bg=PANEL,
                    font=("Segoe UI", 11, "bold")).pack(side="left")
@@ -361,18 +385,21 @@ class App(tk.Tk):
         ttk.Button(terminal_heading, text="Mở rộng", command=self.open_log_window).pack(side="right", padx=2)
         ttk.Button(terminal_heading, text="Xuất TXT", command=self.export_txt).pack(side="right", padx=2)
         ttk.Button(terminal_heading, text="Xuất CSV", command=self.export_csv).pack(side="right", padx=2)
-        ttk.Checkbutton(panel, text="Xem mẫu PID trên terminal (5 Hz, không ảnh hưởng CSV)",
-                        variable=self.preview_pid_log).pack(anchor="w", pady=3)
-        text_area = tk.Frame(panel, bg=PANEL)
+        ttk.Checkbutton(terminal_panel, text="PID preview 5 Hz (CSV đầy đủ)",
+                        variable=self.preview_pid_log).pack(anchor="w", pady=(1, 2))
+        text_area = tk.Frame(terminal_panel, bg=PANEL)
         text_area.pack(fill="both", expand=True)
         self.console = tk.Text(text_area, bg=BG, fg=FG, insertbackground=FG,
-                               font=("Consolas", 9), height=14, wrap="none",
+                               font=("Consolas", 10), height=8, wrap="none",
                                state="disabled", relief="flat")
         scrollbar = ttk.Scrollbar(text_area, orient="vertical", command=self.console.yview)
         self.console.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
         self.console.pack(side="left", fill="both", expand=True)
-        cmd_row = tk.Frame(panel, bg=PANEL)
+        hscroll = ttk.Scrollbar(terminal_panel, orient="horizontal", command=self.console.xview)
+        self.console.configure(xscrollcommand=hscroll.set)
+        hscroll.pack(fill="x")
+        cmd_row = tk.Frame(terminal_panel, bg=PANEL)
         cmd_row.pack(fill="x", pady=(5, 0))
         self.cmd_var = tk.StringVar()
         command_entry = ttk.Entry(cmd_row, textvariable=self.cmd_var)
