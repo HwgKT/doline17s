@@ -69,3 +69,9 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 - A bounded recorder queue holds up to 8192 frames; it never waits on disk writes in the receiver. CSV writer flushes to disk at least once each second and drains the queue on normal shutdown. The app status reports persisted row count, pending queue, dropCSV (queue overflow), and disk errors. Compare that to the ESP32 DIAG and Python RX Hz. At 300 frames/s, expect about 300 CSV rows/s if all frames reach the PC.
 - CSV columns remain: receive host_iso, ESP32 t_ms, all adc0..adc15, optional cal0..cal15 and logic0..logic15 (filled after NVS calibration download), encL, encR, pwmL, pwmR, err, p, i, d, out, mode, logic16. Early frames before NVS download leave calibrated/logic fields blank, not the raw or control fields.
 - Ghi CSV button now pauses/resumes background recording; recording begins automatically, without clicking. Xuất CSV copies a point-in-time snapshot of the persistent session file in the background. The original file stays in logs/ after app exit. The separate terminal TXT export is unchanged.
+
+
+### Live CSV Hz + prioritized Bluetooth replies
+- CSV status additionally displays the actual disk writer throughput in rows/s, total persisted rows, queue depth and dropped rows. This is separate from firmware SPP TX Hz, Python RX Hz and GUI APP Hz.
+- Incoming text responses (including ESTOP acknowledgments and periodic DIAG) use a separate high-priority Python queue. GUI telemetry backlog cannot block the SPP reader when it needs to forward these responses. Binary telemetry still goes to disk first, then UI.
+- Compact Tkinter control row/buttons and responsive sensor graph widths complement the two equal dashboard columns and dedicated lower-right terminal.

@@ -68,11 +68,12 @@ def normalize_adc(raw, low, high, black_is_high=True):
 class Reader(threading.Thread):
     """Read a mixed SPP stream of framed binary samples and text replies."""
 
-    def __init__(self, port, out_queue, recorder=None):
+    def __init__(self, port, out_queue, recorder=None, control_queue=None):
         super().__init__(daemon=True)
         self.ser = serial.Serial(port, 115200, timeout=0.05)
         self.out_queue = out_queue
         self.recorder = recorder
+        self.control_queue = control_queue if control_queue is not None else out_queue
         self.running = True
         self.buf = bytearray()
         self.text_buf = bytearray()
@@ -85,7 +86,7 @@ class Reader(threading.Thread):
             try:
                 chunk = self.ser.read(self.ser.in_waiting or 1)
             except (serial.SerialException, OSError):
-                self.out_queue.put(("error", "Bluetooth/COM đã ngắt kết nối"))
+                self.control_queue.put(("error", "Bluetooth/COM đã ngắt kết nối"))
                 break
             if chunk:
                 self.buf.extend(chunk)
@@ -101,7 +102,7 @@ class Reader(threading.Thread):
                 if self.text_buf:
                     line = self.text_buf.decode("utf-8", "replace").strip()
                     if line:
-                        self.out_queue.put(("text", line))
+                        self.control_queue.put(("text", line))
                     self.text_buf.clear()
             elif 32 <= b <= 126 or b >= 128:
                 if len(self.text_buf) < 512:
@@ -150,7 +151,8 @@ class App(tk.Tk):
         self.geometry("1440x900")
         self.minsize(1080, 720)
         self.configure(bg=BG)
-        self.q = queue.Queue(maxsize=4096)  # bounded at 300 Hz
+        self.q = queue.Queue(maxsize=4096)  # bounded GUI data queue
+        self.controls_q = queue.SimpleQueue()  # priority text replies / E-STOP ACK
         self.reader = None
         self.recorder = None  # Automatic persistent writer starts on first SPP connect.
         self.csv_status = tk.StringVar(value="CSV: chưa kết nối")
@@ -169,6 +171,7 @@ class App(tk.Tk):
         self.wheel_speed = [0.0, 0.0]
         self.frames = 0
         self.last_rx_total = 0
+        self.last_csv_total = 0
         self.rate_time = time.monotonic()
         # Report actual firmware loop/PID rates using periodic SPP DIAG.
         self.diag_interval_s = 2.0
@@ -199,17 +202,17 @@ class App(tk.Tk):
 
     def _build(self):
         top = tk.Frame(self, bg=BG)
-        top.pack(fill="x", padx=12, pady=10)
-        self.label(top, "Bluetooth Classic SPP", font=("Segoe UI", 12, "bold")).pack(side="left", padx=(0, 10))
+        top.pack(fill="x", padx=8, pady=(4, 2))
+        self.label(top, "Bluetooth SPP", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 6))
         self.port_var = tk.StringVar()
-        self.port_combo = ttk.Combobox(top, textvariable=self.port_var, width=14)
+        self.port_combo = ttk.Combobox(top, textvariable=self.port_var, width=11)
         self.port_combo.pack(side="left", padx=3)
         ttk.Button(top, text="Quét COM", command=self.refresh_ports).pack(side="left", padx=3)
         self.connect_btn = ttk.Button(top, text="Kết nối", command=self.toggle_connect)
         self.connect_btn.pack(side="left", padx=3)
         self.csv_btn = ttk.Button(top, text="Ghi CSV", command=self.toggle_csv)
-        self.csv_btn.pack(side="left", padx=8)
-        self.label(top, "SPP Hz", fg=MUTED).pack(side="left", padx=(10, 3))
+        self.csv_btn.pack(side="left", padx=4)
+        self.label(top, "SPP Hz", fg=MUTED).pack(side="left", padx=(4, 2))
         self.rate_combo = ttk.Combobox(top, textvariable=self.stream_rate,
                                        values=("300", "200", "100", "50", "20", "0"),
                                        width=5, state="readonly")
@@ -264,18 +267,18 @@ class App(tk.Tk):
         terminal_panel.grid(row=1, column=0, sticky="nsew")
 
         self.label(panel, "ĐIỀU KHIỂN DÒ LINE", bg=PANEL,
-                   font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 6))
+                   font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 3))
         control = tk.Frame(panel, bg=PANEL)
-        control.pack(fill="x", pady=(0, 4))
+        control.pack(fill="x", pady=(0, 2))
         self.start_btn = tk.Button(control, text="BẮT ĐẦU DÒ LINE",
                                    command=self.start_line, font=("Segoe UI", 10, "bold"),
                                    bg=GREEN, fg="#ffffff", activebackground="#059669",
-                                   relief="flat", height=2)
+                                   relief="flat", height=1)
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.estop_btn = tk.Button(control, text="DỪNG KHẨN CẤP",
                                    command=self.emergency_stop, font=("Segoe UI", 10, "bold"),
                                    bg=ROSE, fg="#ffffff", activebackground="#be123c",
-                                   relief="flat", height=2)
+                                   relief="flat", height=1)
         self.estop_btn.pack(side="left", fill="x", expand=True)
         self.reset_estop_btn = ttk.Button(panel, text="Mở khóa E-STOP (không chạy lại)",
                                           command=self.reset_estop)
@@ -295,7 +298,7 @@ class App(tk.Tk):
         self.label(sensor_head, "16 mắt: RAW / T_i / CAL / 0-1", font=("Segoe UI", 11, "bold")).pack(side="left")
         ttk.Button(sensor_head, text="Bảng 16 mắt", command=self.open_sensor_table).pack(side="right", padx=4)
         self.label(sensor_head, "Mỗi mắt có ngưỡng riêng", fg=AMBER).pack(side="right", padx=6)
-        self.bars = tk.Canvas(left, bg=PANEL, width=715, height=282, highlightthickness=0)
+        self.bars = tk.Canvas(left, bg=PANEL, width=570, height=282, highlightthickness=0)
         self.bars.pack(fill="x", pady=5)
         self.logic_var = tk.StringVar(value="0 = TRẮNG | 1 = ĐEN | Chưa có NVS: ----------------")
         self.label(left, textvariable=self.logic_var, fg=CYAN,
@@ -310,18 +313,18 @@ class App(tk.Tk):
                  ("p", "P"), ("i", "I"), ("d", "D"), ("mode", "Chế độ")]
         for n, (key, name) in enumerate(names):
             r, c = divmod(n, 3)
-            self.label(metrics, name, fg=MUTED, bg=PANEL, width=18,
-                       anchor="e").grid(row=r, column=c * 2, padx=(5, 1), pady=5)
+            self.label(metrics, name, fg=MUTED, bg=PANEL, width=12,
+                       anchor="e").grid(row=r, column=c * 2, padx=(2, 1), pady=4)
             self.values[key] = tk.StringVar(value="—")
             self.label(metrics, textvariable=self.values[key], bg=PANEL, fg=CYAN,
-                       font=("Consolas", 10, "bold"), width=10,
-                       anchor="w").grid(row=r, column=c * 2 + 1, padx=(1, 4))
+                       font=("Consolas", 9, "bold"), width=8,
+                       anchor="w").grid(row=r, column=c * 2 + 1, padx=(1, 2))
 
         self.label(left, "Scope: PWM trái / PWM phải / PID out", fg=MUTED).pack(anchor="w", pady=(11, 3))
-        self.scope = tk.Canvas(left, bg=PANEL, width=715, height=190, highlightthickness=0)
+        self.scope = tk.Canvas(left, bg=PANEL, width=570, height=165, highlightthickness=0)
         self.scope.pack(fill="x")
         encoder_actions = tk.Frame(left, bg=BG)
-        encoder_actions.pack(fill="x", pady=12)
+        encoder_actions.pack(fill="x", pady=5
         ttk.Button(encoder_actions, text="Reset ENC",
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
         self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
@@ -334,11 +337,11 @@ class App(tk.Tk):
         self.label(panel, textvariable=self.pwm_text, bg=PANEL, fg=CYAN).pack(anchor="w")
         self.pwm_slider = ttk.Scale(panel, from_=0, to=255, variable=self.pwm_var,
                                     command=self.preview_pwm)
-        self.pwm_slider.pack(fill="x", pady=4)
+        self.pwm_slider.pack(fill="x", pady=2)
         self.pwm_slider.bind("<ButtonRelease-1>", lambda _e: self.apply_pwm())
         self.pwm_slider.bind("<KeyRelease>", lambda _e: self.apply_pwm())
         speed_buttons = tk.Frame(panel, bg=PANEL)
-        speed_buttons.pack(fill="x", pady=(0, 10))
+        speed_buttons.pack(fill="x", pady=(0, 4))
         for val in (60, 120, 180, 255):
             ttk.Button(speed_buttons, text=str(val), width=6,
                        command=lambda v=val: self.preset_pwm(v)).pack(side="left", expand=True, padx=2)
@@ -353,15 +356,15 @@ class App(tk.Tk):
             self.label(pid, key, bg=PANEL, fg=MUTED).grid(row=0, column=idx, sticky="w")
             var = tk.StringVar(value=initial)
             self.pid_vars[key] = var
-            ttk.Entry(pid, textvariable=var, width=9).grid(row=1, column=idx, padx=(0, 6), sticky="ew")
+            ttk.Entry(pid, textvariable=var, width=7).grid(row=1, column=idx, padx=(0, 3), sticky="ew")
             pid.grid_columnconfigure(idx, weight=1)
         pid_actions = tk.Frame(panel, bg=PANEL)
         pid_actions.pack(fill="x", pady=(6, 3))
         ttk.Button(pid_actions, text="Áp dụng PID", command=self.apply_pid).pack(side="left", fill="x", expand=True, padx=(0, 3))
         ttk.Button(pid_actions, text="Đọc lại PID", command=lambda: self.send_command("PID")).pack(side="left", fill="x", expand=True)
 
-        self.label(panel, "Calibration firmware — 16 mắt / NVS", bg=PANEL,
-                   font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(12, 4))
+        self.label(panel, "Calibration — 16 mắt / NVS", bg=PANEL,
+                   font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
         cal_buttons = tk.Frame(panel, bg=PANEL)
         cal_buttons.pack(fill="x")
         ttk.Button(cal_buttons, text="1. Lấy TRẮNG", command=self.start_calibration).pack(
@@ -558,7 +561,7 @@ class App(tk.Tk):
                 self.csv_btn.config(text="Tạm dừng CSV")
                 self.csv_status.set(f"CSV GHI: {self.recorder.path.name}")
             self.recorder.set_calibration()
-            self.reader = Reader(port, self.q, self.recorder)
+            self.reader = Reader(port, self.q, self.recorder, self.controls_q)
         except (serial.SerialException, OSError, ValueError) as exc:
             self.status_label.config(text=f"Lỗi COM: {exc}", fg=ROSE)
             self.log(str(exc))
@@ -574,6 +577,7 @@ class App(tk.Tk):
         self.update_control_buttons()
         self.prev = None
         self.last_rx_total = self.reader.frames_rx
+        self.last_csv_total = self.recorder.written
         self.frames = 0
         self.rate_time = time.monotonic()
         self.last_diag_rx = None
@@ -896,17 +900,23 @@ class App(tk.Tk):
 
     def tick(self):
         last = None
+        # Process safety-critical Bluetooth replies before bulk telemetry.
+        try:
+            for _ in range(64):
+                kind, payload = self.controls_q.get_nowait()
+                if kind == "text":
+                    self.on_text(payload)
+                elif kind == "error":
+                    self.disconnect()
+                    self.status_label.config(text=payload, fg=ROSE)
+        except queue.Empty:
+            pass
         try:
             for _ in range(512):
                 kind, payload = self.q.get_nowait()
                 if kind == "data":
                     self.on_sample(payload)
                     last = payload
-                elif kind == "text":
-                    self.on_text(payload)
-                elif kind == "error":
-                    self.disconnect()
-                    self.status_label.config(text=payload, fg=ROSE)
                 elif kind == "csv_export":
                     self.log(payload)
         except queue.Empty:
@@ -926,11 +936,13 @@ class App(tk.Tk):
                      f"q={self.q.qsize()} dropUI={drops} CRC={errors}")
             if self.recorder is not None:
                 state = "GHI" if self.recorder.recording else "TẠM DỪNG"
+                csv_hz = (self.recorder.written - self.last_csv_total) / interval
                 self.csv_status.set(
-                    f"CSV {state}: ghi={self.recorder.written} "
+                    f"CSV {state}: {csv_hz:.0f} Hz | tổng={self.recorder.written} "
                     f"đợi={self.recorder.queue.qsize()} dropCSV={self.recorder.dropped}"
                     + (f" LỖI={self.recorder.error}" if self.recorder.error else "")
                     + f" | {self.recorder.path.name}")
+                self.last_csv_total = self.recorder.written
             self.last_rx_total = total
             self.frames = 0
             self.rate_time = now
@@ -962,7 +974,7 @@ class App(tk.Tk):
     def draw_bars(self, adc_values):
         c = self.bars
         c.delete("all")
-        width = max(715, c.winfo_width())
+        width = max(420, c.winfo_width())
         top, height = 25, 154
         step = width / 16
         bits = []
@@ -1008,7 +1020,7 @@ class App(tk.Tk):
     def draw_scope(self):
         c = self.scope
         c.delete("all")
-        width, height = max(715, c.winfo_width()), int(c["height"])
+        width, height = max(420, c.winfo_width()), int(c["height"])
         mid = height / 2
         c.create_line(0, mid, width, mid, fill="#334155")
         for i, (name, color) in enumerate((("pwmL", CYAN), ("pwmR", AMBER), ("PID out", ROSE))):
