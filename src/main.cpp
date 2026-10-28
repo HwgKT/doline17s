@@ -47,7 +47,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_R1), onEncoderRightPulse, RISING);
 
   // 3. Khởi tạo PID với cấu hình mặc định
-  pid_init(2.2f, 0.0f, 10.0f, 120);
+  pid_init(2.2f, 0.0f, 0.0f, 120);
 
   // 4. Khởi tạo BLE Server điều khiển không dây
   ble_control_init("ESP32_LineRobot");
@@ -59,7 +59,7 @@ void setup() {
   Serial.println("  + 'INV': Dao cuc tinh cam bien (Den <-> Trang)");
   Serial.println("  + 'A': BAT chay tu dong PID | 'M': TAT ve lai tay");
   Serial.println("  + 'PWM': Xem toc do PWM 2 banh | 'PID': Xem thong so PID");
-  Serial.println("  + 'KP:2.2' | 'KI:0' | 'KD:10' | 'BASE:120': Chinh thong so PID");
+  Serial.println("  + 'KP:2.2' | 'KI:0' | 'KD:0' | 'BASE:120': Chinh thong so PID");
   Serial.println("  + 'F'/'B'/'L'/'R'/'S': Dieu khien tay tien/lui/trai/phai/dung");
 }
 

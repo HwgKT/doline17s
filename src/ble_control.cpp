@@ -354,7 +354,7 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Chỉnh Kd (Cú pháp: "KD:10")
+    // Chinh Kd (cu phap: "KD:0.05"; mac dinh KD:0; D dung dao ham / giay)
     if (cmd.rfind("KD:", 0) == 0 || cmd.rfind("kd:", 0) == 0) {
         float val = atof(cmd.c_str() + 3);
         if (val >= 0.0f && val <= 50.0f) {
@@ -459,7 +459,7 @@ void ble_control_update(void) {
 
     if (deviceConnected && !oldDeviceConnected) {
         oldDeviceConnected = deviceConnected;
-        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
+        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:0 | BASE:120: Chinh PID\n");
     }
 }
 

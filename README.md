@@ -90,15 +90,15 @@ Bạn có thể gửi các lệnh sau từ máy tính (qua cáp USB 115200 baud)
 | :--- | :--- |
 | **`A`** hoặc **`AUTO`** | **BẬT** chế độ tự động dò line theo PID |
 | **`M`** hoặc **`MANUAL`** | **TẮT** tự động, chuyển sang lái tay |
-| **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: `Base=175, Kp=1.55, Kd=3.4` |
-| **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: `Base=205, Kp=1.75, Kd=4.2` |
+| **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
+| **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
 | **`C`** hoặc **`W`** | Bắt đầu chu trình **Lia Calib 4s** (lia qua vạch đen/trắng) |
 | **`K`** | Chốt kết thúc sớm chu trình Calib |
 | **`INV`** | Đảo cực tính cảm biến (Vạch đen nền trắng $\leftrightarrow$ Vạch trắng nền đen) |
 | **`BASE:xxx`** | Chỉnh tốc độ cơ sở (mặc định `BASE:120`) |
 | **`KP:x.x`** | Chỉnh hệ số tỉ lệ Kp (mặc định `KP:2.2`) |
 | **`KI:x.x`** | Chỉnh hệ số tích phân Ki (mặc định `KI:0`) |
-| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:10`) |
+| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:0`; D = Kd × (e[k] − e[k−1]) / dt, với dt đo bằng giây) |
 | **`V:xxx`** | Chỉnh tốc độ tay và tốc độ cơ sở PID (0–255) |
 | **`PWM`** | Xem giá trị PWM 2 bánh và sai số tức thời |
 | **`PID`** | Xem các thông số PID và Base Speed hiện tại |

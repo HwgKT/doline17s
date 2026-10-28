@@ -904,7 +904,7 @@
               <span>BẬT SIÊU BÁM SÀN (PIN 3S)</span>
               <span class="grip-badge">AUTO CHẠY NGAY</span>
             </div>
-            <div class="grip-sub">Base: 105 | Kp: 1.45 | Kd: 3.9 (Phím tắt: G)</div>
+            <div class="grip-sub">Base: 105 | Kp: 1.45 | Kd: 0 (Phím tắt: G)</div>
           </div>
         </button>
 
@@ -964,7 +964,7 @@
             </div>
             <div class="pid-input-group">
               <label>Kd (Dập lắc)</label>
-              <input type="number" id="inputKd" min="0" max="50" step="0.1" value="10">
+              <input type="number" id="inputKd" min="0" max="50" step="0.01" value="0">
             </div>
             <div class="pid-input-group">
               <label>Speed / Base</label>
@@ -1552,7 +1552,7 @@
         document.getElementById('currentCaseDisplay').textContent = 'Dừng xe';
       }
 
-      // 7. Nhận phản hồi thông số PID từ ESP32: "PID: Kp=1.45 Ki=0.00 Kd=3.90 Base=105"
+      // 7. Nhận phản hồi thông số PID từ ESP32: "PID: Kp=2.20 Ki=0.00 Kd=0.00 Base=120"
       if (raw.includes('PID:') || raw.includes('PID SET:')) {
         const kpMatch = raw.match(/Kp=([\d\.]+)/i);
         const kiMatch = raw.match(/Ki=([\d\.]+)/i);
@@ -1712,7 +1712,7 @@
       sendCommand('BAM');
       setActiveProfileChip('chipGrip', '🔥 Siêu Bám Pin 3S');
       document.getElementById('inputKp').value = '1.45';
-      document.getElementById('inputKd').value = '3.90';
+      document.getElementById('inputKd').value = '0.00';
       document.getElementById('inputBase').value = '105';
       
       const badge = document.getElementById('pidModeBadge');
@@ -1730,19 +1730,19 @@
         sendCommand('3S');
         setActiveProfileChip('chip3S', '🛡️ Pin 3S Chuẩn');
         document.getElementById('inputKp').value = '1.55';
-        document.getElementById('inputKd').value = '3.40';
+        document.getElementById('inputKd').value = '0.00';
         document.getElementById('inputBase').value = '115';
       } else if (type === '2S') {
         sendCommand('2S');
         setActiveProfileChip('chip2S', '🔋 Pin 2S An Toàn');
         document.getElementById('inputKp').value = '1.55';
-        document.getElementById('inputKd').value = '3.40';
+        document.getElementById('inputKd').value = '0.00';
         document.getElementById('inputBase').value = '145';
       } else if (type === 'RACE') {
         sendCommand('STAGE2');
         setActiveProfileChip('chipRace', '🏁 Race 10s');
         document.getElementById('inputKp').value = '1.65';
-        document.getElementById('inputKd').value = '3.80';
+        document.getElementById('inputKd').value = '0.00';
         document.getElementById('inputBase').value = '135';
       }
     }
