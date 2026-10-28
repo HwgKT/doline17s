@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "soc/gpio_struct.h"
 
 // Định nghĩa các biến toàn cục
 uint16_t sensorRaw[N_SENSORS];
@@ -41,25 +42,32 @@ void sensor_init(void) {
 }
 
 void sensor_mux_select(uint8_t channel) {
-    digitalWrite(PIN_MUX_S0, channel & 0x01);
-    digitalWrite(PIN_MUX_S1, (channel >> 1) & 0x01);
-    digitalWrite(PIN_MUX_S2, (channel >> 2) & 0x01);
-    digitalWrite(PIN_MUX_S3, (channel >> 3) & 0x01);
+    // GPIO17/18/19/23 đều thuộc GPIO bank 0 trên ESP32.
+    // Ghi thanh ghi trực tiếp để giảm overhead của 4 lần digitalWrite().
+    const uint32_t muxMask =
+        (1UL << PIN_MUX_S0) |
+        (1UL << PIN_MUX_S1) |
+        (1UL << PIN_MUX_S2) |
+        (1UL << PIN_MUX_S3);
+
+    uint32_t setMask = 0;
+    if (channel & 0x01) setMask |= (1UL << PIN_MUX_S0);
+    if (channel & 0x02) setMask |= (1UL << PIN_MUX_S1);
+    if (channel & 0x04) setMask |= (1UL << PIN_MUX_S2);
+    if (channel & 0x08) setMask |= (1UL << PIN_MUX_S3);
+
+    GPIO.out_w1tc = muxMask; // Xóa 4 bit địa chỉ cũ
+    GPIO.out_w1ts = setMask; // Đặt các bit địa chỉ mới
 }
 
 uint16_t sensor_read_mux(uint8_t channel) {
     sensor_mux_select(channel);
-    delayMicroseconds(6); // Đợi MUX chốt kênh ổn định (tối ưu từ 20us -> 6us)
 
-    analogRead(PIN_LINE_SIG); // Bỏ mẫu đầu tiên để xả điện dung ký sinh
+    // FAST SCAN: giữ settling ngắn, đọc ADC đúng một lần.
+    // Không đọc bỏ mẫu đầu tiên và không lấy trung bình nhiều mẫu.
+    delayMicroseconds(2);
 
-    uint32_t sum = 0;
-    for (int i = 0; i < ADC_SAMPLES; i++) {
-        sum += analogRead(PIN_LINE_SIG);
-        delayMicroseconds(3); // Tối ưu từ 10us -> 3us
-    }
-
-    return (uint16_t)(sum / ADC_SAMPLES);
+    return (uint16_t)analogRead(PIN_LINE_SIG);
 }
 
 void sensor_read_all(void) {
