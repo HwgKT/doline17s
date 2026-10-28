@@ -13,7 +13,7 @@ extern "C" {
 #define N_SENSORS             16      // Tổng số mắt
 #define SENSOR_START_IDX      0       // Bắt đầu từ mắt 0 (sử dụng trọn vẹn 16 mắt)
 #define SENSOR_END_IDX        15      // Kết thúc ở mắt 15 (sử dụng trọn vẹn 16 mắt)
-#define ADC_SAMPLES           4       // Số lần lấy mẫu ADC trung bình
+#define ADC_SAMPLES           1       // FAST SCAN: một mẫu ADC mỗi mắt
 #define MIN_CALIBRATION_DELTA 150     // Chênh lệch tối thiểu giữa Min và Max (tránh nhiễu ADC)
 #define BUTTON_DEBOUNCE_MS    50      // Thời gian chống rung phím (ms)
 
@@ -40,7 +40,7 @@ void sensor_init(void);
 void sensor_mux_select(uint8_t channel);
 
 /**
- * @brief Đọc giá trị Analog từ kênh đã chọn (có lấy trung bình mẫu)
+ * @brief Đọc giá trị Analog từ kênh đã chọn (FAST SCAN: một mẫu ADC)
  * @param channel Kênh cần đọc (0 - 15)
  * @return Giá trị ADC 12-bit (0 - 4095)
  */
