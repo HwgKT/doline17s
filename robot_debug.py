@@ -881,8 +881,9 @@ class App(tk.Tk):
                 self.cal_min = [self.cal_data[i][0] for i in range(16)]
                 self.cal_max = [self.cal_data[i][1] for i in range(16)]
                 self.calibration_ok = True
-                if self.recorder is not None:
-                    self.recorder.set_calibration(self.cal_min, self.cal_max)
+                # Update the current START/STOP CSV with newly downloaded NVS data.
+                if self.run_csv.active is not None:
+                    self.run_csv.active.set_calibration(self.cal_min, self.cal_max)
                 self.cal_state.set("Đã tải NVS 16/16 mắt; dữ liệu CAL 0–1000 theo ESP32.")
                 self.draw_bars(self.last_adc)
             else:
