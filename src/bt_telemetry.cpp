@@ -13,7 +13,7 @@ void btSendLine(const String &line) {
 }
 void btSendTelemetry(const Telemetry &sample) {
   if (!btConnected()) return;
-  Telemetry t=sample; t.t_ms=millis();
+  Telemetry t=sample;  // preserve snapshot timestamp assigned in main.cpp
   uint8_t frame[2+sizeof(t)+1]; frame[0]=0xAA;frame[1]=0x55;
   memcpy(frame+2,&t,sizeof(t));
   uint8_t xorByte=0;

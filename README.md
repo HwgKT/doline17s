@@ -1,6 +1,6 @@
-# 🏎️ ESP32 16-Sensor High-Speed Line Follower Robot (PID + BLE Dashboard)
+# ESP32 16-Sensor High-Speed Line Follower Robot (PID + Bluetooth Classic Debug)
 
-Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều khiển **ESP32**, thanh cảm biến quang trở hồng ngoại **16 mắt qua IC giải mã CD74HC4067**, thuật toán **PID phi tuyến kết hợp điều tốc động (Dynamic Speed Profiling)**, và giao diện giám sát/điều khiển không dây qua **Web Bluetooth (BLE) / Web Serial Dashboard**.
+Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều khiển **ESP32**, thanh cảm biến quang trở hồng ngoại **16 mắt qua IC giải mã CD74HC4067**, thuật toán **PID phi tuyến kết hợp điều tốc động (Dynamic Speed Profiling)**, và giao diện giám sát/điều khiển qua **Bluetooth Classic SPP với robot_debug.py** trên nhánh `mainv4`.
 
 ---
 
@@ -23,7 +23,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 - 🚀 **Bứt tốc đường thẳng & Tự hạ ga ôm cua (Dynamic Speed Curve):** Tự động bốc ga kịch trần (lên tới 215–255 PWM) khi đi thẳng và tự ghì ga xuống 95–115 PWM khi vào cua để bánh xe bám chặt mặt đường.
 - 🛡️ **Khâu vi phân $K_d$ có lọc thông thấp (Anti-Oscillation IIR):** Triệt tiêu hoàn toàn hiện tượng rung lắc li ti hoặc lắc đuôi cá ở tốc độ cao.
 - 📐 **Xử lý chuyên sâu Cua vuông 90° & Vạch đứt nét:** Phanh giật ngược chủ động (*Active Counter-Brake*) kết hợp quay tâm xe đón line tức thời.
-- 📱 **Điều khiển & Tinh chỉnh không dây qua Web Bluetooth:** Giám sát trạng thái 16 mắt cảm biến, đo sai số, hiển thị PWM động cơ thời gian thực và chỉnh thông số PID trực tiếp từ trình duyệt điện thoại/máy tính.
+- **Giám sát bằng app Python Bluetooth Classic:** 16 ADC, 16 giá trị chuẩn hóa, ngưỡng White/Black riêng từng mắt, logic 0/1, PID, PWM và encoder; xuất TXT/CSV.
 
 ---
 
@@ -156,3 +156,13 @@ pio run -t monitor
 5. Nếu ESP32 mất nguồn, firmware tự tải lại profile NVS hợp lệ. Cực tính phần cứng cố định: **ADC đen > ADC trắng**; `INV` không còn đảo cực.
 
 SPP device: **`LineRobot`**; BLE Web **không được khởi tạo trong `mainv4`**. Protocol telemetry 72 byte và các chức năng PID/encoder giữ nguyên.
+
+## Debug SPP và CSV trong app Python (mainv4)
+
+- **Không có ngưỡng RAW chung** cho 16 mắt. Mắt `i` có `T_i = (white_i + black_i) / 2` tải từ NVS bằng `CAL_DUMP`. `CAL_i = clamp(1000*(ADC_i-white_i)/(black_i-white_i),0,1000)`; `logic_i = (CAL_i >= 500)`. `0=TRẮNG`, `1=ĐEN`. Trước khi đọc đủ NVS, app hiện `—`, không đoán logic theo ngưỡng giả.
+- **App:** `robot_debug.py` có nút `Bảng 16 mắt` hiển thị RAW, W, B, T_i, CAL, logic từng mắt; terminal `Mở rộng`, `Xuất TXT`, `Xuất CSV`. Tùy chọn `Xem mẫu PID` mặc định bật, chỉ in 5 Hz để không tràn terminal; `Ghi CSV` lưu **toàn bộ** telemetry ở tần số nhận được, không giảm mẫu.
+- **SPP telemetry:** giữ nguyên 72 byte/frame, header `AA 55`, payload 69 byte (`<I16H2i2h5fB`), byte XOR; để tương thích app cũ. Payload chứa `t_ms` tại snapshot sau PID, `adc0..15` raw 12-bit, `encL/encR` signed quadrature x4, `pwmL/pwmR` sau điều khiển (có dấu), `err,p,i,d,out,mode`. Dữ liệu đã chuẩn hóa và 16 bit logic do app **tính từ profile NVS thực**; không gửi lặp 16 giá trị CAL/logic qua Bluetooth.
+- **Tần số gửi:** mặc định 50 Hz (72*50=3600 bytes/s), chỉnh `STREAM:20`, `STREAM:50`, `STREAM:100`, `STREAM:0` (tạm ngừng). `STREAM` truy vấn trạng thái. Không gửi các dòng TXT cho từng mẫu trên ESP32. 100 Hz là chế độ thử nghiệm, kiểm tra Hz thực tế, số lỗi gói và vòng PID; nếu chậm, về 20 hoặc 50 Hz.
+- **CSV:** cột `host_iso` là thời gian PC nhận/xử lý, `t_ms` là đồng hồ ESP32, `adc0..15`, `cal0..15`, `logic0..15`, encoder, PWM, PID và chuỗi `logic16`. Các cột CAL/logic để trống trước khi tải đủ profile NVS. Xuất CSV lưu tối đa 15.000 mẫu gần nhất; `Ghi CSV` ghi liên tục để thu thập thí nghiệm dài hơn. Xuất TXT chỉ là log lệnh/trạng thái/PID preview, không thay thế CSV toàn tốc độ.
+- **Kết nối:** tên Classic SPP là `LineRobot`; COM Windows chọn `Outgoing`. `COM4` kiểu CP210x chỉ là cổng USB trên máy người dùng ví dụ, không phải SPP.
+

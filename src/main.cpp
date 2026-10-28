@@ -9,12 +9,13 @@
 #include "bt_telemetry.h"
 
 namespace {
-constexpr uint32_t TX_PERIOD_MS=50;       // 20 Hz telemetry for bring-up
+// Packed 72-byte SPP telemetry; default 50 Hz (3.6 kB/s payload+framing).
 constexpr uint32_t DIAG_PERIOD_MS=1000;   // 1 Hz USB diagnostic
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 uint8_t manualSpeed=120;
+uint16_t streamPeriodMs=20; // 50 Hz; STREAM:0/20/50/100 to change
 uint32_t lastTx=0, lastDiag=0, lastBlink=0, lastManual=0;
 uint32_t loopCount=0, pidCount=0, txCount=0;
 String serialLine;
@@ -67,8 +68,22 @@ void command(const String &raw) {
   Serial.printf("[CMD] %s\n",s.c_str());
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING PID PWM ENC ENC_RESET STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP 3S 2S RACE");
+    reply("HELP: PING PID PWM ENC ENC_RESET STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP STREAM:0/20/50/100 3S 2S RACE");
     return;
+  }
+  if(s=="STREAM"){
+    reply(String("STREAM Hz=")+(streamPeriodMs?String(1000U/streamPeriodMs):String("0"))+
+          " FRAME_BYTES=72");return;
+  }
+  if(s.startsWith("STREAM:")){
+    const String hzText=s.substring(7);
+    if(hzText=="0")streamPeriodMs=0;
+    else if(hzText=="20")streamPeriodMs=50;
+    else if(hzText=="50")streamPeriodMs=20;
+    else if(hzText=="100")streamPeriodMs=10;
+    else {reply("ERR: STREAM_RATE_USE_0_20_50_100");return;}
+    reply(String("STREAM Hz=")+(streamPeriodMs?String(1000U/streamPeriodMs):String("0"))+
+          " FRAME_BYTES=72");return;
   }
   if(s=="PID"){showPid();return;}
   if(s=="PWM"){
@@ -192,6 +207,8 @@ void connectionState(uint32_t now) {
 void sendFrame(){
   if(!sppStarted||!btConnected())return;
   Telemetry t{};
+  // Timestamp belongs to the single post-PID snapshot, not the Bluetooth write.
+  t.t_ms=millis();
   for(int i=0;i<N_SENSORS;++i)t.adc[i]=sensorRaw[i];
   int32_t l=0,r=0;
   encoder_get_counts(&l,&r);
@@ -242,13 +259,14 @@ void loop() {
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
-  if(now-lastTx>=TX_PERIOD_MS){lastTx=now;sendFrame();}
+  if(streamPeriodMs && now-lastTx>=streamPeriodMs){lastTx=now;sendFrame();}
   if(now-lastDiag>=DIAG_PERIOD_MS){
     float sec=(now-lastDiag)/1000.0f;
     int32_t encL=0,encR=0;
     encoder_get_counts(&encL,&encR);
-    Serial.printf("[DIAG] bt=%d calib=%d auto=%d loop=%.1fHz pid=%.1fHz tx=%.1fHz encL=%ld encR=%ld\n",
+    Serial.printf("[DIAG] bt=%d calib=%d auto=%d stream=%uHz loop=%.1fHz pid=%.1fHz tx=%.1fHz encL=%ld encR=%ld\n",
       btConnected()?1:0,calibrationReady?1:0,pid_is_auto_mode()?1:0,
+      streamPeriodMs?1000U/streamPeriodMs:0U,
       loopCount/sec,pidCount/sec,txCount/sec,(long)encL,(long)encR);
     loopCount=pidCount=txCount=0;lastDiag=now;
   }

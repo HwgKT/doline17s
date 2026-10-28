@@ -14,6 +14,7 @@ normalizes telemetry to 0..1000 using the same reference levels.
 """
 import collections
 import csv
+import datetime
 import math
 import operator
 import functools
@@ -23,7 +24,7 @@ import struct
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, ttk
 
 import serial
 from serial.tools import list_ports
@@ -41,8 +42,11 @@ PROFILES = {
     "Pin 2S": (1.55, 0.0, 0.00, 145),
     "Race": (1.65, 0.0, 0.00, 135),
 }
-CSV_HEADER = (["t_ms"] + [f"adc{i}" for i in range(16)] +
-              ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode"])
+CSV_HEADER = (["host_iso", "t_ms"] +
+              [f"adc{i}" for i in range(16)] +
+              [f"cal{i}" for i in range(16)] +
+              [f"logic{i}" for i in range(16)] +
+              ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode", "logic16"])
 BG, PANEL, FG, MUTED = "#0f1420", "#161d31", "#e2e8f0", "#94a3b8"
 GREEN, GREY, AMBER, CYAN, ROSE = "#10b981", "#475569", "#f59e0b", "#22d3ee", "#f43f5e"
 
@@ -132,14 +136,23 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("ESP32 Line Robot — Bluetooth Classic SPP")
-        self.geometry("1200x810")
-        self.minsize(1050, 760)
+        self.geometry("1350x900")
+        self.minsize(1090, 770)
         self.configure(bg=BG)
         self.q = queue.Queue()
         self.reader = None
         self.csv_file = None
         self.csv_writer = None
         self.hist = collections.deque(maxlen=HIST_LEN)
+        self.recent_rows = collections.deque(maxlen=15000)  # last ~5 minutes at 50 Hz
+        self.log_lines = collections.deque(maxlen=30000)
+        self.log_window = None
+        self.log_mirror = None
+        self.sensor_window = None
+        self.sensor_table = None
+        self.preview_pid_log = tk.BooleanVar(value=True)
+        self.last_preview_ms = None
+        self.stream_rate = tk.StringVar(value="50")
         self.prev = None
         self.wheel_speed = [0.0, 0.0]
         self.frames = 0
@@ -172,6 +185,13 @@ class App(tk.Tk):
         self.connect_btn.pack(side="left", padx=3)
         self.csv_btn = ttk.Button(top, text="Ghi CSV", command=self.toggle_csv)
         self.csv_btn.pack(side="left", padx=8)
+        self.label(top, "SPP Hz", fg=MUTED).pack(side="left", padx=(10, 3))
+        self.rate_combo = ttk.Combobox(top, textvariable=self.stream_rate,
+                                       values=("20", "50", "100", "0"),
+                                       width=5, state="readonly")
+        self.rate_combo.pack(side="left")
+        self.rate_combo.bind("<<ComboboxSelected>>",
+                             lambda _e: self.send_command("STREAM:" + self.stream_rate.get()))
         self.status_label = self.label(top, "Chưa kết nối", fg=ROSE)
         self.status_label.pack(side="left", padx=5)
         self.rate_label = self.label(top, "0 Hz | 0 lỗi gói", fg=MUTED)
@@ -181,7 +201,7 @@ class App(tk.Tk):
         body.pack(fill="both", expand=True, padx=12, pady=3)
         left = tk.Frame(body, bg=BG)
         left.pack(side="left", fill="both", expand=True, padx=(0, 12))
-        right = tk.Frame(body, bg=PANEL, width=390)
+        right = tk.Frame(body, bg=PANEL, width=440)
         right.pack(side="right", fill="y")
         right.pack_propagate(False)
         panel = tk.Frame(right, bg=PANEL)
@@ -189,16 +209,12 @@ class App(tk.Tk):
 
         sensor_head = tk.Frame(left, bg=BG)
         sensor_head.pack(fill="x")
-        self.label(sensor_head, "16 mắt: RAW / CAL / LOGIC", font=("Segoe UI", 11, "bold")).pack(side="left")
-        self.label(sensor_head, "Ngưỡng raw", fg=MUTED).pack(side="left", padx=(15, 4))
-        self.threshold = tk.DoubleVar(value=2000)
-        ttk.Scale(sensor_head, from_=0, to=4095, variable=self.threshold,
-                  length=120).pack(side="left")
-        self.threshold_label = self.label(sensor_head, "2000", fg=AMBER)
-        self.threshold_label.pack(side="left", padx=5)
-        self.bars = tk.Canvas(left, bg=PANEL, width=715, height=250, highlightthickness=0)
+        self.label(sensor_head, "16 mắt: RAW / T_i / CAL / 0-1", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Button(sensor_head, text="Bảng 16 mắt", command=self.open_sensor_table).pack(side="right", padx=4)
+        self.label(sensor_head, "Mỗi mắt có ngưỡng riêng", fg=AMBER).pack(side="right", padx=6)
+        self.bars = tk.Canvas(left, bg=PANEL, width=715, height=282, highlightthickness=0)
         self.bars.pack(fill="x", pady=5)
-        self.logic_var = tk.StringVar(value="Logic: ---------------- (chưa tải NVS)")
+        self.logic_var = tk.StringVar(value="0 = TRẮNG | 1 = ĐEN | Chưa có NVS: ----------------")
         self.label(left, textvariable=self.logic_var, fg=CYAN,
                    font=("Consolas", 10, "bold")).pack(anchor="w", pady=(0, 8))
 
@@ -229,7 +245,7 @@ class App(tk.Tk):
                        command=lambda text=cmd: self.send_command(text)).pack(side="left", padx=4)
         ttk.Button(modes, text="Reset ENC", width=12,
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
-        self.label(left, "CAL/0-1 sử dụng White/Black đọc từ profile NVS của ESP32.",
+        self.label(left, "RAW: 0–4095   T_i=(W_i+B_i)/2   CAL: 0–1000   0=TRẮNG   1=ĐEN",
                    fg=MUTED).pack(anchor="w")
 
         self.label(panel, "Tốc độ PWM (0–255)", bg=PANEL,
@@ -297,11 +313,16 @@ class App(tk.Tk):
         terminal_heading.pack(fill="x", pady=(6, 3))
         self.label(terminal_heading, "Terminal TX / RX", bg=PANEL,
                    font=("Segoe UI", 11, "bold")).pack(side="left")
-        ttk.Button(terminal_heading, text="Xóa log", command=self.clear_terminal).pack(side="right")
+        ttk.Button(terminal_heading, text="Xóa", command=self.clear_terminal).pack(side="right", padx=2)
+        ttk.Button(terminal_heading, text="Mở rộng", command=self.open_log_window).pack(side="right", padx=2)
+        ttk.Button(terminal_heading, text="Xuất TXT", command=self.export_txt).pack(side="right", padx=2)
+        ttk.Button(terminal_heading, text="Xuất CSV", command=self.export_csv).pack(side="right", padx=2)
+        ttk.Checkbutton(panel, text="Xem mẫu PID trên terminal (5 Hz, không ảnh hưởng CSV)",
+                        variable=self.preview_pid_log).pack(anchor="w", pady=3)
         text_area = tk.Frame(panel, bg=PANEL)
         text_area.pack(fill="both", expand=True)
         self.console = tk.Text(text_area, bg=BG, fg=FG, insertbackground=FG,
-                               font=("Consolas", 9), height=8, wrap="word",
+                               font=("Consolas", 9), height=14, wrap="none",
                                state="disabled", relief="flat")
         scrollbar = ttk.Scrollbar(text_area, orient="vertical", command=self.console.yview)
         self.console.configure(yscrollcommand=scrollbar.set)
@@ -317,17 +338,112 @@ class App(tk.Tk):
         self.log("Chọn COM Bluetooth SPP (outgoing). Chưa có xác nhận firmware.")
 
     def log(self, message):
+        line = f"[{datetime.datetime.now().astimezone().isoformat(timespec='milliseconds')}] {message}\n"
+        self.log_lines.append(line)
         self.console.configure(state="normal")
-        self.console.insert("end", f"[{time.strftime('%H:%M:%S')}] {message}\n")
-        if int(self.console.index("end-1c").split(".")[0]) > 550:
-            self.console.delete("1.0", "101.0")
+        self.console.insert("end", line)
+        if int(self.console.index("end-1c").split(".")[0]) > 1200:
+            self.console.delete("1.0", "201.0")
         self.console.see("end")
         self.console.configure(state="disabled")
+        if self.log_mirror is not None and self.log_mirror.winfo_exists():
+            self.log_mirror.configure(state="normal")
+            self.log_mirror.insert("end", line)
+            self.log_mirror.see("end")
+            self.log_mirror.configure(state="disabled")
 
     def clear_terminal(self):
-        self.console.configure(state="normal")
-        self.console.delete("1.0", "end")
-        self.console.configure(state="disabled")
+        self.log_lines.clear()
+        for widget in (self.console, self.log_mirror):
+            if widget is not None and widget.winfo_exists():
+                widget.configure(state="normal")
+                widget.delete("1.0", "end")
+                widget.configure(state="disabled")
+
+    def open_log_window(self):
+        if self.log_window is not None and self.log_window.winfo_exists():
+            self.log_window.lift()
+            return
+        win = tk.Toplevel(self)
+        win.title("LineRobot — Terminal TX/RX và PID preview")
+        win.geometry("1100x640")
+        txt = tk.Text(win, bg=BG, fg=FG, font=("Consolas", 10), wrap="none")
+        sb = ttk.Scrollbar(win, orient="vertical", command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        txt.pack(fill="both", expand=True)
+        txt.insert("end", "".join(self.log_lines))
+        txt.see("end")
+        txt.configure(state="disabled")
+        self.log_window, self.log_mirror = win, txt
+        def on_close():
+            self.log_mirror = None
+            self.log_window = None
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", on_close)
+
+    def open_sensor_table(self):
+        if self.sensor_window is not None and self.sensor_window.winfo_exists():
+            self.sensor_window.lift()
+            return
+        win = tk.Toplevel(self)
+        win.title("LineRobot — 16 ngưỡng riêng từ NVS")
+        win.geometry("780x560")
+        cols = ("eye", "raw", "white", "black", "threshold", "cal", "logic")
+        table = ttk.Treeview(win, columns=cols, show="headings", height=16)
+        for col, label in zip(cols, ("Mắt", "ADC RAW", "Trắng W", "Đen B", "Ngưỡng T_i",
+                                      "CAL 0–1000", "0 trắng / 1 đen")):
+            table.heading(col, text=label)
+            table.column(col, width=95, anchor="center")
+        table.pack(fill="both", expand=True)
+        for i in range(16):
+            table.insert("", "end", iid=str(i), values=(i, "—", "—", "—", "—", "—", "—"))
+        self.sensor_window, self.sensor_table = win, table
+        self.update_sensor_table()
+        def on_close():
+            self.sensor_window, self.sensor_table = None, None
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", on_close)
+
+    def update_sensor_table(self):
+        if self.sensor_table is None or not self.sensor_table.winfo_exists():
+            return
+        for i, raw in enumerate(self.last_adc):
+            if self.calibration_ok:
+                white, black = self.cal_min[i], self.cal_max[i]
+                cal = normalize_adc(raw, white, black)
+                self.sensor_table.item(str(i), values=(i, raw, white, black,
+                                     (white + black) // 2, cal, int(cal >= 500)))
+            else:
+                self.sensor_table.item(str(i), values=(i, raw, "—", "—", "—", "—", "—"))
+
+    def export_txt(self):
+        path = filedialog.asksaveasfilename(defaultextension=".txt",
+            initialfile=time.strftime("linerobot_terminal_%Y%m%d_%H%M%S.txt"),
+            filetypes=[("Text log", "*.txt")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(self.log_lines)
+            self.log(f"Đã xuất terminal TXT: {path}")
+        except OSError as exc:
+            self.log(f"Không thể xuất TXT: {exc}")
+
+    def export_csv(self):
+        path = filedialog.asksaveasfilename(defaultextension=".csv",
+            initialfile=time.strftime("linerobot_telemetry_%Y%m%d_%H%M%S.csv"),
+            filetypes=[("CSV", "*.csv")])
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow(CSV_HEADER)
+                writer.writerows(self.recent_rows)
+            self.log(f"Đã xuất {len(self.recent_rows)} mẫu telemetry ra CSV: {path}")
+        except OSError as exc:
+            self.log(f"Không thể xuất CSV: {exc}")
 
     def refresh_ports(self):
         ports = [p.device for p in list_ports.comports()]
@@ -358,6 +474,7 @@ class App(tk.Tk):
         self.cal_data = {}
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
+        self.send_command("STREAM:" + self.stream_rate.get())
 
     def disconnect(self):
         if self.reader:
@@ -460,13 +577,35 @@ class App(tk.Tk):
         self.csv_btn.config(text="Dừng CSV")
         self.log(f"Bắt đầu ghi {filename}")
 
+    def sample_csv_row(self, s):
+        adc = list(s[1:17])
+        if self.calibration_ok:
+            cal = [normalize_adc(adc[i], self.cal_min[i], self.cal_max[i]) for i in range(16)]
+            bits = [int(value >= 500) for value in cal]
+            word = "".join(str(bit) for bit in bits)
+        else:
+            cal, bits, word = [""] * 16, [""] * 16, ""
+        host_time = datetime.datetime.now().astimezone().isoformat(timespec="milliseconds")
+        return [host_time, s[0], *adc, *cal, *bits, *s[17:27], word]
+
     def on_sample(self, s):
         self.hist.append(s)
         self.frames += 1
+        row = self.sample_csv_row(s)
+        self.recent_rows.append(row)
         if self.csv_writer:
-            self.csv_writer.writerow(s)
+            self.csv_writer.writerow(row)
         self.last_adc = list(s[1:17])
         t, left, right = s[0], s[17], s[18]
+        if self.preview_pid_log.get() and s[26] == 1:
+            if self.last_preview_ms is None or (t - self.last_preview_ms) % (2**32) >= 200:
+                self.last_preview_ms = t
+                self.log(f"PID t={t}ms adc={','.join(map(str, s[1:17]))}"
+                         f" cal={','.join(str(v) for v in row[18:34])}"
+                         f" logic={row[-1] or '?'} pwm=({s[19]},{s[20]})"
+                         f" enc=({s[17]},{s[18]}) err={s[21]:.3f}"
+                         f" p={s[22]:.3f} i={s[23]:.3f} d={s[24]:.3f}"
+                         f" out={s[25]:.3f}")
         if self.prev and t > self.prev[0]:
             dt = (t - self.prev[0]) / 1000.0
             v_left = (left - self.prev[1]) / dt
@@ -525,6 +664,10 @@ class App(tk.Tk):
         elif message == "CAL_NO_PROFILE":
             self.cal_state.set("ESP32 chưa có profile NVS hợp lệ.")
             self.calibration_ok = False
+        elif message.startswith("STREAM Hz="):
+            hz = re.search(r"STREAM Hz=(\d+)", message)
+            if hz:
+                self.stream_rate.set(hz.group(1))
 
     def tick(self):
         last = None
@@ -560,35 +703,55 @@ class App(tk.Tk):
                   "out": f"{s[25]:.2f}", "mode": {0: "MANUAL", 1: "AUTO PID"}.get(s[26], str(s[26]))}
         for key, value in values.items():
             self.values[key].set(value)
-        self.threshold_label.config(text=str(round(self.threshold.get())))
         self.draw_bars(s[1:17])
+        self.update_sensor_table()
         self.draw_scope()
 
     def draw_bars(self, adc_values):
         c = self.bars
         c.delete("all")
         width = max(715, c.winfo_width())
-        chart_top, chart_height = 22, 155
+        top, height = 25, 154
         step = width / 16
-        threshold = self.threshold.get()
         bits = []
         for i, adc in enumerate(adc_values):
-            cal = normalize_adc(adc, self.cal_min[i], self.cal_max[i], self.black_high) if self.calibration_ok else None
-            black = (cal >= 500) if cal is not None else (adc >= threshold)
-            bits.append("1" if cal is not None and black else "0" if cal is not None else "-")
+            low, high = self.cal_min[i], self.cal_max[i]
+            cal = normalize_adc(adc, low, high) if self.calibration_ok else None
+            black = cal >= 500 if cal is not None else None
+            digit = ("1" if black else "0") if black is not None else "—"
+            bits.append(digit)
             x0, x1 = i * step + 4, (i + 1) * step - 4
-            bar_height = chart_height * adc / ADC_MAX
-            c.create_rectangle(x0, chart_top + chart_height - bar_height, x1,
-                               chart_top + chart_height, fill=GREEN if black else GREY, outline="")
-            c.create_text((x0 + x1) / 2, 12, text=str(adc), fill=FG, font=("Consolas", 8))
-            c.create_text((x0 + x1) / 2, 191, text="—" if cal is None else str(cal),
+            bar_height = height * adc / ADC_MAX
+            color = GREEN if black is True else GREY if black is False else MUTED
+            c.create_rectangle(x0, top + height - bar_height, x1,
+                               top + height, fill=color, outline="")
+            if self.calibration_ok:
+                threshold = (low + high) // 2
+                yt = top + height * (1 - threshold / ADC_MAX)
+                c.create_line(x0, yt, x1, yt, fill=AMBER, width=2)
+            else:
+                threshold = None
+            c.create_text((x0 + x1) / 2, 12, text=str(adc), fill=FG,
+                          font=("Consolas", 8))
+            c.create_text((x0 + x1) / 2, 197,
+                          text="—" if threshold is None else str(threshold),
+                          fill=AMBER, font=("Consolas", 8))
+            c.create_text((x0 + x1) / 2, 220,
+                          text="—" if cal is None else str(cal),
                           fill=CYAN, font=("Consolas", 8))
-            c.create_text((x0 + x1) / 2, 212, text=bits[-1],
-                          fill=GREEN if bits[-1] == "1" else MUTED)
-            c.create_text((x0 + x1) / 2, 238, text=str(i), fill=MUTED)
-        threshold_y = chart_top + chart_height * (1 - threshold / ADC_MAX)
-        c.create_line(0, threshold_y, width, threshold_y, fill=AMBER, dash=(4, 3))
-        self.logic_var.set("Logic: " + "".join(bits) + ("  (NVS firmware)" if self.calibration_ok else "  (chưa tải NVS)"))
+            if digit != "—":
+                c.create_rectangle(x0+4, 235, x1-4, 255, fill=GREEN if black else "#475569",
+                                   outline="")
+            c.create_text((x0 + x1) / 2, 245, text=digit, fill=FG,
+                          font=("Consolas", 10, "bold"))
+            c.create_text((x0 + x1) / 2, 273, text=str(i), fill=MUTED,
+                          font=("Consolas", 9))
+        if self.calibration_ok:
+            self.logic_var.set("0 = TRẮNG | 1 = ĐEN   [" +
+                               "".join(bits[:8]) + " | " + "".join(bits[8:]) +
+                               "]   (ngưỡng riêng từng mắt, NVS)")
+        else:
+            self.logic_var.set("Chưa tải được profile NVS: logic chưa xác định (—)")
 
     def draw_scope(self):
         c = self.scope
