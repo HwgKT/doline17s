@@ -15,6 +15,8 @@ bool calibrationReady = false;
 // Biến quản lý thời gian quét hiệu chuẩn
 static unsigned long calibStartTime = 0;
 static uint32_t calibDurationMs = 4000; // Mặc định lia trong 4 giây
+static uint16_t priorMin[N_SENSORS], priorMax[N_SENSORS], priorThreshold[N_SENSORS];
+static bool priorPolarity[N_SENSORS], priorReady = false, lastCalibOK = false;
 
 // Biến nội bộ phục vụ chống rung nút nhấn
 static int lastCalibReading = LOW;
@@ -71,8 +73,15 @@ void sensor_read_all(void) {
 
 // Bắt đầu chế độ lia cảm biến qua lại
 void sensor_start_sweep_calibration(uint32_t duration_ms) {
+    if (isCalibrating) return;
+    priorReady = calibrationReady;
+    for (int i=0;i<N_SENSORS;++i) {
+       priorMin[i]=minValues[i]; priorMax[i]=maxValues[i];
+       priorThreshold[i]=thresholds[i]; priorPolarity[i]=blackIsHigher[i];
+    }
     isCalibrating = true;
     calibrationReady = false;
+    lastCalibOK = false;
     calibDurationMs = duration_ms;
     calibStartTime = millis();
 
@@ -172,17 +181,23 @@ bool sensor_finish_sweep_calibration(void) {
             blackIsHigher[i] = tempBlackIsHigher[i];
         }
         calibrationReady = true;
+        lastCalibOK = true;
         printf("[CALIB THANH CONG] Da tinh xong nguong trung binh tung mat! (0 = Trang, 1 = Den)\n\n");
         return true;
     } else {
-        // Không cập nhật thresholds[] – dữ liệu cũ hợp lệ (nếu có) được giữ nguyên
-        // calibrationReady KHÔNG được thay đổi để bảo toàn trạng thái dữ liệu cũ
+        for (int i=0;i<N_SENSORS;++i) {
+          minValues[i]=priorMin[i]; maxValues[i]=priorMax[i];
+          thresholds[i]=priorThreshold[i]; blackIsHigher[i]=priorPolarity[i];
+        }
+        calibrationReady = priorReady;
+        lastCalibOK = false;
         printf("[CALIB THAT BAI] Mot so mat khong du delta. Du lieu cu (neu co) duoc giu nguyen.\n");
         printf("[CALIB] Hay lia lai toan bo mat qua vach den va gui lenh ket thuc.\n\n");
         return false;
     }
 }
 
+bool sensor_get_last_calibration_result(void) { return lastCalibOK; }
 bool sensor_is_calibrating(void) {
     return isCalibrating;
 }

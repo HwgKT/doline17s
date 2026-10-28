@@ -79,6 +79,7 @@ bool sensor_finish_sweep_calibration(void);
  * @brief Kiểm tra xem hệ thống có đang trong thời gian lia calib hay không
  */
 bool sensor_is_calibrating(void);
+bool sensor_get_last_calibration_result(void);
 
 /**
  * @brief Kiểm tra nút nhấn hiệu chuẩn (có chống rung phím)

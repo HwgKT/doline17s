@@ -22,4 +22,7 @@
 #define PIN_MOTOR_R1       27
 #define PIN_MOTOR_R2       13
 
+#define PIN_DEBUG_LED 2
+#define DEBUG_LED_ACTIVE_HIGH 1
+
 #endif // PINOUT_H

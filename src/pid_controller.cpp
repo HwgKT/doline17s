@@ -28,6 +28,7 @@ static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0.0f;
 static float integralError = 0.0f;
 static float lastCorrection = 0.0f;
+static float lastPTerm = 0.0f, lastITerm = 0.0f, lastDTerm = 0.0f;
 // Use a microsecond timebase for the derivative (dt is measured in seconds).
 static uint32_t lastComputeTimeUs = 0;
 static bool derivativeHistoryValid = false;
@@ -416,6 +417,7 @@ void pid_line_follow_step(void) {
             derivativeHistoryValid = true;
 
             // Tổng bù lái
+            lastPTerm = pTerm; lastITerm = iTerm; lastDTerm = dTerm;
             lastCorrection = pTerm + iTerm + dTerm;
 
             // 4. Giảm tốc ôm cua chủ động (Dynamic Corner Drag):
@@ -580,6 +582,9 @@ float pid_get_last_error(void) {
 float pid_get_correction(void) {
     return lastCorrection;
 }
+float pid_get_term_p(void) { return currentCase == LINE_CASE_NORMAL_PID ? lastPTerm : 0.0f; }
+float pid_get_term_i(void) { return currentCase == LINE_CASE_NORMAL_PID ? lastITerm : 0.0f; }
+float pid_get_term_d(void) { return currentCase == LINE_CASE_NORMAL_PID ? lastDTerm : 0.0f; }
 
 float pid_get_kp(void) {
     return pidConfig.Kp;
