@@ -188,6 +188,7 @@ class App(tk.Tk):
         self.black_high = True
         self.cal_min = [0] * 16
         self.cal_max = [4095] * 16
+        self.cal_thresholds = [None] * 16
         self.cal_data = {}
         self.estop_latched = None  # Unknown until firmware STATUS.
         self.estop_pending = False
@@ -577,7 +578,9 @@ class App(tk.Tk):
         self.log("CSV: BẮT ĐẦU tạo file mới, DỪNG chốt file")
         self.csv_status.set("CSV: SẴN SÀNG — chưa ghi")
         self.calibration_ok = False
+        self.cal_thresholds = [None] * 16
         self.cal_data = {}
+        self.update_control_buttons()
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
@@ -673,7 +676,9 @@ class App(tk.Tk):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
                      and not self.estop_pending and not self.start_pending
-                     and not self.auto_running and self.run_csv.active is None)
+                     and not self.auto_running and self.run_csv.active is None
+                     and self.calibration_ok
+                     and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
 
@@ -693,10 +698,15 @@ class App(tk.Tk):
         if self.reader is None or not self.reader.is_alive():
             self.log("Chưa kết nối Bluetooth SPP.")
             return
+        if not self.calibration_ok or any(v is None for v in self.cal_thresholds):
+            self.log("Chưa nhận đủ 16 ngưỡng TH từ ESP32; gửi lại CAL_DUMP.")
+            self.send_command("CAL_DUMP")
+            return
         try:
-            calib = (self.cal_min, self.cal_max) if self.calibration_ok else None
-            recorder = self.run_csv.begin(self.reader, CSV_HEADER, calib)
-        except (OSError, RuntimeError) as exc:
+            calib = (self.cal_min, self.cal_max)
+            recorder = self.run_csv.begin(
+                self.reader, CSV_HEADER, calib, list(self.cal_thresholds))
+        except (OSError, RuntimeError, ValueError) as exc:
             self.log(f"Không tạo được CSV, chưa gửi AUTO: {exc}")
             return
         self.last_csv_total = 0
@@ -871,12 +881,14 @@ class App(tk.Tk):
                 if (0 <= eye < 16 and 0 <= white <= 4095 and
                         0 <= black <= 4095 and black - white >= MIN_CALIB_DELTA and
                         threshold == eye_raw_threshold(white, black)):
-                    self.cal_data[eye] = (white, black)
+                    self.cal_data[eye] = (white, black, threshold)
         elif message == "CAL_DUMP_DONE":
             if len(self.cal_data) == 16:
                 self.cal_min = [self.cal_data[i][0] for i in range(16)]
                 self.cal_max = [self.cal_data[i][1] for i in range(16)]
+                self.cal_thresholds = [self.cal_data[i][2] for i in range(16)]
                 self.calibration_ok = True
+                self.update_control_buttons()
                 # Update the current START/STOP CSV with newly downloaded NVS data.
                 if self.run_csv.active is not None:
                     self.run_csv.active.set_calibration(self.cal_min, self.cal_max)
@@ -892,7 +904,10 @@ class App(tk.Tk):
             self.cal_state.set("Đang thu 128 khung ĐEN.")
         elif message == "CAL_OK_SAVED":
             self.cal_state.set("ESP32 đã lưu NVS; đang đọc lại profile 16 mắt.")
+            self.calibration_ok = False
+            self.cal_thresholds = [None] * 16
             self.cal_data = {}
+            self.update_control_buttons()
             self.send_command("CAL_DUMP")
         elif message == "CAL_FAILED":
             self.cal_state.set("Calib mới thất bại; giữ profile cũ nếu có.")
@@ -903,6 +918,8 @@ class App(tk.Tk):
         elif message == "CAL_NO_PROFILE":
             self.cal_state.set("ESP32 chưa có profile NVS hợp lệ.")
             self.calibration_ok = False
+            self.cal_thresholds = [None] * 16
+            self.update_control_buttons()
         elif message.startswith("STREAM Hz="):
             hz = re.search(r"STREAM Hz=(\d+)", message)
             if hz:

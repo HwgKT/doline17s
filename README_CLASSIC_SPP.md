@@ -87,3 +87,11 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 ### Compact upper-right quarter, no scroll bar
 - The dashboard's right half now uses a fixed 50/50 vertical split: the upper-right quarter holds all START/STOP, PWM, PID and calibration controls in a compact stack **without** a Canvas or scrolling; the lower-right quarter remains the embedded terminal. Reduced fonts, paddings, compact PWM/PID groups and shortened calibration labels reclaim vertical space. The 16-sensor dashboard remains in the left half.
 - The terminal retains its own vertical/horizontal scroll bars (for long logs); the request to remove scrolling applies to the upper control dashboard. Firmware, SPP stream rate 300 Hz and per-run CSV lifecycle are untouched.
+
+
+### CSV metadata: 16 per-eye raw calibration thresholds
+- Every new run file contains one extra CSV row immediately below the 61-column header. The row's host_iso field is CAL_THRESHOLDS, t_ms is empty, and adc0..adc15 contain the sixteen raw threshold values TH0..TH15, with all remaining columns blank. Telemetry rows are unchanged.
+- Values are parsed from firmware's CAL_DATA eye WHITE BLACK TH response, verified per sensor, and retained exactly rather than using a shared raw threshold. ESP32 uses TH_i = WHITE_i + ceil(0.4*(BLACK_i-WHITE_i)).
+- START waits for a complete validated NVS CAL_DUMP so the row cannot accidentally contain placeholders; otherwise it re-requests CAL_DUMP rather than opening an incomplete CSV. Every START creates one new file; STOP closes it as before.
+- For pandas telemetry analysis use pandas.read_csv(path, skiprows=[1]), or filter out the row where host_iso is CAL_THRESHOLDS. To inspect the thresholds, read the second row under adc0..adc15.
+- This is an app-only CSV change; the firmware and SPP 300-Hz stream are unchanged.

@@ -7,8 +7,15 @@ import threading
 import time
 
 class TelemetryCsvRecorder(threading.Thread):
-    def __init__(self, header):
+    def __init__(self, header, thresholds):
         super().__init__(name="spp-csv-writer", daemon=True)
+        if len(thresholds) != 16 or any(
+                not isinstance(v, int) or not 0 <= v <= 4095
+                for v in thresholds):
+            raise ValueError("Need all 16 raw calibration thresholds from CAL_DUMP")
+        if len(header) < 18 or header[:2] != ["host_iso", "t_ms"] or (
+                header[2:18] != [f"adc{i}" for i in range(16)]):
+            raise ValueError("Unexpected CSV header alignment")
         folder = Path(__file__).resolve().parent / "logs"
         folder.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -16,6 +23,10 @@ class TelemetryCsvRecorder(threading.Thread):
         self.output = self.path.open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.writer(self.output)
         self.writer.writerow(header)
+        # Single metadata row: 16 raw thresholds aligned under adc0..adc15.
+        self.writer.writerow(
+            ["CAL_THRESHOLDS", "", *thresholds] + [""] * (len(header) - 18))
+        self.output.flush()
         self.queue = queue.Queue(maxsize=8192)
         self.file_lock = threading.Lock()
         self.stop_event = threading.Event()
