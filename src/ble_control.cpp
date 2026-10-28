@@ -86,9 +86,10 @@ static void processBleCommand(const std::string& rxValue) {
             sensor_start_sweep_calibration(4000); // Lia trong 4 giây
             ble_send_string("CALIB: BAT DAU LIA! Hay lia thanh cam bien qua lai vach line trong 4 giay...\n");
         } else {
-            // Nếu đang lia mà gửi lệnh tiếp -> Chốt kết thúc sớm
-            sensor_finish_sweep_calibration();
-            if (calibrationReady) {
+            // Đang lia -> gửi lệnh tiếp = chốt kết thúc sớm
+            // sensor_finish_sweep_calibration() đã kiểm tra isCalibrating bên trong
+            bool ok = sensor_finish_sweep_calibration();
+            if (ok) {
                 ble_send_string("CALIB THANH CONG: Da tinh nguong trung binh tung mat! (0=Trang, 1=Den)\n");
             } else {
                 ble_send_string("CALIB CHUA DAT: Chua lia qua vach den. Hay gui 'C' de lia lai!\n");
@@ -99,11 +100,16 @@ static void processBleCommand(const std::string& rxValue) {
 
     // Lệnh chốt kết thúc lia sớm: 'K' hoặc "STOP_CALIB"
     if (firstChar == 'K' || cmd == "STOP_CALIB") {
-        sensor_finish_sweep_calibration();
-        if (calibrationReady) {
-            ble_send_string("CALIB THANH CONG: Da tinh nguong trung binh tung mat!\n");
+        if (!sensor_is_calibrating()) {
+            // Không có lượt hiệu chuẩn đang chạy -> từ chối, trả về lỗi rõ ràng
+            ble_send_string("LOI: Khong co luot hieu chuan nao dang chay. Hay gui 'C' de bat dau truoc.\n");
         } else {
-            ble_send_string("CALIB CHUA DAT: Hay lia lai!\n");
+            bool ok = sensor_finish_sweep_calibration();
+            if (ok) {
+                ble_send_string("CALIB THANH CONG: Da tinh nguong trung binh tung mat!\n");
+            } else {
+                ble_send_string("CALIB CHUA DAT: Mot so mat khong du delta. Hay lia lai!\n");
+            }
         }
         return;
     }
@@ -235,7 +241,7 @@ static void processBleCommand(const std::string& rxValue) {
     }
 
     // ========================================================
-    // 4. XUẤT PWM VÀ TINH CHỈNH THÔNG SỐ PID TRỰC TIẾP
+    // 5. XUẤT PWM VÀ TINH CHỈNH THÔNG SỐ PID TRỰC TIẾP
     // ========================================================
     // Lệnh xuất PWM tức thì: "PWM"
     if (cmd == "PWM" || cmd == "pwm") {

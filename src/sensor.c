@@ -63,7 +63,7 @@ uint16_t sensor_read_mux(uint8_t channel) {
 }
 
 void sensor_read_all(void) {
-    // Chỉ đọc các mắt cần dùng (từ mắt 1 đến 14)
+    // Chỉ đọc các mắt cần dùng (từ mắt 0 đến 15)
     for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
         sensorRaw[i] = sensor_read_mux(i);
     }
@@ -76,7 +76,7 @@ void sensor_start_sweep_calibration(uint32_t duration_ms) {
     calibDurationMs = duration_ms;
     calibStartTime = millis();
 
-    // Reset lại min/max của các mắt 1..14
+    // Reset lại min/max của các mắt 0..15
     for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
         minValues[i] = 4095;
         maxValues[i] = 0;
@@ -109,8 +109,19 @@ void sensor_update_calibration_loop(void) {
 }
 
 // Chốt kết thúc quá trình lia và tính ngưỡng trung bình (Min + Max) / 2
-void sensor_finish_sweep_calibration(void) {
+// Trả về true nếu hiệu chuẩn thành công, false nếu thất bại hoặc chưa bắt đầu.
+bool sensor_finish_sweep_calibration(void) {
+    // Bảo vệ: Chỉ cho phép kết thúc khi đang thực sự hiệu chuẩn
+    if (!isCalibrating) {
+        printf("[CALIB] CANH BAO: Khong co luot hieu chuan nao dang hoat dong. Lenh bi tu choi.\n");
+        return false;
+    }
+
     isCalibrating = false;
+
+    // Dùng bộ đệm tạm để không ghi đè dữ liệu cũ hợp lệ khi lượt mới thất bại
+    uint16_t tempThresholds[N_SENSORS];
+    bool tempBlackIsHigher[N_SENSORS];
     bool valid = true;
 
     printf("\n=== KET QUA HIEU CHUAN (LIA CAM BIEN QUA LAI) ===\n");
@@ -118,30 +129,57 @@ void sensor_finish_sweep_calibration(void) {
     printf("--------------------------------------------------\n");
 
     for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-        uint16_t diff = maxValues[i] - minValues[i];
-
-        if (diff < MIN_CALIBRATION_DELTA) {
-            printf(" %2d  |   %4u    |   %4u    |   %4u    | CHUA QUA VACH!\n",
-                   i, minValues[i], maxValues[i], diff);
+        // Kiểm tra thứ tự logic: max phải lớn hơn min trước khi trừ (tránh underflow uint16_t)
+        if (maxValues[i] <= minValues[i]) {
+            printf(" %2d  |   %4u    |   %4u    |    N/A    | CHUA QUA VACH! (max<=min)\n",
+                   i, minValues[i], maxValues[i]);
             valid = false;
             continue;
         }
 
-        // Tính ngưỡng trung bình của từng mắt
-        thresholds[i] = (minValues[i] + maxValues[i]) / 2;
-        blackIsHigher[i] = true; // Giá trị cao hơn ngưỡng là vạch đen
+        // Tính delta bằng int32_t để đảm bảo an toàn kiểu dữ liệu, không underflow
+        int32_t delta = (int32_t)maxValues[i] - (int32_t)minValues[i];
 
-        printf(" %2d  |   %4u    |   %4u    |   %4u    |   %4u (OK)\n",
-               i, minValues[i], maxValues[i], diff, thresholds[i]);
+        // Kiểm tra phạm vi ADC hợp lệ (0..4095)
+        if (minValues[i] > 4095 || maxValues[i] > 4095) {
+            printf(" %2d  |   %4u    |   %4u    |   %4ld    | GIA TRI NGOAI PHAM VI ADC!\n",
+                   i, minValues[i], maxValues[i], (long)delta);
+            valid = false;
+            continue;
+        }
+
+        // Kiểm tra độ chênh lệch tối thiểu
+        if (delta < (int32_t)MIN_CALIBRATION_DELTA) {
+            printf(" %2d  |   %4u    |   %4u    |   %4ld    | DELTA QUA NHO! (< %d)\n",
+                   i, minValues[i], maxValues[i], (long)delta, MIN_CALIBRATION_DELTA);
+            valid = false;
+            continue;
+        }
+
+        // Lưu vào bộ đệm tạm, chưa ghi vào thresholds thật
+        tempThresholds[i] = (uint16_t)(((uint32_t)minValues[i] + (uint32_t)maxValues[i]) / 2u);
+        tempBlackIsHigher[i] = true; // Giá trị cao hơn ngưỡng là vạch đen
+
+        printf(" %2d  |   %4u    |   %4u    |   %4ld    |   %4u (OK)\n",
+               i, minValues[i], maxValues[i], (long)delta, tempThresholds[i]);
     }
     printf("--------------------------------------------------\n");
-
-
+    
     if (valid) {
+        // Chỉ commit dữ liệu mới khi TẤT CẢ các mắt đều hợp lệ
+        for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
+            thresholds[i] = tempThresholds[i];
+            blackIsHigher[i] = tempBlackIsHigher[i];
+        }
         calibrationReady = true;
         printf("[CALIB THANH CONG] Da tinh xong nguong trung binh tung mat! (0 = Trang, 1 = Den)\n\n");
+        return true;
     } else {
-        printf("[CALIB CHUA DAT] Mot so mat chua lia qua vach den. Hay bam CALIB va lia lai!\n\n");
+        // Không cập nhật thresholds[] – dữ liệu cũ hợp lệ (nếu có) được giữ nguyên
+        // calibrationReady KHÔNG được thay đổi để bảo toàn trạng thái dữ liệu cũ
+        printf("[CALIB THAT BAI] Mot so mat khong du delta. Du lieu cu (neu co) duoc giu nguyen.\n");
+        printf("[CALIB] Hay lia lai toan bo mat qua vach den va gui lenh ket thuc.\n\n");
+        return false;
     }
 }
 
@@ -206,7 +244,7 @@ bool sensor_get_polarity(void) {
 }
 
 bool sensor_is_black(uint8_t index) {
-    // Bỏ qua mắt 0 và 15
+    // Bỏ qua mắt ngoài phạm vi
     if (index < SENSOR_START_IDX || index > SENSOR_END_IDX) return false;
 
     // Ngưỡng 500/1000 tương đương với giá trị trung bình chính xác (min + max) / 2

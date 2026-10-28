@@ -1301,14 +1301,29 @@
         }
       }
 
-      // 2. Nhận thông báo hiệu chuẩn thành công
-      if (raw.includes('CALIB THANH CONG') || raw.includes('Hieu chuan xong')) {
+      // 2. Nhận thông báo hiệu chuẩn cảm biến (Sweep Calibration)
+      if (raw.includes('BAT DAU LIA')) {
         const badge = document.getElementById('calibStatusBadge');
-        badge.textContent = 'Đã Hiệu Chuẩn';
-        badge.style.background = 'rgba(16, 185, 129, 0.2)';
-        badge.style.color = '#34d399';
+        if (badge) {
+          badge.textContent = '⏳ Đang Lia Calib...';
+          badge.style.background = 'rgba(59, 130, 246, 0.2)';
+          badge.style.color = '#60a5fa';
+        }
+      } else if (raw.includes('CALIB THANH CONG') || raw.includes('Hieu chuan xong')) {
+        const badge = document.getElementById('calibStatusBadge');
+        if (badge) {
+          badge.textContent = '✅ Đã Hiệu Chuẩn';
+          badge.style.background = 'rgba(16, 185, 129, 0.2)';
+          badge.style.color = '#34d399';
+        }
+      } else if (raw.includes('CALIB CHUA DAT')) {
+        const badge = document.getElementById('calibStatusBadge');
+        if (badge) {
+          badge.textContent = '⚠️ Chưa Đạt (Lia Lại)';
+          badge.style.background = 'rgba(239, 68, 68, 0.2)';
+          badge.style.color = '#f87171';
+        }
       }
-
       // 3. Nhận trạng thái Case PID từ USB Serial: "[CASE 1: Bam Line PID] Err: 2.5 | Corr: ..."
       if (raw.includes('[CASE')) {
         const caseMatch = raw.match(/\[(CASE[^\]]+)\]/);

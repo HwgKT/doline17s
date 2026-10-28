@@ -40,11 +40,15 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 | **S0 (A)** | `GPIO 18` | Chọn kênh Bit 0 |
 | **S1 (B)** | `GPIO 19` | Chọn kênh Bit 1 |
 | **S2 (C)** | `GPIO 21` | Chọn kênh Bit 2 |
-| **S3 (D)** | `GPIO 22` | Chọn kênh Bit 3 |
+| **S3 (D)** | `GPIO 23` | Chọn kênh Bit 3 |
 | **SIG (Signal Out)** | `GPIO 36 (ADC1_CH0)` | Tín hiệu Analog đọc về ESP32 |
-| **Nút Calib** | `GPIO 34` | Nút nhấn vật lý kích hoạt lia Calib |
 
-### 3. Động cơ & Driver (LEDC PWM 8-bit, 1000Hz)
+### 3. Nút nhấn.
+
+| **Nút Calib** | `GPIO 34` | Nút nhấn vật lý kích hoạt lia Calib |
+| **Nút Start** | `GPIO35`  | Nút nhấn vật lý kích hoạt start     |
+
+### 4. Động cơ & Driver (LEDC PWM 8-bit, 1000Hz)
 | Chân Driver | Chân ESP32 | Kênh PWM LEDC | Chiều quay |
 | :--- | :--- | :--- | :--- |
 | **IN_L1** | `GPIO 25` | Kênh 0 (`CH_L1`) | Động cơ Trái - Tiến |
@@ -76,32 +80,7 @@ d:/sensor/
 
 ---
 
-## 🏁 Thuật toán Dò Line & Các Chế độ Đua
 
-Hệ thống được thiết kế theo **Chiến lược 2 nấc (Staged Tuning)** giúp đảm bảo an toàn tuyệt đối khi thử nghiệm và bung hết công suất khi thi đấu:
-
-### 1. Nấc 1: Chế độ An Toàn Tốc Độ Cao (Mặc định khi bật nguồn)
-* **Thời gian hoàn thành:** ~**12 – 13 giây** (nhanh gấp ~1.7 lần bản cơ bản).
-* **Tỷ lệ bám sàn thành công:** **95%** (ôm cua chắc chắn, không trượt bánh).
-* **Thông số cài đặt:**
-  * `Base Speed`: **`175`** PWM
-  * `Straight Boost`: Tự động tăng lên **`210 – 215`** PWM khi bám thẳng
-  * `Corner Speed`: Tự ghì ga xuống **`95 – 105`** PWM khi ôm cua
-  * $K_p = 1.55$ (phi tuyến tăng dần khi lệch lớn)
-  * $K_d = 3.4$ (khâu vi phân có lọc thông thấp dập tắt quán tính)
-  * `Min Speed`: **`-110`** (bánh trong cua đảo chiều hãm điện vi sai)
-
-### 2. Nấc 2: Chế độ ULTRA RACE (Mục tiêu dưới 10 giây)
-* **Thời gian hoàn thành:** ~**10 giây** (nhanh gấp ~2.2 lần bản cơ bản).
-* **Thông số cài đặt:**
-  * `Base Speed`: **`205`** PWM
-  * `Straight Boost`: Đạp hết ga **`255`** PWM (100% công suất động cơ)
-  * `Corner Speed`: Giữ đà lướt **`115 – 135`** PWM
-  * $K_p = 1.75$ (tối đa x1.55 lên $2.7$ khi văng cua)
-  * $K_d = 4.2$ (lực cản vi phân dập tắt dao động lớn)
-  * `Min Speed`: **`-130`** (phanh đảo chiều cực mạnh)
-
----
 
 ## 📡 Tập lệnh điều khiển qua BLE / Serial Terminal
 

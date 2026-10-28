@@ -71,8 +71,16 @@ void sensor_update_calibration_loop(void);
 
 /**
  * @brief Chốt kết thúc quá trình lia và tính ngưỡng trung bình = (Min + Max) / 2
+ *
+ * Hàm này an toàn với trường hợp gọi khi chưa có lượt hiệu chuẩn đang chạy:
+ * - Từ chối thực thi và trả về false nếu isCalibrating == false.
+ * - Sử dụng int32_t khi tính delta để tránh underflow uint16_t.
+ * - Chỉ cập nhật thresholds[] và đặt calibrationReady = true khi TẤT CẢ mắt hợp lệ.
+ * - Khi thất bại, dữ liệu hiệu chuẩn cũ (nếu có) được giữ nguyên.
+ *
+ * @return true nếu hiệu chuẩn thành công, false nếu thất bại hoặc chưa bắt đầu.
  */
-void sensor_finish_sweep_calibration(void);
+bool sensor_finish_sweep_calibration(void);
 
 /**
  * @brief Kiểm tra xem hệ thống có đang trong thời gian lia calib hay không
@@ -94,7 +102,7 @@ void sensor_handle_calibration_step(void);
 
 /**
  * @brief Lấy giá trị cảm biến đã chuẩn hóa theo thang đo 0 - 1000 (0: Trắng, 1000: Đen)
- * @param index Chỉ số mắt cảm biến (1 - 14)
+ * @param index Chỉ số mắt cảm biến (0 - 15)
  * @return Giá trị từ 0 đến 1000
  */
 uint16_t sensor_get_calibrated(uint8_t index);
