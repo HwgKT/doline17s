@@ -1,288 +1,235 @@
 #include "sensor.h"
 #include <Arduino.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <Preferences.h>
+#include <stddef.h>
+#include <string.h>
 
-// Định nghĩa các biến toàn cục
-uint16_t sensorRaw[N_SENSORS];
-uint16_t minValues[N_SENSORS];
-uint16_t maxValues[N_SENSORS];
-uint16_t thresholds[N_SENSORS];
-bool blackIsHigher[N_SENSORS];
-bool isCalibrating = false;
+uint16_t sensorRaw[N_SENSORS] = {};
+uint16_t minValues[N_SENSORS] = {};
+uint16_t maxValues[N_SENSORS] = {};
+uint16_t thresholds[N_SENSORS] = {};
 bool calibrationReady = false;
+bool isCalibrating = false;
+static bool lastCalibrationOK = false;
 
-// Biến quản lý thời gian quét hiệu chuẩn
-static unsigned long calibStartTime = 0;
-static uint32_t calibDurationMs = 4000; // Mặc định lia trong 4 giây
-static uint16_t priorMin[N_SENSORS], priorMax[N_SENSORS], priorThreshold[N_SENSORS];
-static bool priorPolarity[N_SENSORS], priorReady = false, lastCalibOK = false;
+namespace {
+constexpr uint32_t MAGIC = 0x4C313643UL;
+constexpr uint16_t VERSION = 1;
+struct Profile {
+  uint32_t magic;
+  uint16_t version, count;
+  uint16_t white[N_SENSORS], black[N_SENSORS];
+  uint32_t crc;
+};
+static_assert(sizeof(Profile) == 76, "NVS profile size changed");
+CalState state = CAL_EMPTY;
+CalEvent pending = CAL_NONE;
+uint32_t sums[N_SENSORS] = {};
+uint64_t squares[N_SENSORS] = {};
+uint16_t whiteStage[N_SENSORS] = {}, whiteNoise[N_SENSORS] = {};
+uint32_t frames = 0;
+int lastButtonRead = LOW, buttonState = LOW;
+unsigned long lastButtonChange = 0;
 
-// Biến nội bộ phục vụ chống rung nút nhấn
-static int lastCalibReading = LOW;
-static int calibButtonState = LOW;
-static unsigned long lastCalibChangeTime = 0;
+uint32_t crc32(const uint8_t *p, size_t size) {
+  uint32_t crc = 0xFFFFFFFFUL;
+  for (size_t i = 0; i < size; ++i) {
+    crc ^= p[i];
+    for (uint8_t j = 0; j < 8; ++j)
+      crc = (crc >> 1) ^ ((crc & 1U) ? 0xEDB88320UL : 0U);
+  }
+  return ~crc;
+}
+uint32_t signature(const Profile &p) {
+  return crc32(reinterpret_cast<const uint8_t *>(&p), offsetof(Profile, crc));
+}
+bool valid(const Profile &p) {
+  if (p.magic != MAGIC || p.version != VERSION || p.count != N_SENSORS ||
+      signature(p) != p.crc) return false;
+  for (int i = 0; i < N_SENSORS; ++i)
+    if (p.white[i] > 4095 || p.black[i] > 4095 ||
+        p.black[i] <= p.white[i] ||
+        p.black[i] - p.white[i] < MIN_CALIBRATION_DELTA) return false;
+  return true;
+}
+void apply(const Profile &p) {
+  for (int i = 0; i < N_SENSORS; ++i) {
+    minValues[i] = p.white[i];
+    maxValues[i] = p.black[i];
+    thresholds[i] = (uint32_t(p.white[i]) + p.black[i]) / 2U;
+  }
+  calibrationReady = true;
+}
+bool load() {
+  Preferences pref;
+  if (!pref.begin("line16cal", true)) return false;
+  Profile p = {};
+  const bool ok = pref.getBytesLength("profile") == sizeof(p) &&
+    pref.getBytes("profile", &p, sizeof(p)) == sizeof(p);
+  pref.end();
+  if (!ok || !valid(p)) return false;
+  apply(p);
+  return true;
+}
+bool persist(const Profile &p) {
+  Preferences pref;
+  if (!pref.begin("line16cal", false)) return false;
+  const bool ok = pref.putBytes("profile", &p, sizeof(p)) == sizeof(p);
+  pref.end();
+  return ok;
+}
+void resetAccum() {
+  memset(sums, 0, sizeof(sums));
+  memset(squares, 0, sizeof(squares));
+  frames = 0;
+}
+void stats(uint16_t *mean, uint16_t *stddev) {
+  const uint64_t n = frames;
+  for (int i = 0; i < N_SENSORS; ++i) {
+    mean[i] = (sums[i] + n / 2) / n;
+    const uint64_t numerator = squares[i] * n - uint64_t(sums[i]) * sums[i];
+    const uint64_t variance = numerator / (n * n);
+    uint16_t sd = 0;
+    while (uint32_t(sd) * sd < variance && sd < 4095) ++sd;
+    stddev[i] = sd;
+  }
+}
+void finish() {
+  uint16_t mean[N_SENSORS], sd[N_SENSORS];
+  stats(mean, sd);
+  isCalibrating = false;
+  if (state == CAL_WHITE_RUNNING) {
+    memcpy(whiteStage, mean, sizeof(whiteStage));
+    memcpy(whiteNoise, sd, sizeof(whiteNoise));
+    state = CAL_WHITE_READY;
+    pending = CAL_WHITE_DONE;
+    Serial.println("[CAL] WHITE captured: 16 channels.");
+    return;
+  }
+  Profile p = {};
+  p.magic = MAGIC; p.version = VERSION; p.count = N_SENSORS;
+  bool ok = true;
+  Serial.println("[CAL] eye white black delta sigmaWhite sigmaBlack valid");
+  for (int i = 0; i < N_SENSORS; ++i) {
+    p.white[i] = whiteStage[i]; p.black[i] = mean[i];
+    const int delta = int(mean[i]) - int(whiteStage[i]);
+    const bool eyeOk = delta >= MIN_CALIBRATION_DELTA &&
+        whiteNoise[i] <= CAL_MAX_STDDEV && sd[i] <= CAL_MAX_STDDEV;
+    if (!eyeOk) ok = false;
+    Serial.printf("[CAL] %02d %u %u %d %u %u %d\n",
+      i, p.white[i], p.black[i], delta, whiteNoise[i], sd[i], eyeOk ? 1 : 0);
+  }
+  p.crc = signature(p);
+  if (ok && persist(p)) {
+    apply(p);
+    lastCalibrationOK = true;
+    state = CAL_READY; pending = CAL_SAVED;
+    Serial.println("[CAL] CAL_OK_SAVED: NVS committed");
+  } else {
+    lastCalibrationOK = false;
+    state = CAL_FAILED; pending = CAL_ERROR;
+    Serial.println("[CAL] CAL_FAILED: previous RAM calibration retained");
+  }
+}
+} // namespace
 
 void sensor_init(void) {
-    pinMode(PIN_MUX_S0, OUTPUT);
-    pinMode(PIN_MUX_S1, OUTPUT);
-    pinMode(PIN_MUX_S2, OUTPUT);
-    pinMode(PIN_MUX_S3, OUTPUT);
-    pinMode(PIN_CALIB_BUTTON, INPUT);
-
-    // GPIO36 trên ESP32 là chân input-only
-    analogReadResolution(12); // Độ phân giải 12-bit (0 - 4095)
-
-    // Khởi tạo giá trị ban đầu cho các mắt
-    for (int i = 0; i < N_SENSORS; i++) {
-        minValues[i] = 4095;
-        maxValues[i] = 0;
-        thresholds[i] = 2048;
-        blackIsHigher[i] = true;
-    }
+  pinMode(PIN_MUX_S0, OUTPUT); pinMode(PIN_MUX_S1, OUTPUT);
+  pinMode(PIN_MUX_S2, OUTPUT); pinMode(PIN_MUX_S3, OUTPUT);
+  pinMode(PIN_CALIB_BUTTON, INPUT);
+  analogReadResolution(12);
+  calibrationReady = false;
+  state = load() ? CAL_READY : CAL_EMPTY;
+  Serial.printf("[CAL] boot: %s\n", calibrationReady ? "NVS_RESTORED" : "NO_VALID_PROFILE");
 }
-
-void sensor_mux_select(uint8_t channel) {
-    digitalWrite(PIN_MUX_S0, channel & 0x01);
-    digitalWrite(PIN_MUX_S1, (channel >> 1) & 0x01);
-    digitalWrite(PIN_MUX_S2, (channel >> 2) & 0x01);
-    digitalWrite(PIN_MUX_S3, (channel >> 3) & 0x01);
+void sensor_mux_select(uint8_t ch) {
+  digitalWrite(PIN_MUX_S0, ch & 1U);
+  digitalWrite(PIN_MUX_S1, (ch >> 1) & 1U);
+  digitalWrite(PIN_MUX_S2, (ch >> 2) & 1U);
+  digitalWrite(PIN_MUX_S3, (ch >> 3) & 1U);
 }
-
-uint16_t sensor_read_mux(uint8_t channel) {
-    sensor_mux_select(channel);
-    delayMicroseconds(6); // Đợi MUX chốt kênh ổn định (tối ưu từ 20us -> 6us)
-
-    analogRead(PIN_LINE_SIG); // Bỏ mẫu đầu tiên để xả điện dung ký sinh
-
-    uint32_t sum = 0;
-    for (int i = 0; i < ADC_SAMPLES; i++) {
-        sum += analogRead(PIN_LINE_SIG);
-        delayMicroseconds(3); // Tối ưu từ 10us -> 3us
-    }
-
-    return (uint16_t)(sum / ADC_SAMPLES);
+uint16_t sensor_read_mux(uint8_t ch) {
+  sensor_mux_select(ch);
+  delayMicroseconds(6);
+  (void)analogRead(PIN_LINE_SIG);
+  uint32_t sum = 0;
+  for (int n = 0; n < ADC_SAMPLES; ++n) {
+    sum += analogRead(PIN_LINE_SIG);
+    delayMicroseconds(3);
+  }
+  return sum / ADC_SAMPLES;
 }
-
 void sensor_read_all(void) {
-    // Chỉ đọc các mắt cần dùng (từ mắt 0 đến 15)
-    for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-        sensorRaw[i] = sensor_read_mux(i);
-    }
+  for (int i = 0; i < N_SENSORS; ++i) sensorRaw[i] = sensor_read_mux(i);
 }
-
-// Bắt đầu chế độ lia cảm biến qua lại
-void sensor_start_sweep_calibration(uint32_t duration_ms) {
-    if (isCalibrating) return;
-    priorReady = calibrationReady;
-    for (int i=0;i<N_SENSORS;++i) {
-       priorMin[i]=minValues[i]; priorMax[i]=maxValues[i];
-       priorThreshold[i]=thresholds[i]; priorPolarity[i]=blackIsHigher[i];
-    }
-    isCalibrating = true;
-    calibrationReady = false;
-    lastCalibOK = false;
-    calibDurationMs = duration_ms;
-    calibStartTime = millis();
-
-    // Reset lại min/max của các mắt 0..15
-    for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-        minValues[i] = 4095;
-        maxValues[i] = 0;
-    }
-
-    printf("\n======================================================\n");
-    printf("[CALIB] BAT DAU LIA CAM BIEN QUA LAI TREN VACH LINE!\n");
-    printf(">> Hay lia thanh cam bien qua lai trong %u giay...\n", (unsigned int)(duration_ms / 1000));
-    printf("======================================================\n");
+bool sensor_capture_white(void) {
+  if (isCalibrating) return false;
+  lastCalibrationOK = false;
+  resetAccum(); isCalibrating = true; state = CAL_WHITE_RUNNING; pending = CAL_WHITE_STARTED;
+  Serial.println("[CAL] WHITE: hold all 16 sensors stationary on uniform WHITE");
+  return true;
 }
-
-// Cập nhật Min/Max liên tục khi đang lia (gọi trong loop)
+bool sensor_capture_black(void) {
+  if (isCalibrating || state != CAL_WHITE_READY) return false;
+  resetAccum(); isCalibrating = true; state = CAL_BLACK_RUNNING; pending = CAL_BLACK_STARTED;
+  Serial.println("[CAL] BLACK: hold all 16 sensors stationary on uniform BLACK");
+  return true;
+}
 void sensor_update_calibration_loop(void) {
-    if (!isCalibrating) return;
-
-    // Đọc toàn bộ mắt
-    sensor_read_all();
-
-    // Cập nhật giá trị cực tiểu (Min) và cực đại (Max) cho từng mắt
-    for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-        uint16_t val = sensorRaw[i];
-        if (val < minValues[i]) minValues[i] = val;
-        if (val > maxValues[i]) maxValues[i] = val;
-    }
-
-    // Kiểm tra nếu hết thời gian lia
-    if (millis() - calibStartTime >= calibDurationMs) {
-        sensor_finish_sweep_calibration();
-    }
+  if (!isCalibrating) return;
+  sensor_read_all();
+  for (int i = 0; i < N_SENSORS; ++i) {
+    uint32_t v = sensorRaw[i];
+    sums[i] += v;
+    squares[i] += uint64_t(v) * v;
+  }
+  if (++frames >= CAL_FRAMES) finish();
 }
-
-// Chốt kết thúc quá trình lia và tính ngưỡng trung bình (Min + Max) / 2
-// Trả về true nếu hiệu chuẩn thành công, false nếu thất bại hoặc chưa bắt đầu.
-bool sensor_finish_sweep_calibration(void) {
-    // Bảo vệ: Chỉ cho phép kết thúc khi đang thực sự hiệu chuẩn
-    if (!isCalibrating) {
-        printf("[CALIB] CANH BAO: Khong co luot hieu chuan nao dang hoat dong. Lenh bi tu choi.\n");
-        return false;
-    }
-
-    isCalibrating = false;
-
-    // Dùng bộ đệm tạm để không ghi đè dữ liệu cũ hợp lệ khi lượt mới thất bại
-    uint16_t tempThresholds[N_SENSORS];
-    bool tempBlackIsHigher[N_SENSORS];
-    bool valid = true;
-
-    printf("\n=== KET QUA HIEU CHUAN (LIA CAM BIEN QUA LAI) ===\n");
-    printf("Mat  |  Min ADC  |  Max ADC  | Delta ADC | Nguong TB\n");
-    printf("--------------------------------------------------\n");
-
-    for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-        // Kiểm tra thứ tự logic: max phải lớn hơn min trước khi trừ (tránh underflow uint16_t)
-        if (maxValues[i] <= minValues[i]) {
-            printf(" %2d  |   %4u    |   %4u    |    N/A    | CHUA QUA VACH! (max<=min)\n",
-                   i, minValues[i], maxValues[i]);
-            valid = false;
-            continue;
-        }
-
-        // Tính delta bằng int32_t để đảm bảo an toàn kiểu dữ liệu, không underflow
-        int32_t delta = (int32_t)maxValues[i] - (int32_t)minValues[i];
-
-        // Kiểm tra phạm vi ADC hợp lệ (0..4095)
-        if (minValues[i] > 4095 || maxValues[i] > 4095) {
-            printf(" %2d  |   %4u    |   %4u    |   %4ld    | GIA TRI NGOAI PHAM VI ADC!\n",
-                   i, minValues[i], maxValues[i], (long)delta);
-            valid = false;
-            continue;
-        }
-
-        // Kiểm tra độ chênh lệch tối thiểu
-        if (delta < (int32_t)MIN_CALIBRATION_DELTA) {
-            printf(" %2d  |   %4u    |   %4u    |   %4ld    | DELTA QUA NHO! (< %d)\n",
-                   i, minValues[i], maxValues[i], (long)delta, MIN_CALIBRATION_DELTA);
-            valid = false;
-            continue;
-        }
-
-        // Lưu vào bộ đệm tạm, chưa ghi vào thresholds thật
-        tempThresholds[i] = (uint16_t)(((uint32_t)minValues[i] + (uint32_t)maxValues[i]) / 2u);
-        tempBlackIsHigher[i] = true; // Giá trị cao hơn ngưỡng là vạch đen
-
-        printf(" %2d  |   %4u    |   %4u    |   %4ld    |   %4u (OK)\n",
-               i, minValues[i], maxValues[i], (long)delta, tempThresholds[i]);
-    }
-    printf("--------------------------------------------------\n");
-    
-    if (valid) {
-        // Chỉ commit dữ liệu mới khi TẤT CẢ các mắt đều hợp lệ
-        for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-            thresholds[i] = tempThresholds[i];
-            blackIsHigher[i] = tempBlackIsHigher[i];
-        }
-        calibrationReady = true;
-        lastCalibOK = true;
-        printf("[CALIB THANH CONG] Da tinh xong nguong trung binh tung mat! (0 = Trang, 1 = Den)\n\n");
-        return true;
-    } else {
-        for (int i=0;i<N_SENSORS;++i) {
-          minValues[i]=priorMin[i]; maxValues[i]=priorMax[i];
-          thresholds[i]=priorThreshold[i]; blackIsHigher[i]=priorPolarity[i];
-        }
-        calibrationReady = priorReady;
-        lastCalibOK = false;
-        printf("[CALIB THAT BAI] Mot so mat khong du delta. Du lieu cu (neu co) duoc giu nguyen.\n");
-        printf("[CALIB] Hay lia lai toan bo mat qua vach den va gui lenh ket thuc.\n\n");
-        return false;
-    }
+bool sensor_is_calibrating(void) { return isCalibrating; }
+bool sensor_get_last_calibration_result(void) { return lastCalibrationOK; }
+CalState sensor_calibration_state(void) { return state; }
+CalEvent sensor_take_calibration_event(void) {
+  CalEvent e = pending; pending = CAL_NONE; return e;
 }
-
-bool sensor_get_last_calibration_result(void) { return lastCalibOK; }
-bool sensor_is_calibrating(void) {
-    return isCalibrating;
+void sensor_print_calibration(void) {
+  Serial.printf("[CAL] READY=%d STATE=%d\n", calibrationReady ? 1 : 0, int(state));
+  if (!calibrationReady) return;
+  for (int i = 0; i < N_SENSORS; ++i)
+    Serial.printf("[CAL] eye=%02d W=%u B=%u TH=%u\n",
+      i, minValues[i], maxValues[i], thresholds[i]);
 }
-
 bool sensor_is_button_pressed(void) {
-    int reading = digitalRead(PIN_CALIB_BUTTON);
-    if (reading != lastCalibReading) {
-        lastCalibChangeTime = millis();
-    }
-
-    bool pressed = false;
-    if (millis() - lastCalibChangeTime > BUTTON_DEBOUNCE_MS &&
-        reading != calibButtonState) {
-        calibButtonState = reading;
-        pressed = (calibButtonState == HIGH);
-    }
-    lastCalibReading = reading;
-    return pressed;
+  const int read = digitalRead(PIN_CALIB_BUTTON);
+  if (read != lastButtonRead) lastButtonChange = millis();
+  bool pressed = false;
+  if (millis() - lastButtonChange > BUTTON_DEBOUNCE_MS && read != buttonState) {
+    buttonState = read; pressed = buttonState == HIGH;
+  }
+  lastButtonRead = read;
+  return pressed;
 }
-
 void sensor_handle_calibration_step(void) {
-    if (!isCalibrating) {
-        // Bắt đầu lia trong 4 giây
-        sensor_start_sweep_calibration(4000);
-    } else {
-        // Nếu đang lia mà bấm nút lần nữa -> Chốt kết thúc sớm
-        sensor_finish_sweep_calibration();
-    }
+  if (isCalibrating) return;
+  if (state == CAL_WHITE_READY) sensor_capture_black();
+  else sensor_capture_white();
 }
-
 uint16_t sensor_get_calibrated(uint8_t index) {
-    if (index < SENSOR_START_IDX || index > SENSOR_END_IDX) return 0;
-    uint16_t minVal = minValues[index];
-    uint16_t maxVal = maxValues[index];
-    if (maxVal <= minVal + MIN_CALIBRATION_DELTA) return 0;
-
-    uint16_t raw = sensorRaw[index];
-    if (raw <= minVal) raw = minVal;
-    if (raw >= maxVal) raw = maxVal;
-
-    // Hỗ trợ cực tính: Nếu blackIsHigher là true thì ADC cao là đen (0 -> 1000)
-    // Nếu false thì ADC thấp là đen (đảo ngược lại để 1000 luôn luôn đại diện cho vạch đen)
-    if (blackIsHigher[index]) {
-        return (uint16_t)(((uint32_t)(raw - minVal) * 1000UL) / (maxVal - minVal));
-    } else {
-        return (uint16_t)(((uint32_t)(maxVal - raw) * 1000UL) / (maxVal - minVal));
-    }
+  if (!calibrationReady || index >= N_SENSORS) return 0;
+  uint16_t white = minValues[index], black = maxValues[index];
+  if (black <= white || black - white < MIN_CALIBRATION_DELTA) return 0;
+  uint16_t x = sensorRaw[index];
+  if (x <= white) return 0;
+  if (x >= black) return 1000;
+  return (uint32_t(x - white) * 1000UL) / (black - white);
 }
-
-void sensor_set_polarity(bool black_is_higher) {
-    for (int i = 0; i < N_SENSORS; i++) {
-        blackIsHigher[i] = black_is_higher;
-    }
-    printf("[SENSOR] Da doi cuc tinh: %s\n", black_is_higher ? "DEN_ADC_CAO" : "DEN_ADC_THAP");
-}
-
-bool sensor_get_polarity(void) {
-    return blackIsHigher[SENSOR_START_IDX];
-}
-
-bool sensor_is_black(uint8_t index) {
-    // Bỏ qua mắt ngoài phạm vi
-    if (index < SENSOR_START_IDX || index > SENSOR_END_IDX) return false;
-
-    // Ngưỡng 500/1000 tương đương với giá trị trung bình chính xác (min + max) / 2
-    return (sensor_get_calibrated(index) >= 500);
-}
-
+bool sensor_is_black(uint8_t i) { return sensor_get_calibrated(i) >= 500; }
 uint16_t sensor_get_line_bits(void) {
-    uint16_t bits = 0;
-    for (int i = SENSOR_START_IDX; i <= SENSOR_END_IDX; i++) {
-        if (sensor_is_black(i)) {
-            bits |= (1 << i);
-        }
-    }
-    return bits;
+  uint16_t bits = 0;
+  for (int i = 0; i < N_SENSORS; ++i)
+    if (sensor_is_black(i)) bits |= uint16_t(1U << i);
+  return bits;
 }
-
 void sensor_print_states(void) {
-    for (int i = 0; i < N_SENSORS; i++) {
-        if (i < SENSOR_START_IDX || i > SENSOR_END_IDX) {
-            printf("- "); // Mắt không dùng
-        } else {
-            printf("%c ", sensor_is_black(i) ? '1' : '0');
-        }
-    }
-    printf("\n");
+  for (int i = 0; i < N_SENSORS; ++i)
+    Serial.printf("%d%s", sensor_is_black(i) ? 1 : 0, i == N_SENSORS-1 ? "\n" : " ");
 }

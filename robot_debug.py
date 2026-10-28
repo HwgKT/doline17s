@@ -8,9 +8,9 @@ First pair the ESP32 in Windows and select its SPP COM port.
 mainv4 firmware now starts Classic SPP as LineRobot and sends 72-byte frames.
 Use its outgoing Windows Bluetooth COM port, separate from the USB serial COM port.
 
-The 69-byte SPP payload includes raw ADC, not firmware-calibrated ADC. Thus,
-values 0..1000 and black/white bits below come from independent local PC
-Min/Max calibration. The GUI does not claim to read firmware calibration data.
+The 69-byte SPP payload includes raw ADC. The GUI requests exact 16-channel
+white/black references from the ESP32 NVS profile through CAL_DUMP, then
+normalizes telemetry to 0..1000 using the same reference levels.
 """
 import collections
 import csv
@@ -146,16 +146,12 @@ class App(tk.Tk):
         self.rate_time = time.monotonic()
         self.values = {}
         self.last_adc = [0] * 16
-        # PC-only calibration state. Firmware calibration values are unavailable in SPP.
+        # Display only firmware calibration. Keep last valid NVS profile on failures.
         self.calibration_ok = False
-        self.calibrating = False
         self.black_high = True
         self.cal_min = [0] * 16
         self.cal_max = [4095] * 16
-        self.scan_min = [4095] * 16
-        self.scan_max = [0] * 16
-        self.scan_samples = 0
-        self.cal_timer = None
+        self.cal_data = {}
         self._build()
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -202,7 +198,7 @@ class App(tk.Tk):
         self.threshold_label.pack(side="left", padx=5)
         self.bars = tk.Canvas(left, bg=PANEL, width=715, height=250, highlightthickness=0)
         self.bars.pack(fill="x", pady=5)
-        self.logic_var = tk.StringVar(value="Logic: ---------------- (chưa calib PC)")
+        self.logic_var = tk.StringVar(value="Logic: ---------------- (chưa tải NVS)")
         self.label(left, textvariable=self.logic_var, fg=CYAN,
                    font=("Consolas", 10, "bold")).pack(anchor="w", pady=(0, 8))
 
@@ -233,7 +229,7 @@ class App(tk.Tk):
                        command=lambda text=cmd: self.send_command(text)).pack(side="left", padx=4)
         ttk.Button(modes, text="Reset ENC", width=12,
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
-        self.label(left, "Chỉ số CAL/0-1 được tính từ Min/Max đo ở PC, không đọc từ ESP32.",
+        self.label(left, "CAL/0-1 sử dụng White/Black đọc từ profile NVS của ESP32.",
                    fg=MUTED).pack(anchor="w")
 
         self.label(panel, "Tốc độ PWM (0–255)", bg=PANEL,
@@ -278,18 +274,24 @@ class App(tk.Tk):
         profiles.grid_columnconfigure(0, weight=1)
         profiles.grid_columnconfigure(1, weight=1)
 
-        self.label(panel, "Calibration 16 mắt (PC + lệnh ESP32)", bg=PANEL,
+        self.label(panel, "Calibration firmware — 16 mắt / NVS", bg=PANEL,
                    font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(12, 4))
         cal_buttons = tk.Frame(panel, bg=PANEL)
         cal_buttons.pack(fill="x")
-        ttk.Button(cal_buttons, text="Lia Calib 4 s", command=self.start_calibration).pack(side="left", fill="x", expand=True, padx=(0, 3))
-        ttk.Button(cal_buttons, text="Chốt sớm", command=self.stop_calibration).pack(side="left", fill="x", expand=True)
-        self.cal_state = tk.StringVar(value="Chưa hiệu chuẩn trên PC")
+        ttk.Button(cal_buttons, text="1. Lấy TRẮNG", command=self.start_calibration).pack(
+            side="left", fill="x", expand=True, padx=(0, 3))
+        ttk.Button(cal_buttons, text="2. Lấy ĐEN", command=self.stop_calibration).pack(
+            side="left", fill="x", expand=True)
+        more = tk.Frame(panel, bg=PANEL)
+        more.pack(fill="x", pady=(4, 0))
+        ttk.Button(more, text="Trạng thái", command=lambda: self.send_command("CAL_STATUS")).pack(
+            side="left", fill="x", expand=True, padx=(0, 3))
+        ttk.Button(more, text="Đọc NVS 16 mắt", command=lambda: self.send_command("CAL_DUMP")).pack(
+            side="left", fill="x", expand=True)
+        self.cal_state = tk.StringVar(value="Chưa tải profile calibration từ ESP32")
         self.label(panel, textvariable=self.cal_state, bg=PANEL, fg=AMBER,
                    justify="left", anchor="w", wraplength=350).pack(fill="x", pady=5)
-        ttk.Button(panel, text="Đảo cực (INV)", command=self.invert).pack(fill="x")
-        self.polarity_state = tk.StringVar(value="ADC cao = đen (1000)")
-        self.label(panel, textvariable=self.polarity_state, bg=PANEL, fg=MUTED).pack(anchor="w", pady=4)
+        self.label(panel, "Cực tính cố định: ADC đen > ADC trắng", bg=PANEL, fg=MUTED).pack(anchor="w")
 
         terminal_heading = tk.Frame(panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
@@ -352,6 +354,10 @@ class App(tk.Tk):
         self.connect_btn.config(text="Ngắt")
         self.status_label.config(text=f"Đã mở {port}", fg=GREEN)
         self.log(f"Đã mở {port}; chờ frame SPP từ ESP32")
+        self.calibration_ok = False
+        self.cal_data = {}
+        self.send_command("CAL_STATUS")
+        self.send_command("CAL_DUMP")
 
     def disconnect(self):
         if self.reader:
@@ -429,52 +435,12 @@ class App(tk.Tk):
         self.apply_pid()
 
     def start_calibration(self):
-        if self.calibrating:
-            self.log("Đang hiệu chuẩn")
-            return
-        if not self.send_command("C"):
-            return
-        self.scan_min = [4095] * 16
-        self.scan_max = [0] * 16
-        self.scan_samples = 0
-        self.calibrating = True
-        self.cal_state.set("Đang lia qua nền/vạch, thu Min/Max trên PC (4 s)…")
-        self.cal_timer = self.after(4000, lambda: self.finish_calibration(auto=True))
-        self.log("Bắt đầu quét PC 4 s; firmware phải tự kết thúc sau 4 s")
+        if self.send_command("CAL_WHITE"):
+            self.cal_state.set("Đang lấy TRẮNG trên ESP32; giữ 16 mắt cố định.")
 
     def stop_calibration(self):
-        self.finish_calibration(auto=False)
-
-    def finish_calibration(self, auto=False):
-        if not self.calibrating:
-            self.log("Không có lượt hiệu chuẩn đang chạy")
-            return
-        self.calibrating = False
-        if self.cal_timer is not None:
-            self.after_cancel(self.cal_timer)
-            self.cal_timer = None
-        if not auto:
-            self.send_command("K")
-        failed = [i for i in range(16)
-                  if self.scan_max[i] - self.scan_min[i] < MIN_CALIB_DELTA]
-        if self.scan_samples == 0 or failed:
-            self.cal_state.set(f"Calib PC chưa đạt: mắt {failed}. Giữ Min/Max PC cũ nếu có.")
-            self.log(f"Calib PC thất bại: {self.scan_samples} mẫu, thiếu delta mắt {failed}")
-            return
-        self.cal_min = self.scan_min[:]
-        self.cal_max = self.scan_max[:]
-        self.calibration_ok = True
-        self.cal_state.set(f"Đã hiệu chuẩn PC: 16/16 mắt, {self.scan_samples} frame")
-        self.log("Calib PC thành công: 0–1000, đen khi >=500; không xác nhận calib ESP32")
-        self.draw_bars(self.last_adc)
-
-    def invert(self):
-        if self.send_command("INV"):
-            self.black_high = not self.black_high
-            self.polarity_state.set("ADC cao = đen (1000)" if self.black_high
-                                    else "ADC thấp = đen (1000)")
-            self.log("Đã đảo cực tính hiển thị PC; chưa được firmware xác nhận")
-            self.draw_bars(self.last_adc)
+        if self.send_command("CAL_BLACK"):
+            self.cal_state.set("Đã gửi Lấy ĐEN; chờ ESP32 xác nhận.")
 
     def toggle_csv(self):
         if self.csv_file:
@@ -500,11 +466,6 @@ class App(tk.Tk):
         if self.csv_writer:
             self.csv_writer.writerow(s)
         self.last_adc = list(s[1:17])
-        if self.calibrating:
-            self.scan_samples += 1
-            for i, adc in enumerate(self.last_adc):
-                self.scan_min[i] = min(self.scan_min[i], adc)
-                self.scan_max[i] = max(self.scan_max[i], adc)
         t, left, right = s[0], s[17], s[18]
         if self.prev and t > self.prev[0]:
             dt = (t - self.prev[0]) / 1000.0
@@ -523,10 +484,47 @@ class App(tk.Tk):
                 self.pid_vars[key].set(value)
             self.pwm_var.set(int(pid.group(4)))
             self.preview_pwm()
-        if "CALIB THANH CONG" in message:
-            self.log("ESP32 báo calib thành công; dữ liệu CAL vẫn dùng Min/Max PC")
-        elif "CALIB" in message and ("CHUA DAT" in message or "THAT BAI" in message):
-            self.log("ESP32 báo hiệu chuẩn chưa đạt")
+        if message == "CAL_DUMP_BEGIN":
+            self.cal_data = {}
+        elif message.startswith("CAL_DATA "):
+            parts = message.split()
+            if len(parts) == 5:
+                try:
+                    eye, white, black, threshold = map(int, parts[1:])
+                except ValueError:
+                    return
+                if (0 <= eye < 16 and 0 <= white <= 4095 and
+                        0 <= black <= 4095 and black - white >= MIN_CALIB_DELTA and
+                        threshold == (white + black) // 2):
+                    self.cal_data[eye] = (white, black)
+        elif message == "CAL_DUMP_DONE":
+            if len(self.cal_data) == 16:
+                self.cal_min = [self.cal_data[i][0] for i in range(16)]
+                self.cal_max = [self.cal_data[i][1] for i in range(16)]
+                self.calibration_ok = True
+                self.cal_state.set("Đã tải NVS 16/16 mắt; dữ liệu CAL 0–1000 theo ESP32.")
+                self.draw_bars(self.last_adc)
+            else:
+                self.cal_state.set(f"Chưa nhận đủ NVS: {len(self.cal_data)}/16 mắt.")
+        elif message == "CAL_WHITE_DONE":
+            self.cal_state.set("Đã lấy TRẮNG. Đặt nền ĐEN rồi bấm 2. Lấy ĐEN.")
+        elif message == "CAL_WHITE_STARTED":
+            self.cal_state.set("Đang thu 128 khung TRẮNG.")
+        elif message == "CAL_BLACK_STARTED":
+            self.cal_state.set("Đang thu 128 khung ĐEN.")
+        elif message == "CAL_OK_SAVED":
+            self.cal_state.set("ESP32 đã lưu NVS; đang đọc lại profile 16 mắt.")
+            self.cal_data = {}
+            self.send_command("CAL_DUMP")
+        elif message == "CAL_FAILED":
+            self.cal_state.set("Calib mới thất bại; giữ profile cũ nếu có.")
+        elif message.startswith("CAL_STATUS"):
+            self.cal_state.set(message)
+        elif message == "CAL_NEED_WHITE":
+            self.cal_state.set("Chưa lấy TRẮNG; bấm 1. Lấy TRẮNG trước.")
+        elif message == "CAL_NO_PROFILE":
+            self.cal_state.set("ESP32 chưa có profile NVS hợp lệ.")
+            self.calibration_ok = False
 
     def tick(self):
         last = None
@@ -590,7 +588,7 @@ class App(tk.Tk):
             c.create_text((x0 + x1) / 2, 238, text=str(i), fill=MUTED)
         threshold_y = chart_top + chart_height * (1 - threshold / ADC_MAX)
         c.create_line(0, threshold_y, width, threshold_y, fill=AMBER, dash=(4, 3))
-        self.logic_var.set("Logic: " + "".join(bits) + ("  (CAL PC)" if self.calibration_ok else "  (chưa calib PC)"))
+        self.logic_var.set("Logic: " + "".join(bits) + ("  (NVS firmware)" if self.calibration_ok else "  (chưa tải NVS)"))
 
     def draw_scope(self):
         c = self.scope
@@ -611,8 +609,6 @@ class App(tk.Tk):
             c.create_line(*pts, fill=color)
 
     def on_close(self):
-        if self.cal_timer is not None:
-            self.after_cancel(self.cal_timer)
         self.disconnect()
         if self.csv_file:
             self.csv_file.close()

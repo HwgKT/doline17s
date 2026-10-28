@@ -19,7 +19,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 - ⚡ **Chu kỳ lấy mẫu siêu tốc (~400Hz - 500Hz):** Phản xạ chỉ trong 2ms - 2.5ms, loại bỏ hoàn toàn hiện tượng trễ pha quán tính khi chạy tốc độ cao.
 - 🎯 **Thanh cảm biến 16 mắt chuẩn hóa Analog (0 - 1000):** Tính toán trọng tâm liên tục (*Smooth Centroid*) với độ mịn cao từ `-65.0` đến `+65.0`.
-- 🔄 **Cơ chế Hiệu chuẩn Quét (Sweep Calibration):** Chỉ cần lia xe qua vạch line trong 4 giây, hệ thống tự động lưu ngưỡng Min/Max và tính toán giá trị trung bình cho từng mắt riêng biệt.
+- 🔄 **Hiệu chuẩn 2 bề mặt:** Lấy mẫu đồng thời 16 mắt lần lượt trên nền trắng và đen (128 khung mỗi nền), kiểm tra nhiễu/tương phản rồi lưu NVS với CRC32. Không dùng lia Min/Max nữa.
 - 🚀 **Bứt tốc đường thẳng & Tự hạ ga ôm cua (Dynamic Speed Curve):** Tự động bốc ga kịch trần (lên tới 215–255 PWM) khi đi thẳng và tự ghì ga xuống 95–115 PWM khi vào cua để bánh xe bám chặt mặt đường.
 - 🛡️ **Khâu vi phân $K_d$ có lọc thông thấp (Anti-Oscillation IIR):** Triệt tiêu hoàn toàn hiện tượng rung lắc li ti hoặc lắc đuôi cá ở tốc độ cao.
 - 📐 **Xử lý chuyên sâu Cua vuông 90° & Vạch đứt nét:** Phanh giật ngược chủ động (*Active Counter-Brake*) kết hợp quay tâm xe đón line tức thời.
@@ -45,7 +45,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 ### 3. Nút nhấn.
 
-| **Nút Calib** | `GPIO 34` | Nút nhấn vật lý kích hoạt lia Calib |
+| **Nút Calib** | `GPIO 34` | Bấm lần 1 để lấy trắng; chờ hoàn tất, bấm lần 2 để lấy đen |
 | **Nút Start** | `GPIO35`  | Nút nhấn vật lý kích hoạt start     |
 
 ### 4. Động cơ & Driver (LEDC PWM 8-bit, 1000Hz)
@@ -92,9 +92,10 @@ Bạn có thể gửi các lệnh sau từ máy tính (qua cáp USB 115200 baud)
 | **`M`** hoặc **`MANUAL`** | **TẮT** tự động, chuyển sang lái tay |
 | **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
 | **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
-| **`C`** hoặc **`W`** | Bắt đầu chu trình **Lia Calib 4s** (lia qua vạch đen/trắng) |
-| **`K`** | Chốt kết thúc sớm chu trình Calib |
-| **`INV`** | Đảo cực tính cảm biến (Vạch đen nền trắng $\leftrightarrow$ Vạch trắng nền đen) |
+| **`CAL_WHITE`** / **`C`** | Bắt đầu lấy mẫu 16 mắt trên nền **trắng** |
+| **`CAL_BLACK`** | Sau `CAL_WHITE_DONE`, bắt đầu lấy mẫu trên nền **đen** và lưu NVS nếu đạt |
+| **`CAL_STATUS`** | Xem trạng thái hiệu chuẩn trên ESP32 |
+| **`CAL_DUMP`** | Đọc 16 cặp trắng/đen/threshold từ ESP32 qua SPP hoặc USB |
 | **`BASE:xxx`** | Chỉnh tốc độ cơ sở (mặc định `BASE:120`) |
 | **`KP:x.x`** | Chỉnh hệ số tỉ lệ Kp (mặc định `KP:2.2`) |
 | **`KI:x.x`** | Chỉnh hệ số tích phân Ki (mặc định `KI:0`) |
@@ -144,3 +145,14 @@ pio run -t monitor
 - **Organization:** [clb-robot-line-2026](https://github.com/clb-robot-line-2026)
 - **Repository:** [ECcodedoline](https://github.com/clb-robot-line-2026/ECcodedoline.git)
 - Giấy phép: MIT License.
+
+
+## Hiệu chuẩn 16 mắt — mainv4 Bluetooth Classic
+
+1. Đặt đủ 16 mắt lên cùng một mặt **trắng** đồng nhất, giữ nguyên chiều cao, gửi `CAL_WHITE` (hoặc bấm nút CALIB một lần), chờ `CAL_WHITE_DONE`.
+2. Chuyển đủ 16 mắt sang cùng một mặt **đen** đồng nhất, gửi `CAL_BLACK` (hoặc bấm nút CALIB lần hai sau bước trắng), chờ `CAL_OK_SAVED`.
+3. `CAL_FAILED` có nghĩa là độ tương phản của ít nhất một mắt < 150 ADC, nhiễu quá lớn, hoặc không ghi được NVS; dữ liệu hợp lệ cũ được giữ nguyên.
+4. Gửi `CAL_DUMP` để đọc 16 mức white/black được lưu và ngưỡng trung bình; app Python `robot_debug.py` tự truy vấn NVS sau khi kết nối.
+5. Nếu ESP32 mất nguồn, firmware tự tải lại profile NVS hợp lệ. Cực tính phần cứng cố định: **ADC đen > ADC trắng**; `INV` không còn đảo cực.
+
+SPP device: **`LineRobot`**; BLE Web **không được khởi tạo trong `mainv4`**. Protocol telemetry 72 byte và các chức năng PID/encoder giữ nguyên.

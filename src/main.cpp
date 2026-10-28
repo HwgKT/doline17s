@@ -51,8 +51,8 @@ void showPid() {
   reply(b);
 }
 void showCalib() {
-  reply(sensor_get_last_calibration_result()?"CALIB THANH CONG":"CALIB CHUA DAT");
-  reply(String("CALIB_STATUS: ready=")+(calibrationReady?"1":"0"));
+  reply(String("CAL_STATUS READY=")+(calibrationReady?"1":"0")+
+        " STATE="+String((int)sensor_calibration_state()));
 }
 void setPreset(float kp,int base,const char *name) {
   // Old Kd=3.4/3.9/10 presets do not apply after the /dt derivative fix.
@@ -67,7 +67,7 @@ void command(const String &raw) {
   Serial.printf("[CMD] %s\n",s.c_str());
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING PID PWM ENC ENC_RESET STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 C K INV 3S 2S RACE");
+    reply("HELP: PING PID PWM ENC ENC_RESET STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP 3S 2S RACE");
     return;
   }
   if(s=="PID"){showPid();return;}
@@ -104,21 +104,35 @@ void command(const String &raw) {
     safeStop();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
   }
   if(s=="A"||s=="AUTO"){
-    if(sensor_is_calibrating()||!calibrationReady){reply("ERR: CALIB_REQUIRED");return;}
+    if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
     manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
   }
-  if(s=="C"||s=="W"||s=="CALIB"||s=="SWEEP"){
-    safeStop();sensor_start_sweep_calibration(4000);
-    reply("CALIB: BAT DAU LIA (4s)");return;
+  // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
+  if(s=="C"||s=="W"||s=="CALIB"||s=="CAL_WHITE"){
+    if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
+    safeStop();
+    reply(sensor_capture_white()?"CAL_WHITE_ACCEPTED":"CAL_BUSY");return;
   }
-  if(s=="K"||s=="STOP_CALIB"){
-    if(!sensor_is_calibrating()){reply("ERR: NO_ACTIVE_CALIB");return;}
-    sensor_finish_sweep_calibration();showCalib();return;
+  if(s=="CAL_BLACK"){
+    if(sensor_calibration_state()!=CAL_WHITE_READY){reply("CAL_NEED_WHITE");return;}
+    safeStop();
+    reply(sensor_capture_black()?"CAL_BLACK_ACCEPTED":"CAL_BUSY");return;
   }
-  if(s=="INV"||s=="INVERT"){
-    sensor_set_polarity(!sensor_get_polarity());
-    reply(String("POLARITY: ")+(sensor_get_polarity()?"DEN_ADC_CAO":"DEN_ADC_THAP"));return;
+  if(s=="CAL_STATUS"){showCalib();return;}
+  if(s=="CAL_DUMP"){
+    showCalib();
+    if(!calibrationReady){reply("CAL_NO_PROFILE");return;}
+    reply("CAL_DUMP_BEGIN");
+    for(int i=0;i<N_SENSORS;++i){
+      char line[80];
+      snprintf(line,sizeof(line),"CAL_DATA %d %u %u %u",
+          i,minValues[i],maxValues[i],thresholds[i]);
+      reply(line);
+    }
+    reply("CAL_DUMP_DONE");return;
   }
+  if(s=="K"||s=="STOP_CALIB"||s=="SWEEP"){reply("CAL_USE_WHITE_THEN_BLACK");return;}
+  if(s=="INV"||s=="INVERT"){reply("CAL_FIXED_POLARITY BLACK_ADC_HIGH");return;}
   if(s.startsWith("KP:")||s.startsWith("KI:")||s.startsWith("KD:")){
     float v;
     if(!parseGain(s.substring(3),v)){reply("ERR: PID_VALUE_0_50");return;}
@@ -202,21 +216,28 @@ void setup() {
   pid_init(2.2f,0.0f,0.0f,120); // preserve seconds-based derivative default Kd=0
   sppStarted=btBegin("LineRobot");
   Serial.printf("[BT] %s | device=LineRobot\n",sppStarted?"SPP STARTED":"SPP INIT FAILED");
-  Serial.println("[READY] USB 115200 newline; PING/PID/PWM/STATUS/C/K/A/M/S");
+  Serial.println("[READY] USB 115200 newline; PING/PID/STATUS/CAL_WHITE/CAL_BLACK/A/M/S");
   lastTx=lastDiag=lastBlink=millis();
 }
 void loop() {
   uint32_t now=millis();++loopCount;
   connectionState(now);pollUSB();
   if(sppStarted)btPollCommands(command);
-  if(sensor_is_button_pressed()){
-    if(sensor_is_calibrating()){sensor_finish_sweep_calibration();showCalib();}
-    else{safeStop();sensor_start_sweep_calibration(4000);reply("CALIB: BAT DAU LIA (button)");}
+  if(sensor_is_button_pressed() && !sensor_is_calibrating()){
+    safeStop();
+    sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
   }
-  bool wasCalibrating=sensor_is_calibrating();
+  const bool wasCalibrating=sensor_is_calibrating();
   if(wasCalibrating)sensor_update_calibration_loop();
   else sensor_read_all();
-  if(wasCalibrating&&!sensor_is_calibrating())showCalib();
+  switch(sensor_take_calibration_event()){
+    case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
+    case CAL_WHITE_DONE:    reply("CAL_WHITE_DONE"); break;
+    case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
+    case CAL_SAVED:         reply("CAL_OK_SAVED");showCalib(); break;
+    case CAL_ERROR:         reply("CAL_FAILED");showCalib(); break;
+    default: break;
+  }
   if(pid_is_auto_mode()&&!sensor_is_calibrating()){pid_line_follow_step();++pidCount;}
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
