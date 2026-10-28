@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 
+<<<<<<< HEAD
 // Configure both quadrature encoders and start counting their edges.
 void encoder_init(void);
 
@@ -15,6 +16,15 @@ void encoder_init(void);
 void encoder_get_counts(int32_t* left, int32_t* right);
 
 // Clear both counters and synchronize the decoder to the current pin levels.
+=======
+// Initialize both quadrature encoders. Counts are signed and use x4 decoding.
+void encoder_init(void);
+
+// Read an atomic snapshot of the cumulative left and right counts.
+void encoder_get_counts(int32_t* left, int32_t* right);
+
+// Set both counts to zero and resynchronize the decoder to the current levels.
+>>>>>>> origin/mainv2
 void encoder_reset_counts(void);
 
 #ifdef __cplusplus

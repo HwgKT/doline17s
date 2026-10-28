@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "pinout.h"
 #include "sensor.h"
 #include "motor.h"
 #include "encoder.h"
@@ -21,7 +22,11 @@ void setup() {
   // 2. Khởi tạo điều khiển 2 động cơ PWM
   motor_init();
 
+<<<<<<< HEAD
   // 2.1 Khởi tạo bộ đếm encoder hai bánh
+=======
+  // Decode both A/B channels so reverse wheel motion produces negative counts.
+>>>>>>> origin/mainv2
   encoder_init();
 
   // 3. Khởi tạo PID với cấu hình mặc định
@@ -36,7 +41,7 @@ void setup() {
   Serial.println("  + 'C' / 'W': Bat dau lia calib 4s | 'K': Chot som");
   Serial.println("  + 'INV': Dao cuc tinh cam bien (Den <-> Trang)");
   Serial.println("  + 'A': BAT chay tu dong PID | 'M': TAT ve lai tay");
-  Serial.println("  + 'PWM': Xem toc do PWM 2 banh | 'PID': Xem thong so PID");
+  Serial.println("  + 'PWM': Xem PWM | 'PID': Xem PID | 'ENC_RESET': Dat encoder ve 0");
   Serial.println("  + 'KP:2.2' | 'KI:0' | 'KD:10' | 'BASE:120': Chinh thong so PID");
   Serial.println("  + 'F'/'B'/'L'/'R'/'S': Dieu khien tay tien/lui/trai/phai/dung");
 }
@@ -70,9 +75,19 @@ void loop() {
     int16_t rightPwm = motor_get_right_speed();
     float err = pid_get_last_error();
     const char* caseName = pid_get_case_name(pid_get_current_case());
+<<<<<<< HEAD
     int32_t leftEncoderCount = 0;
     int32_t rightEncoderCount = 0;
     encoder_get_counts(&leftEncoderCount, &rightEncoderCount);
+=======
+    int32_t leftEncoderSnapshot = 0;
+    int32_t rightEncoderSnapshot = 0;
+    encoder_get_counts(&leftEncoderSnapshot, &rightEncoderSnapshot);
+
+    Serial.printf("[ENC] L:%ld R:%ld\n",
+                  static_cast<long>(leftEncoderSnapshot),
+                  static_cast<long>(rightEncoderSnapshot));
+>>>>>>> origin/mainv2
 
     if (pid_is_auto_mode()) {
       Serial.printf("[%s] Err: %.1f | PWM L:%d R:%d | Corr: %.1f\n",
@@ -85,6 +100,7 @@ void loop() {
       sensor_print_states();
     }
 
+<<<<<<< HEAD
     Serial.printf("[ENC] L:%ld R:%ld\n",
                   static_cast<long>(leftEncoderCount),
                   static_cast<long>(rightEncoderCount));
@@ -93,6 +109,12 @@ void loop() {
     if (ble_is_connected()) {
       ble_send_pwm_telemetry(leftPwm, rightPwm, err, caseName);
       ble_send_encoder_telemetry(leftEncoderCount, rightEncoderCount);
+=======
+    // Send one compact debug snapshot: PWM, pulse counters and both ADC arrays.
+    if (ble_is_connected()) {
+      ble_send_debug_telemetry(
+          leftPwm, rightPwm, leftEncoderSnapshot, rightEncoderSnapshot);
+>>>>>>> origin/mainv2
     }
   }
 

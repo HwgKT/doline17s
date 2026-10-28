@@ -356,13 +356,15 @@
       padding: 20px;
       border-radius: 16px;
       border: 1px solid rgba(255, 255, 255, 0.05);
+      overflow-x: auto;
     }
 
     .sensor-bar {
       display: grid;
-      grid-template-columns: repeat(16, 1fr);
+      grid-template-columns: repeat(16, minmax(30px, 1fr));
       gap: 6px;
       margin: 16px 0;
+      min-width: 680px;
     }
 
     .sensor-node {
@@ -400,6 +402,66 @@
     .sensor-idx {
       font-size: 10px;
       font-family: 'JetBrains Mono', monospace;
+      color: var(--text-muted);
+    }
+
+    .sensor-adc {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      line-height: 1.25;
+      color: var(--text-muted);
+    }
+
+    .sensor-adc span {
+      display: flex;
+      justify-content: space-between;
+      gap: 2px;
+      white-space: nowrap;
+    }
+
+    .sensor-adc b {
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+
+    .debug-metrics {
+      min-width: 680px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 12px 0 16px;
+    }
+
+    .debug-metric {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.035);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .debug-metric span {
+      font-size: 10px;
+      line-height: 1.3;
+      color: var(--text-muted);
+    }
+
+    .debug-metric strong {
+      overflow-wrap: anywhere;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: var(--accent-cyan);
+    }
+
+    .debug-metric small {
+      font-size: 9px;
       color: var(--text-muted);
     }
 
@@ -1001,6 +1063,34 @@
           <!-- 16 Mắt tự sinh bằng JavaScript -->
         </div>
 
+        <div class="debug-metrics" aria-label="Thong so debug truc tiep">
+          <div class="debug-metric">
+            <span>PWM dong co trai</span>
+            <strong id="debugPwmLeft">—</strong>
+            <small>−255 đến 255</small>
+          </div>
+          <div class="debug-metric">
+            <span>PWM dong co phai</span>
+            <strong id="debugPwmRight">—</strong>
+            <small>−255 đến 255</small>
+          </div>
+          <div class="debug-metric">
+            <span>Xung encoder trai</span>
+            <strong id="debugEncoderLeft">—</strong>
+            <small>Dem tich luy</small>
+          </div>
+          <div class="debug-metric">
+            <span>Xung encoder phai</span>
+            <strong id="debugEncoderRight">—</strong>
+            <small>Dem tich luy</small>
+          </div>
+        </div>
+
+        <button class="btn-action-sm" id="btnResetEncoder" onclick="resetEncoderCounts()"
+          title="Dat bo dem encoder hai banh ve 0 qua BLE">
+          ↺ Đặt lại xung encoder
+        </button>
+
         <div class="line-indicator-preview">
           <span>◄ Mắt 0 (Trái ngoài cùng)</span>
           <span>Trung tâm (Mắt 7-8)</span>
@@ -1101,6 +1191,10 @@
       node.innerHTML = `
         <div class="sensor-led" id="led_${i}">0</div>
         <span class="sensor-idx">${i}</span>
+        <div class="sensor-adc">
+          <span title="ADC tho">R:<b id="adcRaw_${i}">—</b></span>
+          <span title="ADC sau hieu chuan">C:<b id="adcCal_${i}">—</b></span>
+        </div>
       `;
       sensorBar.appendChild(node);
     }
@@ -1143,6 +1237,12 @@
         btnSerial.innerHTML = '<span>🔌 Cáp USB Serial</span>';
         connectionType = null;
         stopAutoPoll();
+        const autoPollButton = document.getElementById('btnAutoPoll');
+        if (autoPollButton) {
+          autoPollButton.disabled = false;
+          autoPollButton.textContent = `⚡ Tự động quét: ${autoPollActive ? 'BẬT' : 'TẮT'}`;
+          autoPollButton.style.color = autoPollActive ? 'var(--accent-cyan)' : 'var(--text-muted)';
+        }
       }
     }
 
@@ -1182,8 +1282,7 @@
         // Bật notify nhận phản hồi từ ESP32
         await txCharacteristic.startNotifications();
         txCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
-          const value = new TextDecoder().decode(e.target.value);
-          handleIncomingData(value);
+          handleBleNotification(e.target.value);
         });
 
         connectionType = 'ble';
@@ -1295,16 +1394,103 @@
       }
     }
 
+<<<<<<< HEAD
     async function resetEncoderCounts() {
       if (connectionType !== 'ble') {
         log('Hãy kết nối BLE để đặt lại bộ đếm encoder.', 'err');
+=======
+    // Binary debug notification: [0xA7, sequence, fragmentIndex, payload...].
+    // The ESP32 sends 4 fragments; update the UI only after a complete snapshot.
+    let debugAssembly = null;
+
+    async function resetEncoderCounts() {
+      if (connectionType !== 'ble') {
+        log('Ket noi BLE de dat lai bo dem encoder.', 'err');
+>>>>>>> origin/mainv2
         return false;
       }
       return sendCommand('ENC_RESET');
     }
 
+<<<<<<< HEAD
+=======
+    function handleBleNotification(value) {
+      if (value && value.byteLength > 0 && value.getUint8(0) === 0xA7) {
+        handleDebugFragment(value);
+        return;
+      }
+      handleIncomingData(new TextDecoder().decode(value));
+    }
+
+    function handleDebugFragment(frame) {
+      if (frame.byteLength < 4) return;
+      const sequence = frame.getUint8(1);
+      const fragmentIndex = frame.getUint8(2);
+      if (fragmentIndex >= 4) return;
+      const expectedPayloadLength = fragmentIndex === 3 ? 8 : 16;
+      if (frame.byteLength !== expectedPayloadLength + 3) return;
+
+      if (!debugAssembly || debugAssembly.sequence !== sequence) {
+        debugAssembly = { sequence, fragments: new Array(4).fill(null) };
+      }
+      const fragment = new Uint8Array(expectedPayloadLength);
+      for (let i = 0; i < expectedPayloadLength; i++) fragment[i] = frame.getUint8(i + 3);
+      debugAssembly.fragments[fragmentIndex] = fragment;
+      if (debugAssembly.fragments.some(part => part === null)) return;
+
+      const payload = new Uint8Array(56);
+      for (let i = 0; i < 4; i++) payload.set(debugAssembly.fragments[i], i * 16);
+      debugAssembly = null;
+      renderDebugTelemetry(payload);
+    }
+
+    // Read LSB-first packed unsigned fields.
+    function readPackedUnsigned(bytes, startBit, bitCount) {
+      let value = 0;
+      for (let bit = 0; bit < bitCount; bit++) {
+        const absoluteBit = startBit + bit;
+        value |= ((bytes[absoluteBit >>> 3] >>> (absoluteBit & 7)) & 1) << bit;
+      }
+      return value >>> 0;
+    }
+
+    function renderDebugTelemetry(payload) {
+      if (payload.length !== 56) return;
+      const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      const leftPwm = view.getInt16(0, true);
+      const rightPwm = view.getInt16(2, true);
+      const leftEncoder = view.getInt32(4, true);
+      const rightEncoder = view.getInt32(8, true);
+      const rawValues = [];
+      const calibratedValues = [];
+
+      for (let i = 0; i < 16; i++) {
+        rawValues.push(readPackedUnsigned(payload, 12 * 8 + i * 12, 12));
+        calibratedValues.push(readPackedUnsigned(payload, 36 * 8 + i * 10, 10));
+      }
+
+      updateSensorLeds(calibratedValues.map(value => value >= 500 ? '1' : '0').join(''));
+      for (let i = 0; i < 16; i++) {
+        const rawElement = document.getElementById(`adcRaw_${i}`);
+        const calibratedElement = document.getElementById(`adcCal_${i}`);
+        if (rawElement) rawElement.textContent = String(rawValues[i]);
+        if (calibratedElement) calibratedElement.textContent = String(calibratedValues[i]);
+      }
+
+      document.getElementById('debugPwmLeft').textContent = String(leftPwm);
+      document.getElementById('debugPwmRight').textContent = String(rightPwm);
+      document.getElementById('debugEncoderLeft').textContent = leftEncoder.toLocaleString();
+      document.getElementById('debugEncoderRight').textContent = rightEncoder.toLocaleString();
+    }
+
+>>>>>>> origin/mainv2
     function handleIncomingData(raw) {
       log(`RX <- ${raw}`, 'rx');
+
+      if (raw.includes('ENC_RESET:OK')) {
+        document.getElementById('debugEncoderLeft').textContent = '0';
+        document.getElementById('debugEncoderRight').textContent = '0';
+      }
 
       // 1. Nhận chuỗi trạng thái 16 mắt cảm biến: "SENSORS: 0000001100000000"
       if (raw.includes('SENSORS:')) {
@@ -1525,13 +1711,28 @@
 
     // =================== TỰ ĐỘNG QUÉT MẮT CẢM BIẾN (AUTO POLL) ===================
     function startAutoPoll() {
-      if (!autoPollActive) return;
       stopAutoPoll();
-      autoPollInterval = setInterval(() => {
-        if (isConnected) {
-          sendCommand('P'); // Gửi lệnh P để lấy trạng thái 16 mắt
+      const button = document.getElementById('btnAutoPoll');
+
+      // BLE telemetry is pushed by ESP32; polling with P adds redundant notifications.
+      if (connectionType === 'ble') {
+        if (button) {
+          button.textContent = '⚡ Debug BLE: ESP đẩy';
+          button.style.color = 'var(--accent-cyan)';
+          button.disabled = true;
         }
-      }, 200);
+        return;
+      }
+
+      if (button) {
+        button.disabled = false;
+        button.textContent = `⚡ Tự động quét: ${autoPollActive ? 'BẬT' : 'TẮT'}`;
+        button.style.color = autoPollActive ? 'var(--accent-cyan)' : 'var(--text-muted)';
+      }
+      if (!autoPollActive || !isConnected || connectionType !== 'serial') return;
+      autoPollInterval = setInterval(() => {
+        if (isConnected && connectionType === 'serial') sendCommand('P');
+      }, 500);
     }
 
     function stopAutoPoll() {
@@ -1542,17 +1743,9 @@
     }
 
     function toggleAutoPoll() {
+      if (connectionType === 'ble') return; // BLE debug data is push-only.
       autoPollActive = !autoPollActive;
-      const btn = document.getElementById('btnAutoPoll');
-      if (autoPollActive) {
-        btn.textContent = '⚡ Tự động quét: BẬT';
-        btn.style.color = 'var(--accent-cyan)';
-        startAutoPoll();
-      } else {
-        btn.textContent = '⚡ Tự động quét: TẮT';
-        btn.style.color = 'var(--text-muted)';
-        stopAutoPoll();
-      }
+      startAutoPoll();
     }
 
     function sendCustomCommand() {
