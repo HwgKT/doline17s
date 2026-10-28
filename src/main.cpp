@@ -9,28 +9,26 @@
 #include "bt_telemetry.h"
 #include "perf_monitor.h"
 #include "adc_bench.h"
+#include "spp_debug.h"
 
 namespace {
-// Packed 72-byte SPP telemetry; 100 Hz target = 7.2 kB/s (72 bytes/frame).
-constexpr uint32_t DIAG_PERIOD_MS=1000;   // 1 Hz USB diagnostic
+// 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
-uint16_t streamPeriodMs=10; // 100 Hz default; STREAM:0/20/50/100 at runtime
-uint32_t lastTx=0, lastDiag=0, lastBlink=0, lastManual=0;
-uint32_t loopCount=0, pidCount=0, txCount=0;
-String serialLine;
+uint16_t streamHz=300;
+uint32_t streamPeriodUs=1000000UL/300;
+uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
+uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
+BtTxStats lastTxStats{};
 
 void ledWrite(bool on) {
   ledOn=on;
   digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
 }
-void reply(const String &line) {
-  Serial.println(line);
-  btSendLine(line);
-}
+void reply(const String &line) { btSendLine(line); }
 void safeStop() {
   pid_set_auto_mode(false); motor_stop(); manualActive=false;
 }
@@ -70,32 +68,53 @@ void command(const String &raw) {
     safeStop();estopLatched=false; // Unlock only: motors remain stopped.
     reply("ESTOP: CLEARED (MOTORS OFF)");return;
   }
-  Serial.printf("[CMD] %s\n",s.c_str());
+  // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:2.2 KI:0 KD:0 BASE:120 STREAM:0/20/50/100 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
-    reply(String("STREAM Hz=")+(streamPeriodMs?String(1000U/streamPeriodMs):String("0"))+
-          " FRAME_BYTES=72");return;
+    reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
   }
   if(s.startsWith("STREAM:")){
-    const String hzText=s.substring(7);
-    if(hzText=="0")streamPeriodMs=0;
-    else if(hzText=="20")streamPeriodMs=50;
-    else if(hzText=="50")streamPeriodMs=20;
-    else if(hzText=="100")streamPeriodMs=10;
-    else {reply("ERR: STREAM_RATE_USE_0_20_50_100");return;}
-    lastTx=millis(); // Start a fresh period when the stream rate changes.
-    reply(String("STREAM Hz=")+(streamPeriodMs?String(1000U/streamPeriodMs):String("0"))+
-          " FRAME_BYTES=72");return;
+    const String textHz=s.substring(7);
+    const int hz=textHz.toInt();
+    const bool valid=(textHz==String(hz))&&
+       (hz==0||hz==20||hz==50||hz==100||hz==200||hz==300);
+    if(!valid){reply("ERR: STREAM_RATE_USE_0_20_50_100_200_300");return;}
+    streamHz=(uint16_t)hz;
+    streamPeriodUs=streamHz?1000000UL/streamHz:0;
+    lastTxUs=micros();
+    btDropPendingTelemetry();
+    reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
   }
+  if(s=="DIAG"){
+    const uint32_t t=micros(),dt=t-lastDiagUs;
+    const float sec=dt?dt*1e-6f:1.0f;
+    const BtTxStats tx=btGetTxStats();
+    int32_t encL=0,encR=0;encoder_get_counts(&encL,&encR);
+    char b[290];
+    snprintf(b,sizeof(b),
+      "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
+      "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld",
+      btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
+      loopCount/sec,pidCount/sec,
+      (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
+      (unsigned long)(tx.dropped-lastTxStats.dropped),
+      (unsigned long)(tx.failed-lastTxStats.failed),
+      (unsigned long)skippedSlots,(unsigned long)tx.pending,
+      (long)encL,(long)encR);
+    lastDiagUs=t;loopCount=pidCount=txCount=0;
+    lastTxStats=tx;skippedSlots=0;
+    reply(b);return;
+  }
+  if(s=="PERF"){perfReport();return;}
   if(s=="TASKS"){perfTaskReport();return;}
   if(s=="ADC_BENCH"){
     if(sensor_is_calibrating()){reply("ERR: ADC_BENCH_CALIB_ACTIVE");return;}
     safeStop();
-    reply(adcBenchStart()?"ADC_BENCH: STARTED (USB RESULTS)":
+    reply(adcBenchStart()?"ADC_BENCH: STARTED (SPP RESULTS)":
                           "ERR: ADC_BENCH_BUSY_OR_INIT_FAILED");
     return;
   }
@@ -199,17 +218,6 @@ void command(const String &raw) {
   }
   reply(String("ERR: UNKNOWN_COMMAND ")+s);
 }
-void pollUSB() {
-  uint16_t n=0;
-  while(Serial.available()&&n++<128){
-    char c=(char)Serial.read();
-    if(c=='\n'||c=='\r'){
-      if(serialLine.length())command(serialLine);
-      serialLine="";
-    }else if(c>=32&&c<=126&&serialLine.length()<80)serialLine+=c;
-    else if(serialLine.length()>=80)serialLine="";
-  }
-}
 void connectionState(uint32_t now) {
   bool connected=sppStarted&&btConnected();
   if(connected!=btPrevious){
@@ -218,7 +226,7 @@ void connectionState(uint32_t now) {
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
     }else{
       safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
-      Serial.println("[BT] DISCONNECTED -> AUTO OFF, MOTOR STOP");
+      btDropPendingTelemetry(); // no replay after reconnect
     }
     btPrevious=connected;
   }
@@ -239,30 +247,27 @@ void sendFrame(){
   t.p=pid_get_term_p();t.i=pid_get_term_i();t.d=pid_get_term_d();
   t.out=pid_is_auto_mode()?pid_get_correction():0.0f;
   t.mode=pid_is_auto_mode()?1:0;
-  btSendTelemetry(t);++txCount;
+  if(btSendTelemetry(t))++txCount;
 }
 } // namespace
 
 void setup() {
-  Serial.begin(115200);delay(300);
+  // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
-  Serial.println("\n=== ESP32 mainv4 Bluetooth Classic SPP / USB Debug ===");
-  Serial.printf("[LED] GPIO%d active_%s blink=waiting solid=connected\n",
-    PIN_DEBUG_LED,DEBUG_LED_ACTIVE_HIGH?"HIGH":"LOW");
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
   pid_init(2.2f,0.0f,0.0f,120); // preserve seconds-based derivative default Kd=0
   sppStarted=btBegin("LineRobot");
-  Serial.printf("[BT] %s | device=LineRobot\n",sppStarted?"SPP STARTED":"SPP INIT FAILED");
-  Serial.println("[READY] USB 115200 newline; STATUS/AUTO/STOP/ESTOP/RESET_ESTOP/CAL_WHITE/CAL_BLACK");
-  lastTx=lastDiag=lastBlink=millis();
+  lastTxUs=lastDiagUs=micros();
+  lastTxStats=btGetTxStats();
+  lastBlink=millis();
 }
 void loop() {
   const uint32_t loopStartUs=micros();
   perfLoopBegin(loopStartUs);
   uint32_t now=millis();++loopCount;
   uint32_t stageStartUs=micros();
-  connectionState(now);pollUSB();
+  connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
   if(!adcBenchActive() && sensor_is_button_pressed() && !sensor_is_calibrating()){
@@ -295,35 +300,22 @@ void loop() {
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
-  // Phase-locked, non-blocking telemetry. Keep the original timebase so
-  // loop-period quantization does not reduce the long-term stream rate.
-  // Skip missed slots (one frame max per loop): never burst stale samples.
-  const uint32_t txNow=millis();
-  if(streamPeriodMs && !adcBenchActive()){
-    const uint32_t elapsed=txNow-lastTx;
-    if(elapsed>=streamPeriodMs){
-      lastTx+=(elapsed/streamPeriodMs)*streamPeriodMs;
+  // 300 Hz = 3333-us slots. No stale bursts; bounded nonblocking enqueue.
+  const uint32_t txNow=micros();
+  if(streamPeriodUs&&!adcBenchActive()){
+    const uint32_t elapsed=txNow-lastTxUs;
+    if(elapsed>=streamPeriodUs){
+      const uint32_t slots=elapsed/streamPeriodUs;
+      lastTxUs+=slots*streamPeriodUs;
+      if(slots>1)skippedSlots+=slots-1;
       if(sppStarted&&btConnected()){
         stageStartUs=micros();
         sendFrame();
-        perfRecord(PERF_TX, micros()-stageStartUs);
+        perfRecord(PERF_TX,micros()-stageStartUs);
       }
     }
   }
-  const bool diagDue=(now-lastDiag>=DIAG_PERIOD_MS);
-  if(diagDue){
-    float sec=(now-lastDiag)/1000.0f;
-    int32_t encL=0,encR=0;
-    encoder_get_counts(&encL,&encR);
-    Serial.printf("[DIAG] bt=%d calib=%d auto=%d stream=%uHz loop=%.1fHz pid=%.1fHz tx=%.1fHz encL=%ld encR=%ld\n",
-      btConnected()?1:0,calibrationReady?1:0,pid_is_auto_mode()?1:0,
-      streamPeriodMs?1000U/streamPeriodMs:0U,
-      loopCount/sec,pidCount/sec,txCount/sec,(long)encL,(long)encR);
-    loopCount=pidCount=txCount=0;lastDiag=now;
-  }
-  // The body includes the [DIAG] print if due, but not [PERF] printing.
   perfLoopEnd(micros()-loopStartUs);
-  if(diagDue) perfReport();
   // Loop start-to-start time includes yield and background scheduler work.
   yield();
 }

@@ -18,6 +18,9 @@ static_assert(sizeof(Telemetry)==69, "SPP frame payload must remain 69 bytes");
 typedef void (*BtCommandHandler)(const String &command);
 bool btBegin(const char *deviceName = "LineRobot");
 bool btConnected();
-void btSendTelemetry(const Telemetry &t);
+bool btSendTelemetry(const Telemetry &t); // nonblocking queue, returns enqueue result
 void btSendLine(const String &line);
 void btPollCommands(BtCommandHandler handler);
+struct BtTxStats { uint32_t queued, sent, dropped, failed, pending; };
+BtTxStats btGetTxStats();
+void btDropPendingTelemetry();
