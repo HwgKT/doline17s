@@ -21,6 +21,9 @@ void ble_control_init(const char* deviceName);
  */
 void ble_control_update(void);
 
+// Shared command parser for BLE and Classic SPP.
+void ble_control_process_command(const char* command);
+
 /**
  * @brief Kiểm tra xem điện thoại đã kết nối BLE hay chưa
  * @return true nếu đã kết nối

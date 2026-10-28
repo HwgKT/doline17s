@@ -54,3 +54,4 @@ void btBegin(const char *deviceName = "LineRobot");
 bool btConnected();
 void btSendTelemetry(const Telemetry &t);       // bỏ qua nếu chưa có PC kết nối
 void btPollCommands(BtCommandHandler handler);  // lệnh kết thúc bằng '\n'
+void btSendText(const char* message);

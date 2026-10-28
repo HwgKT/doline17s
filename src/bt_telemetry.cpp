@@ -49,3 +49,7 @@ void btPollCommands(BtCommandHandler handler) {
     }
   }
 }
+
+void btSendText(const char* message) {
+  if (message && SerialBT.hasClient()) SerialBT.print(message);
+}

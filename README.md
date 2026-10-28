@@ -19,7 +19,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 - ⚡ **Chu kỳ lấy mẫu siêu tốc (~400Hz - 500Hz):** Phản xạ chỉ trong 2ms - 2.5ms, loại bỏ hoàn toàn hiện tượng trễ pha quán tính khi chạy tốc độ cao.
 - 🎯 **Thanh cảm biến 16 mắt chuẩn hóa Analog (0 - 1000):** Tính toán trọng tâm liên tục (*Smooth Centroid*) với độ mịn cao từ `-65.0` đến `+65.0`.
-- 🔄 **Cơ chế Hiệu chuẩn Quét (Sweep Calibration):** Chỉ cần lia xe qua vạch line trong 4 giây, hệ thống tự động lưu ngưỡng Min/Max và tính toán giá trị trung bình cho từng mắt riêng biệt.
+- 🔄 **Hiệu chuẩn hai bề mặt:** Đặt cả 16 mắt lần lượt trên nền trắng và đen; lấy trung bình 128 khung mỗi nền; kiểm tra tín hiệu và lưu NVS.
 - 🚀 **Bứt tốc đường thẳng & Tự hạ ga ôm cua (Dynamic Speed Curve):** Tự động bốc ga kịch trần (lên tới 215–255 PWM) khi đi thẳng và tự ghì ga xuống 95–115 PWM khi vào cua để bánh xe bám chặt mặt đường.
 - 🛡️ **Khâu vi phân $K_d$ có lọc thông thấp (Anti-Oscillation IIR):** Triệt tiêu hoàn toàn hiện tượng rung lắc li ti hoặc lắc đuôi cá ở tốc độ cao.
 - 📐 **Xử lý chuyên sâu Cua vuông 90° & Vạch đứt nét:** Phanh giật ngược chủ động (*Active Counter-Brake*) kết hợp quay tâm xe đón line tức thời.
@@ -33,7 +33,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 * **ESP32 DevKit V1** (Dual-core 240MHz, 320KB RAM, 4MB Flash)
 
 ### 2. Cảm biến 16 mắt (CD74HC4067 MUX)
-* Mắt hoạt động: **Mắt 1 đến Mắt 14** (Mắt 0 và 15 bỏ qua để tối ưu khoảng cách).
+* Mắt hoạt động: **16 mắt, từ mắt 0 đến mắt 15**.
 
 | Chân CD74HC4067 | Chân ESP32 | Chức năng |
 | :--- | :--- | :--- |
@@ -90,15 +90,15 @@ Bạn có thể gửi các lệnh sau từ máy tính (qua cáp USB 115200 baud)
 | :--- | :--- |
 | **`A`** hoặc **`AUTO`** | **BẬT** chế độ tự động dò line theo PID |
 | **`M`** hoặc **`MANUAL`** | **TẮT** tự động, chuyển sang lái tay |
-| **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: `Base=175, Kp=1.55, Kd=3.4` |
-| **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: `Base=205, Kp=1.75, Kd=4.2` |
-| **`C`** hoặc **`W`** | Bắt đầu chu trình **Lia Calib 4s** (lia qua vạch đen/trắng) |
-| **`K`** | Chốt kết thúc sớm chu trình Calib |
-| **`INV`** | Đảo cực tính cảm biến (Vạch đen nền trắng $\leftrightarrow$ Vạch trắng nền đen) |
+| **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
+| **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
+| **`CAL_WHITE`** / **`C`** | Lấy ADC 16 mắt trên nền TRẮNG |
+| **`CAL_BLACK`** | Lấy ADC trên nền ĐEN, kiểm tra và lưu NVS |
+| **`CAL_STATUS`** / **`CAL_DUMP`** | Xem trạng thái và đọc tham số hiệu chuẩn |
 | **`BASE:xxx`** | Chỉnh tốc độ cơ sở (mặc định `BASE:120`) |
 | **`KP:x.x`** | Chỉnh hệ số tỉ lệ Kp (mặc định `KP:2.2`) |
 | **`KI:x.x`** | Chỉnh hệ số tích phân Ki (mặc định `KI:0`) |
-| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:10`) |
+| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:0`; D = Kd × (e[k] − e[k−1]) / dt, với dt đo bằng giây) |
 | **`V:xxx`** | Chỉnh tốc độ tay và tốc độ cơ sở PID (0–255) |
 | **`PWM`** | Xem giá trị PWM 2 bánh và sai số tức thời |
 | **`PID`** | Xem các thông số PID và Base Speed hiện tại |
@@ -144,3 +144,7 @@ pio run -t monitor
 - **Organization:** [clb-robot-line-2026](https://github.com/clb-robot-line-2026)
 - **Repository:** [ECcodedoline](https://github.com/clb-robot-line-2026/ECcodedoline.git)
 - Giấy phép: MIT License.
+
+
+## Two-surface calibration (mainv4)
+Place all 16 sensors on uniform WHITE and send CAL_WHITE. Once CAL_WHITE_DONE appears, place all sensors on BLACK and send CAL_BLACK. CAL_OK_SAVED means the complete validated 16-channel profile is stored in ESP32 NVS. CAL_STATUS and CAL_DUMP inspect the calibration. The previous valid profile is retained on failure. ADC black must be greater than white.\n

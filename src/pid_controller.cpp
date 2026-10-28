@@ -17,7 +17,7 @@ static const float SENSOR_WEIGHTS[N_SENSORS] = {
 static PID_Config_t pidConfig = {
     .Kp = 2.2f,
     .Ki = 0.0f,
-    .Kd = 10.0f,
+    .Kd = 0.0f,
     .baseSpeed = 120,
     .maxSpeed = 220,
     .minSpeed = -95
@@ -28,7 +28,9 @@ static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0.0f;
 static float integralError = 0.0f;
 static float lastCorrection = 0.0f;
-static unsigned long lastComputeTime = 0;
+// Use a microsecond timebase for the derivative (dt is measured in seconds).
+static uint32_t lastComputeTimeUs = 0;
+static bool derivativeHistoryValid = false;
 #define DASHED_LINE_TIMEOUT_MS  60    // Rút ngắn xuống 60ms để tránh phóng mù ra ngoài khi văng góc cua
 #define SHARP_TURN_TIMEOUT_MS   450   // Thời gian tối đa giữ cua 90 độ trước khi tự thoát an toàn
 #define SHARP_TURN_COOLDOWN_MS  80    // Thời gian miễn nhiễm sau khi thoát cua (tránh quay vòng tròn lặp lại)
@@ -63,7 +65,8 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.baseSpeed = baseSpeed;
     lastError = 0.0f;
     integralError = 0.0f;
-    lastComputeTime = millis();
+    lastComputeTimeUs = micros();
+    derivativeHistoryValid = false;
     autoMode = false;
     currentCase = LINE_CASE_STOPPED;
     isLineCurrentlyLost = false;
@@ -78,6 +81,8 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
 }
 
 void pid_set_tunings(float kp, float ki, float kd) {
+    // Reinitialize the derivative history if Kd is changed at runtime.
+    if (pidConfig.Kd != kd) derivativeHistoryValid = false;
     pidConfig.Kp = kp;
     pidConfig.Ki = ki;
     pidConfig.Kd = kd;
@@ -104,7 +109,8 @@ void pid_set_auto_mode(bool enable) {
     } else {
         integralError = 0.0f;
         lastError = 0.0f;
-        lastComputeTime = millis();
+        lastComputeTimeUs = micros();
+        derivativeHistoryValid = false;
     }
 }
 
@@ -359,13 +365,22 @@ void pid_line_follow_step(void) {
     uint8_t blackCount = 0;
     pid_calculate_position(&position, &blackCount);
 
-    // Nhận diện Case hiện tại
+    // Nhan dien Case hien tai, ghi nho Case cu de tranh D kick.
+    LineCase_t previousCase = currentCase;
     currentCase = pid_detect_case(position, blackCount);
 
-    unsigned long now = millis();
-    float dt = (float)(now - lastComputeTime) / 1000.0f;
-    if (dt <= 0.0f || dt > 0.1f) dt = 0.01f;
-    lastComputeTime = now;
+    const uint32_t nowUs = micros();
+    const float measuredDt = (float)(nowUs - lastComputeTimeUs) * 1e-6f;
+    const bool dtValid = measuredDt > 0.0f && measuredDt <= 0.1f;
+    // Retain the original fallback for I; do not differentiate invalid dt.
+    const float dt = dtValid ? measuredDt : 0.01f;
+    lastComputeTimeUs = nowUs;
+
+    // Do not differentiate stale/error-memory values across line cases.
+    if (previousCase != LINE_CASE_NORMAL_PID ||
+        currentCase != LINE_CASE_NORMAL_PID) {
+        derivativeHistoryValid = false;
+    }
 
     // =========================================================================
     // XỬ LÝ TỪNG CASE TRƯỜNG HỢP CỤ THỂ
@@ -376,7 +391,7 @@ void pid_line_follow_step(void) {
         // CASE 1: BÁM LINE CHUẨN PID (Đường thẳng và khúc cua vừa phải)
         // ---------------------------------------------------------------------
         case LINE_CASE_NORMAL_PID: {
-            float error = position; // Sai số liên tục biến thiên siêu mượt (-65.0 đến +65.0)
+            float error = position; // Sai so vi tri cua 16 mat (-75.0 den +75.0)
             float absErr = fabsf(error);
 
             // 1. Khâu tỷ lệ P phi tuyến (Non-linear P):
@@ -391,10 +406,14 @@ void pid_line_follow_step(void) {
             if (integralError < -150.0f) integralError = -150.0f;
             float iTerm = pidConfig.Ki * integralError;
 
-            // 3. Khâu vi phân D (Kd = 10.0 đóng vai trò giảm chấn cực mạnh, dập tắt hoàn toàn rung lắc)
-            float deltaErr = error - lastError;
+            // 3. Khau D: Kd * (e[k] - e[k-1]) / dt, dt tinh bang giay.
+            // Kd mac dinh = 0. Bo qua D o mau dau sau khi doi mode/case/Kd.
+            float dTerm = 0.0f;
+            if (pidConfig.Kd != 0.0f && derivativeHistoryValid && dtValid) {
+                dTerm = pidConfig.Kd * (error - lastError) / measuredDt;
+            }
             lastError = error;
-            float dTerm = pidConfig.Kd * deltaErr;
+            derivativeHistoryValid = true;
 
             // Tổng bù lái
             lastCorrection = pTerm + iTerm + dTerm;
@@ -404,8 +423,12 @@ void pid_line_follow_step(void) {
             int16_t currentBase = pidConfig.baseSpeed - (int16_t)(absErr * 0.55f);
             if (currentBase < 50) currentBase = 50;
 
-            int16_t leftSpeed  = currentBase + (int16_t)lastCorrection;
-            int16_t rightSpeed = currentBase - (int16_t)lastCorrection;
+            // Avoid float-to-int16 overflow with a large retuned D term.
+            float driveCorrection = lastCorrection;
+            if (driveCorrection > 512.0f) driveCorrection = 512.0f;
+            if (driveCorrection < -512.0f) driveCorrection = -512.0f;
+            int16_t leftSpeed  = currentBase + (int16_t)driveCorrection;
+            int16_t rightSpeed = currentBase - (int16_t)driveCorrection;
 
             // Giới hạn tốc độ trong dải an toàn
             leftSpeed  = clamp_val(leftSpeed, pidConfig.minSpeed, pidConfig.maxSpeed);

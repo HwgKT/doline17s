@@ -51,6 +51,7 @@ class Reader(threading.Thread):
         self.running = True
         self.buf = bytearray()
         self.bad = 0
+        self.textbuf = bytearray()
 
     def run(self):
         while self.running:
@@ -67,13 +68,27 @@ class Reader(threading.Thread):
         except Exception:
             pass
 
+    def _consume_text(self, data):
+        self.textbuf.extend(data)
+        while b"\n" in self.textbuf:
+            line, _, rest = self.textbuf.partition(b"\n")
+            self.textbuf = bytearray(rest)
+            msg = line.decode("utf-8", errors="replace").strip()
+            if msg:
+                self.q.put(("message", msg))
+        if len(self.textbuf) > 512:
+            self.textbuf = self.textbuf[-128:]
+
     def _parse(self):
         while True:
             i = self.buf.find(HDR)
             if i < 0:
-                del self.buf[:-1]          # giữ lại 1 byte cuối phòng là 0xAA
+                if len(self.buf) > 1:
+                    self._consume_text(bytes(self.buf[:-1]))
+                    del self.buf[:-1]
                 return
             if i > 0:
+                self._consume_text(bytes(self.buf[:i]))
                 del self.buf[:i]
             if len(self.buf) < FRAME_LEN:
                 return
@@ -136,6 +151,15 @@ class App(tk.Tk):
         self.th_lbl.pack(side="left")
         self.bars = tk.Canvas(self, width=760, height=210, bg=PANEL, highlightthickness=0)
         self.bars.pack(padx=10, pady=4)
+        cf = tk.Frame(self, bg=BG)
+        cf.pack(fill="x", padx=10, pady=5)
+        for title, command in (("1. Lấy TRẮNG", "CAL_WHITE"),
+                               ("2. Lấy ĐEN", "CAL_BLACK"),
+                               ("Trạng thái", "CAL_STATUS"),
+                               ("Đọc tham số", "CAL_DUMP")):
+            ttk.Button(cf, text=title, command=lambda c=command: self.send_cmd(c)).pack(side="left", padx=4)
+        self.cal_status = tk.Label(self, text="Calibration: chưa truy vấn", bg=BG, fg=AMBER)
+        self.cal_status.pack(fill="x", padx=10)
 
         # Thông số số học
         grid = tk.Frame(self, bg=PANEL)
@@ -240,6 +264,11 @@ class App(tk.Tk):
                 if kind == "data":
                     self.on_sample(payload)
                     last = payload
+                elif kind == "message":
+                    if payload.startswith("CAL_"):
+                        self.cal_status.config(text=payload)
+                    else:
+                        self.status.config(text=payload[:90])
                 elif kind == "error":
                     self.disconnect()
                     self.status.config(text=payload, fg=ROSE)

@@ -2,6 +2,7 @@
 #include "motor.h"
 #include "sensor.h"
 #include "pid_controller.h"
+#include "bt_telemetry.h"
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -24,6 +25,7 @@ static bool oldDeviceConnected = false;
 static uint8_t currentSpeed = 120;
 
 void ble_send_string(const char* message) {
+    btSendText(message);
     if (deviceConnected && pTxCharacteristic != nullptr) {
         pTxCharacteristic->setValue((uint8_t*)message, strlen(message));
         pTxCharacteristic->notify();
@@ -145,46 +147,52 @@ static void processBleCommand(const std::string& rxValue) {
     // Chuyển ký tự đầu thành chữ in hoa để dễ so khớp
     char firstChar = toupper(cmd[0]);
 
-    // ========================================================
-    // 1. NHÓM LỆNH HIỆU CHUẨN CẢM BIẾN (LIA QUA LẠI - SWEEP CALIBRATION)
-    // ========================================================
-
-    // Lệnh bắt đầu lia cảm biến: 'C' hoặc 'W' hoặc "CALIB" hoặc "SWEEP"
-    if (firstChar == 'C' || firstChar == 'W' || cmd == "CALIB" || cmd == "SWEEP") {
-        if (!sensor_is_calibrating()) {
-            sensor_start_sweep_calibration(4000); // Lia trong 4 giây
-            ble_send_string("CALIB: BAT DAU LIA! Hay lia thanh cam bien qua lai vach line trong 4 giay...\n");
-        } else {
-            // Đang lia -> gửi lệnh tiếp = chốt kết thúc sớm
-            // sensor_finish_sweep_calibration() đã kiểm tra isCalibrating bên trong
-            bool ok = sensor_finish_sweep_calibration();
-            if (ok) {
-                ble_send_string("CALIB THANH CONG: Da tinh nguong trung binh tung mat! (0=Trang, 1=Den)\n");
-            } else {
-                ble_send_string("CALIB CHUA DAT: Chua lia qua vach den. Hay gui 'C' de lia lai!\n");
-            }
+    // Fixed polarity: BLACK ADC always exceeds WHITE ADC.
+    // CAL_WHITE and CAL_BLACK each capture 128 frames of all 16 channels.
+    if (cmd == "CAL_WHITE" || cmd == "C" || cmd == "CALIB") {
+        if (sensor_is_calibrating()) { ble_send_string("CAL_BUSY\n"); return; }
+        pid_set_auto_mode(false);
+        motor_stop();
+        ble_send_string(sensor_capture_white() ? "CAL_WHITE_ACCEPTED\n" : "CAL_BUSY\n");
+        return;
+    }
+    if (cmd == "CAL_BLACK") {
+        if (sensor_calibration_state() != CAL_WHITE_READY) {
+            ble_send_string("CAL_NEED_WHITE\n"); return;
+        }
+        pid_set_auto_mode(false);
+        motor_stop();
+        ble_send_string(sensor_capture_black() ? "CAL_BLACK_ACCEPTED\n" : "CAL_BUSY\n");
+        return;
+    }
+    if (cmd == "CAL_STATUS") {
+        char msg[80];
+        snprintf(msg, sizeof(msg), "CAL_STATUS READY=%d STATE=%d\n",
+                 calibrationReady ? 1 : 0, (int)sensor_calibration_state());
+        ble_send_string(msg);
+        return;
+    }
+    if (cmd == "CAL_DUMP") {
+        sensor_print_calibration();
+        if (!calibrationReady) ble_send_string("CAL_NO_PROFILE\n");
+        else for (int i = 0; i < N_SENSORS; ++i) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "CAL_DATA %d %u %u %u\n", i,
+                     minValues[i], maxValues[i], thresholds[i]);
+            ble_send_string(msg);
+            delay(4);
         }
         return;
     }
-
-    // Lệnh chốt kết thúc lia sớm: 'K' hoặc "STOP_CALIB"
-    if (firstChar == 'K' || cmd == "STOP_CALIB") {
-        if (!sensor_is_calibrating()) {
-            // Không có lượt hiệu chuẩn đang chạy -> từ chối, trả về lỗi rõ ràng
-            ble_send_string("LOI: Khong co luot hieu chuan nao dang chay. Hay gui 'C' de bat dau truoc.\n");
-        } else {
-            bool ok = sensor_finish_sweep_calibration();
-            if (ok) {
-                ble_send_string("CALIB THANH CONG: Da tinh nguong trung binh tung mat!\n");
-            } else {
-                ble_send_string("CALIB CHUA DAT: Mot so mat khong du delta. Hay lia lai!\n");
-            }
-        }
+    if (cmd == "INV" || cmd == "INVERT") {
+        ble_send_string("CAL_FIXED_POLARITY BLACK_ADC_HIGH\n");
         return;
     }
-
-    // Lệnh đọc dữ liệu cảm biến: 'P' hoặc "SENSORS" hoặc "STATUS"
-    if (firstChar == 'P' || cmd == "SENSORS" || cmd == "STATUS") {
+    if (cmd == "K" || cmd == "STOP_CALIB") {
+        ble_send_string("CAL_USE_WHITE_THEN_BLACK\n");
+        return;
+    }
+    if (cmd == "P" || cmd == "SENSORS" || cmd == "STATUS") {
         ble_send_sensor_states();
         return;
     }
@@ -195,8 +203,9 @@ static void processBleCommand(const std::string& rxValue) {
 
     // Lệnh BẬT tự động dò line: 'A' hoặc "AUTO"
     if (firstChar == 'A' || cmd == "AUTO") {
-        if (!calibrationReady) {
-            ble_send_string("LOI: Chua hieu chuan trang/den! Hay calib (W/K) truoc khi bat Auto.\n");
+        if (!calibrationReady || sensor_is_calibrating() ||
+            sensor_calibration_state() == CAL_WHITE_READY) {
+            ble_send_string("CAL_NOT_READY_FOR_AUTO\n");
             return;
         }
         pid_set_auto_mode(true);
@@ -289,16 +298,6 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Đảo cực tính cảm biến: "INV" hoặc "INVERT"
-    if (cmd == "INV" || cmd == "INVERT") {
-        bool cur = sensor_get_polarity();
-        sensor_set_polarity(!cur);
-        char msg[64];
-        snprintf(msg, sizeof(msg), "POLARITY: %s\n", !cur ? "DEN_ADC_CAO" : "DEN_ADC_THAP");
-        ble_send_string(msg);
-        return;
-    }
-
     // Tốc độ phím nhanh 0..9 (từ các ứng dụng RC Car)
     if (cmd.length() == 1 && cmd[0] >= '0' && cmd[0] <= '9') {
         int level = cmd[0] - '0';
@@ -354,7 +353,7 @@ static void processBleCommand(const std::string& rxValue) {
         return;
     }
 
-    // Chỉnh Kd (Cú pháp: "KD:10")
+    // Chinh Kd (cu phap: "KD:0.05"; mac dinh KD:0; D dung dao ham / giay)
     if (cmd.rfind("KD:", 0) == 0 || cmd.rfind("kd:", 0) == 0) {
         float val = atof(cmd.c_str() + 3);
         if (val >= 0.0f && val <= 50.0f) {
@@ -381,6 +380,11 @@ static void processBleCommand(const std::string& rxValue) {
 
     // Lệnh không nhận diện được
     ble_send_string("LENH KHONG HOP LE! Gui ? hoac HELP de xem tro giup.\n");
+}
+
+// Same command interface for BLE NUS and Bluetooth Classic SPP.
+void ble_control_process_command(const char* command) {
+    if (command) processBleCommand(std::string(command));
 }
 
 // Callback quản lý kết nối BLE
@@ -459,7 +463,7 @@ void ble_control_update(void) {
 
     if (deviceConnected && !oldDeviceConnected) {
         oldDeviceConnected = deviceConnected;
-        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
+        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:0 | BASE:120: Chinh PID\n");
     }
 }
 

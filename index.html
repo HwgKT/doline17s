@@ -904,7 +904,7 @@
               <span>BẬT SIÊU BÁM SÀN (PIN 3S)</span>
               <span class="grip-badge">AUTO CHẠY NGAY</span>
             </div>
-            <div class="grip-sub">Base: 105 | Kp: 1.45 | Kd: 3.9 (Phím tắt: G)</div>
+            <div class="grip-sub">Base: 105 | Kp: 1.45 | Kd: 0 (Phím tắt: G)</div>
           </div>
         </button>
 
@@ -964,7 +964,7 @@
             </div>
             <div class="pid-input-group">
               <label>Kd (Dập lắc)</label>
-              <input type="number" id="inputKd" min="0" max="50" step="0.1" value="10">
+              <input type="number" id="inputKd" min="0" max="50" step="0.01" value="0">
             </div>
             <div class="pid-input-group">
               <label>Speed / Base</label>
@@ -1085,40 +1085,19 @@
 
       <!-- BƯỚC CALIBRATION -->
       <div class="calib-wizard">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 13px; font-weight: 600; color: #cbd5e1;">🎯 Hiệu chuẩn bằng cách LIA CẢM BIẾN (Sweep
-            Calibration):</span>
+        <strong>Calibration 2 vùng — đặt cả 16 mắt cùng lúc</strong>
+        <p>1. Đặt tất cả 16 mắt trên nền TRẮNG đồng nhất, giữ cố định rồi lấy mẫu trắng.
+        Chờ thông báo hoàn tất. 2. Đặt 16 mắt trên nền ĐEN đồng nhất rồi lấy mẫu đen.
+        Firmware chỉ lưu khi tất cả 16 mắt đạt yêu cầu tương phản và ổn định.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn-calib btn-calib-white" onclick="sendCommand('CAL_WHITE')">1. LẤY TRẮNG (16 mắt)</button>
+          <button class="btn-calib btn-calib-black" onclick="sendCommand('CAL_BLACK')">2. LẤY ĐEN (16 mắt)</button>
+          <button class="btn-action-sm" onclick="sendCommand('CAL_STATUS')">Trạng thái</button>
+          <button class="btn-action-sm" onclick="sendCommand('CAL_DUMP')">Đọc NVS</button>
         </div>
-        <div
-          style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 10px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.05);">
-          👉 <b>Cách làm:</b> Bấm nút dưới đây rồi <b>dùng tay lia thanh cảm biến qua lại ngang qua vạch đen 2 - 3
-            lần</b> trong 4 giây. Hệ thống sẽ tự bắt Min (trắng) và Max (đen) rồi tính ngưỡng trung bình cho từng mắt
-          (từ mắt 1 đến 14)!
-        </div>
-
-        <div style="display: flex; gap: 10px;">
-          <button
-            style="flex: 2; padding: 14px; border-radius: 12px; border: none; cursor: pointer; background: linear-gradient(135deg, #00f2fe, #4facfe); color: #061122; font-weight: 700; font-size: 14px; box-shadow: 0 0 15px rgba(0, 242, 254, 0.4); display: flex; align-items: center; justify-content: center; gap: 8px;"
-            onclick="sendCommand('C')">
-            <span>🎯 BẮT ĐẦU LIA CALIB (4 Giây)</span>
-          </button>
-          <button
-            style="flex: 1; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; background: rgba(255,255,255,0.06); color: #e2e8f0; font-weight: 600; font-size: 13px;"
-            onclick="sendCommand('K')">
-            ⏹️ Chốt Sớm
-          </button>
-        </div>
-
         <div class="calib-extra-actions">
-          <button class="btn-action-sm" onclick="sendCommand('P')">
-            📊 Đọc mắt (P)
-          </button>
-          <button class="btn-action-sm" onclick="sendCommand('INV')">
-            🔄 Đảo Cực (INV)
-          </button>
-          <button class="btn-action-sm" id="btnAutoPoll" onclick="toggleAutoPoll()">
-            ⚡ Tự quét: BẬT
-          </button>
+          <button class="btn-action-sm" onclick="sendCommand('P')">Đọc cảm biến</button>
+          <button class="btn-action-sm" id="btnAutoPoll" onclick="toggleAutoPoll()">Tự quét: BẬT</button>
         </div>
       </div>
     </div>
@@ -1468,27 +1447,24 @@
         }
       }
 
-      // 2. Nhận thông báo hiệu chuẩn cảm biến (Sweep Calibration)
-      if (raw.includes('BAT DAU LIA')) {
-        const badge = document.getElementById('calibStatusBadge');
-        if (badge) {
-          badge.textContent = '⏳ Đang Lia Calib...';
-          badge.style.background = 'rgba(59, 130, 246, 0.2)';
-          badge.style.color = '#60a5fa';
-        }
-      } else if (raw.includes('CALIB THANH CONG') || raw.includes('Hieu chuan xong')) {
-        const badge = document.getElementById('calibStatusBadge');
-        if (badge) {
-          badge.textContent = '✅ Đã Hiệu Chuẩn';
-          badge.style.background = 'rgba(16, 185, 129, 0.2)';
-          badge.style.color = '#34d399';
-        }
-      } else if (raw.includes('CALIB CHUA DAT')) {
-        const badge = document.getElementById('calibStatusBadge');
-        if (badge) {
-          badge.textContent = '⚠️ Chưa Đạt (Lia Lại)';
-          badge.style.background = 'rgba(239, 68, 68, 0.2)';
-          badge.style.color = '#f87171';
+      // Calibration state machine events (also accepted by Classic PC client).
+      const calibBadge = document.getElementById('calibStatusBadge');
+      if (calibBadge) {
+        if (raw.includes('CAL_WHITE_STARTED') || raw.includes('CAL_WHITE_ACCEPTED')) {
+          calibBadge.textContent = 'Đang lấy mẫu trắng';
+          calibBadge.style.color = '#60a5fa';
+        } else if (raw.includes('CAL_WHITE_DONE')) {
+          calibBadge.textContent = 'Trắng đã xong, đặt nền đen';
+          calibBadge.style.color = '#fbbf24';
+        } else if (raw.includes('CAL_BLACK_STARTED') || raw.includes('CAL_BLACK_ACCEPTED')) {
+          calibBadge.textContent = 'Đang lấy mẫu đen';
+          calibBadge.style.color = '#60a5fa';
+        } else if (raw.includes('CAL_OK_SAVED') || raw.includes('CAL_STATUS READY=1 STATE=4')) {
+          calibBadge.textContent = 'Đã lưu NVS';
+          calibBadge.style.color = '#34d399';
+        } else if (raw.includes('CAL_FAILED') || raw.includes('CAL_NEED_WHITE')) {
+          calibBadge.textContent = 'Calibration lỗi — xem log';
+          calibBadge.style.color = '#f87171';
         }
       }
       // 3. Nhận trạng thái Case PID từ USB Serial: "[CASE 1: Bam Line PID] Err: 2.5 | Corr: ..."
@@ -1552,7 +1528,7 @@
         document.getElementById('currentCaseDisplay').textContent = 'Dừng xe';
       }
 
-      // 7. Nhận phản hồi thông số PID từ ESP32: "PID: Kp=1.45 Ki=0.00 Kd=3.90 Base=105"
+      // 7. Nhận phản hồi thông số PID từ ESP32: "PID: Kp=2.20 Ki=0.00 Kd=0.00 Base=120"
       if (raw.includes('PID:') || raw.includes('PID SET:')) {
         const kpMatch = raw.match(/Kp=([\d\.]+)/i);
         const kiMatch = raw.match(/Ki=([\d\.]+)/i);
@@ -1712,7 +1688,7 @@
       sendCommand('BAM');
       setActiveProfileChip('chipGrip', '🔥 Siêu Bám Pin 3S');
       document.getElementById('inputKp').value = '1.45';
-      document.getElementById('inputKd').value = '3.90';
+      document.getElementById('inputKd').value = '0.00';
       document.getElementById('inputBase').value = '105';
       
       const badge = document.getElementById('pidModeBadge');
@@ -1730,19 +1706,19 @@
         sendCommand('3S');
         setActiveProfileChip('chip3S', '🛡️ Pin 3S Chuẩn');
         document.getElementById('inputKp').value = '1.55';
-        document.getElementById('inputKd').value = '3.40';
+        document.getElementById('inputKd').value = '0.00';
         document.getElementById('inputBase').value = '115';
       } else if (type === '2S') {
         sendCommand('2S');
         setActiveProfileChip('chip2S', '🔋 Pin 2S An Toàn');
         document.getElementById('inputKp').value = '1.55';
-        document.getElementById('inputKd').value = '3.40';
+        document.getElementById('inputKd').value = '0.00';
         document.getElementById('inputBase').value = '145';
       } else if (type === 'RACE') {
         sendCommand('STAGE2');
         setActiveProfileChip('chipRace', '🏁 Race 10s');
         document.getElementById('inputKp').value = '1.65';
-        document.getElementById('inputKd').value = '3.80';
+        document.getElementById('inputKd').value = '0.00';
         document.getElementById('inputBase').value = '135';
       }
     }
