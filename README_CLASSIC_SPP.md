@@ -82,3 +82,8 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 - Bluetooth connection alone does not create CSV. Every START immediately creates a new persistent `logs/linerobot_300hz_TIMESTAMP.csv` and begins capturing every valid SPP frame before sending AUTO. After ESP32 confirms STOP with `MOTOR: STOP`, the app detaches the logger, flushes any queued rows asynchronously and closes that CSV, keeping Bluetooth connected.
 - Each subsequent START generates a new file; export copies the latest file. Disconnect, failed AUTO, ADC errors, external ESTOP, or STOP without acknowledgment close the current CSV with a clearly labeled reason. A 2-second STOP-ack timeout does not prove the motors have stopped.
 - Data columns and 300Hz SPP stream remain unchanged. CSV status reports actual write rate, samples and drops during each run. Existing `run_csv_lifecycle.py` coordinates the per-run writer threads.
+
+
+### Compact upper-right quarter, no scroll bar
+- The dashboard's right half now uses a fixed 50/50 vertical split: the upper-right quarter holds all START/STOP, PWM, PID and calibration controls in a compact stack **without** a Canvas or scrolling; the lower-right quarter remains the embedded terminal. Reduced fonts, paddings, compact PWM/PID groups and shortened calibration labels reclaim vertical space. The 16-sensor dashboard remains in the left half.
+- The terminal retains its own vertical/horizontal scroll bars (for long logs); the request to remove scrolling applies to the upper control dashboard. Firmware, SPP stream rate 300 Hz and per-run CSV lifecycle are untouched.
