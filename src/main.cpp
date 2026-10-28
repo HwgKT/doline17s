@@ -6,33 +6,21 @@
 #include "ble_control.h"
 #include "pid_controller.h"
 
-unsigned long lastPrintTime = 0;
+static unsigned long lastPrintTime = 0;
 
 void setup() {
   Serial.begin(115200);
-  delay(500);
+  delay(500); // Chỉ chờ Serial lúc khởi động, không nằm trong vòng điều khiển.
 
   Serial.println("\n==============================================");
   Serial.println("  ESP32 XE DO LINE 16 MAT - BLE + MOTOR + PID");
   Serial.println("==============================================");
 
-  // 1. Khởi tạo cảm biến dò line 16 mắt (CD74HC4067)
   sensor_init();
-
-  // 2. Khởi tạo điều khiển 2 động cơ PWM
   motor_init();
-
-<<<<<<< HEAD
-  // 2.1 Khởi tạo bộ đếm encoder hai bánh
-=======
-  // Decode both A/B channels so reverse wheel motion produces negative counts.
->>>>>>> origin/mainv2
   encoder_init();
 
-  // 3. Khởi tạo PID với cấu hình mặc định
   pid_init(2.2f, 0.0f, 10.0f, 120);
-
-  // 4. Khởi tạo BLE Server điều khiển không dây
   ble_control_init("ESP32_LineRobot");
 
   Serial.println("\nSan sang!");
@@ -47,76 +35,56 @@ void setup() {
 }
 
 void loop() {
-  // 1. Duy trì kết nối và thông báo qua BLE
+  // Duy tri BLE; khong them delay co dinh vao vong lap.
   ble_control_update();
 
-  // 2. Kiểm tra nút nhấn vật lý (hoạt động song song với lệnh BLE/Web)
   if (sensor_is_button_pressed()) {
     sensor_handle_calibration_step();
   }
 
-  // 3. Xử lý quét Min/Max nếu đang trong chế độ lia calib (trong hàm này đã có sensor_read_all)
+  // Trong calib, ham nay tu quet sensor va cap nhat Min/Max.
   sensor_update_calibration_loop();
 
-  // 4. Quét các mắt cảm biến khi ở chế độ bình thường (tránh quét 2 lần liên tiếp khi calib)
+  // Khi khong calib, quet lien tuc 16 mat cho PID.
   if (!sensor_is_calibrating()) {
     sensor_read_all();
   }
 
-  // 5. Nếu đang ở chế độ Tự động -> Chạy thuật toán PID xử lý từng Case
   if (pid_is_auto_mode()) {
     pid_line_follow_step();
   }
 
-  // 6. Định kỳ in thông tin trạng thái ra Serial & xuất PWM qua BLE (150ms/lần)
+  // Telemetry gioi han 150 ms/lần de tranh Serial/BLE lam cham vong dieu khien.
   if (millis() - lastPrintTime >= 150) {
     lastPrintTime = millis();
+
     int16_t leftPwm = motor_get_left_speed();
     int16_t rightPwm = motor_get_right_speed();
     float err = pid_get_last_error();
     const char* caseName = pid_get_case_name(pid_get_current_case());
-<<<<<<< HEAD
+
     int32_t leftEncoderCount = 0;
     int32_t rightEncoderCount = 0;
     encoder_get_counts(&leftEncoderCount, &rightEncoderCount);
-=======
-    int32_t leftEncoderSnapshot = 0;
-    int32_t rightEncoderSnapshot = 0;
-    encoder_get_counts(&leftEncoderSnapshot, &rightEncoderSnapshot);
-
-    Serial.printf("[ENC] L:%ld R:%ld\n",
-                  static_cast<long>(leftEncoderSnapshot),
-                  static_cast<long>(rightEncoderSnapshot));
->>>>>>> origin/mainv2
 
     if (pid_is_auto_mode()) {
       Serial.printf("[%s] Err: %.1f | PWM L:%d R:%d | Corr: %.1f\n",
-                    caseName,
-                    err,
-                    leftPwm,
-                    rightPwm,
-                    pid_get_correction());
+                    caseName, err, leftPwm, rightPwm, pid_get_correction());
     } else if (calibrationReady) {
       sensor_print_states();
     }
 
-<<<<<<< HEAD
     Serial.printf("[ENC] L:%ld R:%ld\n",
                   static_cast<long>(leftEncoderCount),
                   static_cast<long>(rightEncoderCount));
 
-    // Xuất giá trị PWM 2 động cơ, sai số và tên Case lên BLE
     if (ble_is_connected()) {
-      ble_send_pwm_telemetry(leftPwm, rightPwm, err, caseName);
-      ble_send_encoder_telemetry(leftEncoderCount, rightEncoderCount);
-=======
-    // Send one compact debug snapshot: PWM, pulse counters and both ADC arrays.
-    if (ble_is_connected()) {
+      // Snapshot gom PWM, encoder, ADC raw va gia tri calibrated trong mot goi debug.
       ble_send_debug_telemetry(
-          leftPwm, rightPwm, leftEncoderSnapshot, rightEncoderSnapshot);
->>>>>>> origin/mainv2
+          leftPwm, rightPwm, leftEncoderCount, rightEncoderCount);
     }
   }
 
-  delay(5); // Chu kỳ lấy mẫu và điều khiển 5ms chuẩn ổn định
+  // Khong dung delay(5): vong lap chay lien tuc theo thoi gian quet ADC,
+  // PID va cong viec BLE/telemetry.
 }
