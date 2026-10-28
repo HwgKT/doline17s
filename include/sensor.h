@@ -11,10 +11,10 @@ extern "C" {
 #define SENSOR_END_IDX 15
 #define ADC_SAMPLES 4
 #define MIN_CALIBRATION_DELTA 150
-// Black starts 45% of the way from calibrated white to black (previously 50%).
+// Black starts 40% of the way from calibrated white to black (previously 50%).
 // This is a normalized detection threshold, NOT a shared raw ADC threshold.
 // Each eye's raw threshold is computed separately from its own white/black ADC.
-#define SENSOR_BLACK_THRESHOLD_CAL 450
+#define SENSOR_BLACK_THRESHOLD_CAL 400
 #define BUTTON_DEBOUNCE_MS 50
 #define CAL_FRAMES 128
 #define CAL_MAX_STDDEV 90

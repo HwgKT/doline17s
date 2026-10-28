@@ -35,9 +35,9 @@ PAYLOAD_LEN = struct.calcsize(FMT)  # 69
 FRAME_LEN = len(HDR) + PAYLOAD_LEN + 1  # 72
 ADC_MAX, PWM_MAX, HIST_LEN = 4095, 255, 300
 MIN_CALIB_DELTA = 150
-BLACK_THRESHOLD_CAL = 450  # 45% of each eye's calibrated W->B contrast (not RAW)
+BLACK_THRESHOLD_CAL = 400  # 40% of each eye's calibrated W->B contrast (not RAW)
 def eye_raw_threshold(white, black):
-    """Exact RAW cutoff for firmware's normalized CAL>=450 rule."""
+    """Exact RAW cutoff for firmware's normalized CAL>=400 rule."""
     return white + ((black - white) * BLACK_THRESHOLD_CAL + 999) // 1000
 # Time-normalized derivative: keep Kd=0 until hardware re-tuning.
 PROFILES = {
@@ -249,7 +249,7 @@ class App(tk.Tk):
                        command=lambda text=cmd: self.send_command(text)).pack(side="left", padx=4)
         ttk.Button(modes, text="Reset ENC", width=12,
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
-        self.label(left, "RAW: 0–4095  |  T_i=W_i+45%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
+        self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
                    fg=MUTED).pack(anchor="w")
 
         self.label(panel, "Tốc độ PWM (0–255)", bg=PANEL,

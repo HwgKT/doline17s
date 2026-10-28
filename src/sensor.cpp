@@ -56,8 +56,8 @@ void apply(const Profile &p) {
   for (int i = 0; i < N_SENSORS; ++i) {
     minValues[i] = p.white[i];
     maxValues[i] = p.black[i];
-    // Per-eye raw threshold = W_i + ceil((B_i - W_i)*450/1000).
-    // Integer rounding makes raw>=TH_i equivalent to CAL_i>=450.
+    // Per-eye raw threshold = W_i + ceil((B_i - W_i)*400/1000).
+    // Integer rounding makes raw>=TH_i equivalent to CAL_i>=400.
     const uint32_t contrast = uint32_t(p.black[i]) - p.white[i];
     thresholds[i] = uint16_t(uint32_t(p.white[i]) +
       (contrast * SENSOR_BLACK_THRESHOLD_CAL + 999U) / 1000U);
