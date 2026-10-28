@@ -8,6 +8,7 @@
 #include "pid_controller.h"
 #include "bt_telemetry.h"
 #include "perf_monitor.h"
+#include "adc_bench.h"
 
 namespace {
 // Packed 72-byte SPP telemetry; 100 Hz target = 7.2 kB/s (72 bytes/frame).
@@ -62,7 +63,7 @@ void command(const String &raw) {
   if(!s.length())return;
   // Highest-priority commands: E-STOP cuts PWM and prevents all new motion.
   if(s=="ESTOP"||s=="E_STOP"||s=="EMERGENCY_STOP"){
-    estopLatched=true; safeStop();
+    estopLatched=true; safeStop();adcBenchCancel();
     reply("ESTOP: LATCHED");return;
   }
   if(s=="RESET_ESTOP"){
@@ -72,7 +73,7 @@ void command(const String &raw) {
   Serial.printf("[CMD] %s\n",s.c_str());
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS PID TASKS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:2.2 KI:0 KD:0 BASE:120 STREAM:0/20/50/100 F B L R");
+    reply("HELP: PING STATUS PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:2.2 KI:0 KD:0 BASE:120 STREAM:0/20/50/100 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -91,6 +92,15 @@ void command(const String &raw) {
           " FRAME_BYTES=72");return;
   }
   if(s=="TASKS"){perfTaskReport();return;}
+  if(s=="ADC_BENCH"){
+    if(sensor_is_calibrating()){reply("ERR: ADC_BENCH_CALIB_ACTIVE");return;}
+    safeStop();
+    reply(adcBenchStart()?"ADC_BENCH: STARTED (USB RESULTS)":
+                          "ERR: ADC_BENCH_BUSY_OR_INIT_FAILED");
+    return;
+  }
+  if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
+  if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
   if(s=="PWM"){
     char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
@@ -122,20 +132,23 @@ void command(const String &raw) {
     reply(b);return;
   }
   if(s=="S"||s=="STOP"||s=="M"||s=="MANUAL"){
-    safeStop();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
+    safeStop();adcBenchCancel();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
   }
   if(s=="A"||s=="AUTO"||s=="START"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
     if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
     manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
   if(s=="C"||s=="W"||s=="CALIB"||s=="CAL_WHITE"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
     safeStop();
     reply(sensor_capture_white()?"CAL_WHITE_ACCEPTED":"CAL_BUSY");return;
   }
   if(s=="CAL_BLACK"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(sensor_calibration_state()!=CAL_WHITE_READY){reply("CAL_NEED_WHITE");return;}
     safeStop();
     reply(sensor_capture_black()?"CAL_BLACK_ACCEPTED":"CAL_BUSY");return;
@@ -171,6 +184,7 @@ void command(const String &raw) {
     reply(String("SPEED SET: ")+v);return;
   }
   if(s=="F"||s=="B"||s=="L"||s=="R"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
     safeStop();
     if(s=="F")motor_forward(manualSpeed);
@@ -200,7 +214,7 @@ void connectionState(uint32_t now) {
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
     }else{
-      safeStop();ledWrite(false);lastBlink=now;
+      safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
       Serial.println("[BT] DISCONNECTED -> AUTO OFF, MOTOR STOP");
     }
     btPrevious=connected;
@@ -248,13 +262,14 @@ void loop() {
   connectionState(now);pollUSB();
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  if(sensor_is_button_pressed() && !sensor_is_calibrating()){
+  if(!adcBenchActive() && sensor_is_button_pressed() && !sensor_is_calibrating()){
     safeStop();
     sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
   }
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
-  if(wasCalibrating)sensor_update_calibration_loop();
+  if(adcBenchActive())adcBenchStep();
+  else if(wasCalibrating)sensor_update_calibration_loop();
   else sensor_read_all();
   perfRecord(PERF_ADC, micros()-stageStartUs);
   switch(sensor_take_calibration_event()){
@@ -277,7 +292,7 @@ void loop() {
   // loop-period quantization does not reduce the long-term stream rate.
   // Skip missed slots (one frame max per loop): never burst stale samples.
   const uint32_t txNow=millis();
-  if(streamPeriodMs){
+  if(streamPeriodMs && !adcBenchActive()){
     const uint32_t elapsed=txNow-lastTx;
     if(elapsed>=streamPeriodMs){
       lastTx+=(elapsed/streamPeriodMs)*streamPeriodMs;
