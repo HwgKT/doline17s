@@ -1,7 +1,7 @@
 # Encoder x4 integration (mainv2 to mainv4)
 
 ## Scope
-The signed quadrature x4 decoder is copied unchanged from `mainv2` (`include/encoder.h` and `src/encoder.cpp`). `mainv4` keeps its current line-following PID, 16-channel ADC, Bluetooth Classic SPP framing and 20 Hz telemetry. Encoder interrupts run independently of the PID loop.
+The signed quadrature x4 decoder is copied unchanged from `mainv2` (`include/encoder.h` and `src/encoder.cpp`). `mainv4` keeps its current line-following PID, 16-channel ADC, Bluetooth Classic SPP framing and 100 Hz target telemetry (STREAM-selectable). Encoder interrupts run independently of the PID loop.
 
 ## Wiring and sign
 | Wheel | Channel A | Channel B | Direction sign |
@@ -26,7 +26,7 @@ The encoder values are sampled for output whether Auto PID is enabled or not. **
 1. Build `pio run -e esp32dev`. Flash the ESP32 with the robot supported so the wheels are lifted.
 2. Open USB Serial at 115200, send `ENC_RESET`, then `ENC`; confirm two zeros.
 3. Manually rotate the left wheel forward and backward. `encL` should increase and decrease, while `encR` stays stable. Repeat for the right wheel.
-4. Pair `LineRobot` via Bluetooth Classic on Windows and connect its outgoing SPP COM port in `robot_debug.py`. Confirm count and speed updates and telemetry around 20 Hz.
+4. Pair `LineRobot` via Bluetooth Classic on Windows and connect its outgoing SPP COM port in `robot_debug.py`. Confirm count and speed updates and telemetry up to 100 Hz (verify measured tx Hz).
 5. After line-sensor calibration, run Auto PID with the robot safely supported. Confirm encoder counts continue updating in the App alongside PWM and PID error; log a CSV.
 6. Stop, verify count stability, and reset before the next run.
 

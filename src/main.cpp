@@ -9,13 +9,13 @@
 #include "bt_telemetry.h"
 
 namespace {
-// Packed 72-byte SPP telemetry; default 50 Hz (3.6 kB/s payload+framing).
+// Packed 72-byte SPP telemetry; 100 Hz target = 7.2 kB/s (72 bytes/frame).
 constexpr uint32_t DIAG_PERIOD_MS=1000;   // 1 Hz USB diagnostic
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 uint8_t manualSpeed=120;
-uint16_t streamPeriodMs=20; // 50 Hz; STREAM:0/20/50/100 to change
+uint16_t streamPeriodMs=10; // 100 Hz default; STREAM:0/20/50/100 at runtime
 uint32_t lastTx=0, lastDiag=0, lastBlink=0, lastManual=0;
 uint32_t loopCount=0, pidCount=0, txCount=0;
 String serialLine;
@@ -82,6 +82,7 @@ void command(const String &raw) {
     else if(hzText=="50")streamPeriodMs=20;
     else if(hzText=="100")streamPeriodMs=10;
     else {reply("ERR: STREAM_RATE_USE_0_20_50_100");return;}
+    lastTx=millis(); // Start a fresh period when the stream rate changes.
     reply(String("STREAM Hz=")+(streamPeriodMs?String(1000U/streamPeriodMs):String("0"))+
           " FRAME_BYTES=72");return;
   }
@@ -259,7 +260,17 @@ void loop() {
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
-  if(streamPeriodMs && now-lastTx>=streamPeriodMs){lastTx=now;sendFrame();}
+  // Phase-locked, non-blocking telemetry. Keep the original timebase so
+  // loop-period quantization does not reduce the long-term stream rate.
+  // Skip missed slots (one frame max per loop): never burst stale samples.
+  const uint32_t txNow=millis();
+  if(streamPeriodMs){
+    const uint32_t elapsed=txNow-lastTx;
+    if(elapsed>=streamPeriodMs){
+      lastTx+=(elapsed/streamPeriodMs)*streamPeriodMs;
+      sendFrame();
+    }
+  }
   if(now-lastDiag>=DIAG_PERIOD_MS){
     float sec=(now-lastDiag)/1000.0f;
     int32_t encL=0,encR=0;
@@ -270,5 +281,7 @@ void loop() {
       loopCount/sec,pidCount/sec,txCount/sec,(long)encL,(long)encR);
     loopCount=pidCount=txCount=0;lastDiag=now;
   }
-  delay(5);
+  // No fixed 5 ms delay: allow the control loop to run as soon as ADC is ready.
+  // Keep cooperative scheduling for the ESP32 Bluetooth/FreeRTOS tasks.
+  yield();
 }
