@@ -30,7 +30,7 @@ from tkinter import filedialog, ttk
 
 import serial
 from serial.tools import list_ports
-from spp_csv_recorder import TelemetryCsvRecorder
+from run_csv_lifecycle import RunCsvLifecycle
 
 HDR = b"\xAA\x55"
 FMT = "<I16H2i2h5fB"
@@ -154,8 +154,10 @@ class App(tk.Tk):
         self.q = queue.Queue(maxsize=4096)  # bounded GUI data queue
         self.controls_q = queue.SimpleQueue()  # priority text replies / E-STOP ACK
         self.reader = None
-        self.recorder = None  # Automatic persistent writer starts on first SPP connect.
-        self.csv_status = tk.StringVar(value="CSV: chưa kết nối")
+        self.run_csv = RunCsvLifecycle(self.controls_q)
+        self.stop_ack_deadline = None
+        self.start_confirmed = False
+        self.csv_status = tk.StringVar(value="CSV: chờ START")
         self.session_log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
         self.hist = collections.deque(maxlen=HIST_LEN)
         self.recent_rows = collections.deque(maxlen=15000)  # UI cache only, ~50 sec at 300 Hz
@@ -194,7 +196,7 @@ class App(tk.Tk):
         self._build()
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.bind_all("<Escape>", lambda _event: self.emergency_stop())
+        self.bind_all("<Escape>", lambda _event: self.stop_line())
         self.after(30, self.tick)
 
     def label(self, parent, text="", fg=FG, bg=None, **kw):
@@ -210,8 +212,8 @@ class App(tk.Tk):
         ttk.Button(top, text="Quét COM", command=self.refresh_ports).pack(side="left", padx=3)
         self.connect_btn = ttk.Button(top, text="Kết nối", command=self.toggle_connect)
         self.connect_btn.pack(side="left", padx=3)
-        self.csv_btn = ttk.Button(top, text="Ghi CSV", command=self.toggle_csv)
-        self.csv_btn.pack(side="left", padx=4)
+        self.label(top, "CSV: tự động START/STOP", fg=GREEN,
+                   font=("Segoe UI", 9)).pack(side="left", padx=4)
         self.label(top, "SPP Hz", fg=MUTED).pack(side="left", padx=(4, 2))
         self.rate_combo = ttk.Combobox(top, textvariable=self.stream_rate,
                                        values=("300", "200", "100", "50", "20", "0"),
@@ -275,14 +277,11 @@ class App(tk.Tk):
                                    bg=GREEN, fg="#ffffff", activebackground="#059669",
                                    relief="flat", height=1)
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.estop_btn = tk.Button(control, text="DỪNG KHẨN CẤP",
-                                   command=self.emergency_stop, font=("Segoe UI", 10, "bold"),
-                                   bg=ROSE, fg="#ffffff", activebackground="#be123c",
-                                   relief="flat", height=1)
-        self.estop_btn.pack(side="left", fill="x", expand=True)
-        self.reset_estop_btn = ttk.Button(panel, text="Mở khóa E-STOP (không chạy lại)",
-                                          command=self.reset_estop)
-        self.reset_estop_btn.pack(fill="x", pady=(0, 4))
+        self.stop_btn = tk.Button(control, text="DỪNG", command=self.stop_line,
+                                  font=("Segoe UI", 10, "bold"),
+                                  bg=ROSE, fg="#ffffff", activebackground="#be123c",
+                                  relief="flat", height=1)
+        self.stop_btn.pack(side="left", fill="x", expand=True)
         self.control_state = tk.StringVar(value="Chưa kết nối / chưa xác định trạng thái")
         self.control_state_label = self.label(panel, textvariable=self.control_state,
                                               bg=PANEL, fg=AMBER, wraplength=395,
@@ -521,20 +520,18 @@ class App(tk.Tk):
         if not path:
             return
         try:
-            if self.recorder is None:
-                self.log("Chưa có dữ liệu CSV; kết nối Bluetooth trước")
+            if self.run_csv.last is None:
+                self.log("Chưa có lượt chạy CSV nào để xuất")
                 return
+            selected = self.run_csv.last
 
             def export_job():
                 try:
-                    count = self.recorder.export_snapshot(path)
+                    count = selected.export_snapshot(path)
                     message = f"Đã xuất CSV ({count} mẫu): {path}"
                 except (OSError, ValueError) as exc:
                     message = f"Lỗi xuất CSV: {exc}"
-                try:
-                    self.q.put_nowait(("csv_export", message))
-                except queue.Full:
-                    pass
+                self.controls_q.put(("csv_export", message))
 
             threading.Thread(target=export_job, daemon=True).start()
         except OSError as exc:
@@ -555,13 +552,8 @@ class App(tk.Tk):
             self.log("Chưa chọn COM")
             return
         try:
-            if self.recorder is None:
-                self.recorder = TelemetryCsvRecorder(CSV_HEADER)
-                self.recorder.start()
-                self.csv_btn.config(text="Tạm dừng CSV")
-                self.csv_status.set(f"CSV GHI: {self.recorder.path.name}")
-            self.recorder.set_calibration()
-            self.reader = Reader(port, self.q, self.recorder, self.controls_q)
+            # Merely connecting Bluetooth never opens a CSV file.
+            self.reader = Reader(port, self.q, None, self.controls_q)
         except (serial.SerialException, OSError, ValueError) as exc:
             self.status_label.config(text=f"Lỗi COM: {exc}", fg=ROSE)
             self.log(str(exc))
@@ -577,7 +569,7 @@ class App(tk.Tk):
         self.update_control_buttons()
         self.prev = None
         self.last_rx_total = self.reader.frames_rx
-        self.last_csv_total = self.recorder.written
+        self.last_csv_total = 0
         self.frames = 0
         self.rate_time = time.monotonic()
         self.last_diag_rx = None
@@ -586,7 +578,8 @@ class App(tk.Tk):
         self.connect_btn.config(text="Ngắt")
         self.status_label.config(text=f"Đã mở {port}", fg=GREEN)
         self.log(f"Đã mở {port}; chờ frame SPP từ ESP32")
-        self.log(f"Ghi CSV nền: {self.recorder.path}")
+        self.log("CSV: BẮT ĐẦU tạo file mới, DỪNG chốt file")
+        self.csv_status.set("CSV: SẴN SÀNG — chưa ghi")
         self.calibration_ok = False
         self.cal_data = {}
         self.send_command("STATUS")
@@ -603,6 +596,8 @@ class App(tk.Tk):
         if self.reader:
             self.reader.running = False
             self.reader.join(timeout=1)
+            if self.run_csv.active is not None:
+                self.finish_run_csv("MẤT KẾT NỐI; CHƯA XÁC NHẬN DỪNG")
             self.reader = None
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
@@ -612,8 +607,6 @@ class App(tk.Tk):
         self.auto_running = False
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
-        if self.recorder:
-            self.recorder.set_calibration()
         self.next_diag_poll = None
         self.last_diag_rx = None
         self.loop_debug.set("LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (mất kết nối)")
@@ -683,41 +676,55 @@ class App(tk.Tk):
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
-                     and not self.estop_pending and not self.start_pending)
+                     and not self.estop_pending and not self.start_pending
+                     and not self.auto_running and self.run_csv.active is None)
         self.start_btn.configure(state="normal" if can_start else "disabled")
-        can_reset = connected and self.estop_latched is True and not self.estop_pending
-        self.reset_estop_btn.configure(state="normal" if can_reset else "disabled")
+        self.stop_btn.configure(state="normal" if connected else "disabled")
+
+    def finish_run_csv(self, reason):
+        recorder = self.run_csv.finish(self.reader, reason)
+        if recorder is None:
+            return
+        self.stop_ack_deadline = None
+        self.start_confirmed = False
+        self.csv_status.set(f"CSV ĐANG ĐÓNG: {recorder.path.name}")
+        self.log(f"CSV đang chốt ({reason}): {recorder.path}")
 
     def start_line(self):
-        if self.estop_latched is not False:
-            self.log("Không thể bắt đầu: E-STOP đang khóa hoặc chưa xác nhận trạng thái.")
+        if self.estop_latched is not False or self.auto_running or self.start_pending:
+            self.log("Chưa thể START: AUTO đang chạy hoặc firmware bị khóa.")
             return
+        if self.reader is None or not self.reader.is_alive():
+            self.log("Chưa kết nối Bluetooth SPP.")
+            return
+        try:
+            calib = (self.cal_min, self.cal_max) if self.calibration_ok else None
+            recorder = self.run_csv.begin(self.reader, CSV_HEADER, calib)
+        except (OSError, RuntimeError) as exc:
+            self.log(f"Không tạo được CSV, chưa gửi AUTO: {exc}")
+            return
+        self.last_csv_total = 0
+        self.stop_ack_deadline = None
+        self.start_confirmed = False
+        self.csv_status.set(f"CSV GHI: {recorder.path.name}")
+        self.log(f"CSV BẮT ĐẦU: {recorder.path}")
         if self.send_command("AUTO"):
             self.start_pending = True
             self.control_state.set("Đã gửi AUTO — chờ ESP32 xác nhận.")
             self.update_control_buttons()
+        else:
+            self.finish_run_csv("KHÔNG GỬI ĐƯỢC AUTO")
 
-    def emergency_stop(self):
-        # A sent Bluetooth command is NOT proof that the motor has stopped.
-        self.auto_running = False
-        self.start_pending = False
-        self.estop_latched = True
-        self.estop_pending = True
-        self.control_state.set("Đang gửi E-STOP — chưa có xác nhận từ ESP32!")
-        self.control_state_label.configure(fg=ROSE)
-        self.update_control_buttons()
-        if not self.send_command("ESTOP"):
-            self.estop_pending = False
-            self.control_state.set("KHÔNG XÁC NHẬN ĐƯỢC E-STOP — NGẮT NGUỒN ĐỘNG CƠ!")
+    def stop_line(self):
+        # STOP is the single visible stop action. CSV closes after firmware ACK.
+        if self.send_command("STOP"):
+            if self.run_csv.active is not None:
+                self.stop_ack_deadline = time.monotonic() + 2.0
+            self.start_pending = False
+            self.control_state.set("Đã gửi STOP — chờ ESP32 xác nhận.")
             self.update_control_buttons()
-
-    def reset_estop(self):
-        if self.estop_latched is not True or self.estop_pending:
-            return
-        if self.send_command("RESET_ESTOP"):
-            self.estop_pending = True
-            self.control_state.set("Đang gửi mở khóa — chờ ESP32 xác nhận.")
-            self.update_control_buttons()
+        else:
+            self.finish_run_csv("STOP KHÔNG GỬI ĐƯỢC / CHƯA XÁC NHẬN DỪNG")
 
     def start_calibration(self):
         if self.send_command("CAL_WHITE"):
@@ -726,15 +733,6 @@ class App(tk.Tk):
     def stop_calibration(self):
         if self.send_command("CAL_BLACK"):
             self.cal_state.set("Đã gửi Lấy ĐEN; chờ ESP32 xác nhận.")
-
-    def toggle_csv(self):
-        if self.recorder is None:
-            self.log("Kết nối Bluetooth để tự động tạo file CSV.")
-            return
-        self.recorder.recording = not self.recorder.recording
-        self.csv_btn.config(text="Tạm dừng CSV" if self.recorder.recording else "Ghi tiếp CSV")
-        self.log(("Tiếp tục CSV: " if self.recorder.recording else "Tạm dừng CSV: ")
-                 + str(self.recorder.path))
 
     def sample_csv_row(self, s):
         adc = list(s[1:17])
@@ -779,8 +777,9 @@ class App(tk.Tk):
             self.estop_pending = False
             self.start_pending = False
             self.auto_running = False
-            self.control_state.set("E-STOP ĐÃ CHỐT — ĐỘNG CƠ DỪNG (ESP32 xác nhận).")
+            self.control_state.set("Firmware báo E-STOP đã chốt; có thể RESET_ESTOP qua terminal.")
             self.control_state_label.configure(fg=ROSE)
+            self.finish_run_csv("ESTOP ĐÃ XÁC NHẬN")
             self.update_control_buttons()
         elif message == "ESTOP: CLEARED (MOTORS OFF)":
             self.estop_latched = False
@@ -792,6 +791,7 @@ class App(tk.Tk):
             self.update_control_buttons()
         elif message == "MODE: AUTO PID":
             self.start_pending = False
+            self.start_confirmed = True
             self.auto_running = True
             self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
             self.control_state_label.configure(fg=GREEN)
@@ -801,7 +801,14 @@ class App(tk.Tk):
             self.auto_running = False
             self.control_state.set("Không thể bắt đầu: cần hoàn tất calibration TRẮNG/ĐEN.")
             self.control_state_label.configure(fg=AMBER)
+            self.finish_run_csv("AUTO BỊ TỪ CHỐI: CALIBRATION")
             self.update_control_buttons()
+        elif message in ("ERR: ADC_NOT_READY", "ERR: ADC_BENCH_ACTIVE"):
+            if self.start_pending and not self.start_confirmed:
+                self.start_pending = False
+                self.auto_running = False
+                self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
+                self.update_control_buttons()
         elif message.startswith("DIAG:"):
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
@@ -828,8 +835,11 @@ class App(tk.Tk):
                 self.start_pending = False
                 self.auto_running = bool(auto and auto.group(1) == "1")
                 if self.estop_latched:
-                    self.control_state.set("E-STOP đang khóa — cần mở khóa thủ công.")
+                    self.control_state.set("E-STOP đang khóa — gửi RESET_ESTOP trong terminal để mở khóa.")
                     self.control_state_label.configure(fg=ROSE)
+                    self.finish_run_csv("STATUS: ESTOP ĐANG KHÓA")
+                elif self.start_confirmed and not self.auto_running:
+                    self.finish_run_csv("STATUS: AUTO ĐÃ DỪNG")
                 elif self.auto_running:
                     self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
                     self.control_state_label.configure(fg=GREEN)
@@ -837,11 +847,14 @@ class App(tk.Tk):
                     self.control_state.set("SẴN SÀNG — động cơ đang dừng.")
                     self.control_state_label.configure(fg=GREEN)
                 self.update_control_buttons()
-        elif message in ("MOTOR: STOP", "MODE: MANUAL"):
+        elif message in ("MOTOR: STOP", "MODE: MANUAL",
+                              "[SAFE] MANUAL DEADMAN: MOTOR STOP",
+                              "ERR: ADC_READ_FAULT_MOTORS_STOPPED"):
             self.auto_running = False
             self.start_pending = False
+            self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + message)
             if self.estop_latched is False:
-                self.control_state.set("Đã dừng — sẵn sàng khởi động lại.")
+                self.control_state.set("Đã dừng — sẵn sàng START lượt mới.")
             self.update_control_buttons()
         pid = re.search(r"PID:\s*Kp=([\d.]+)\s+Ki=([\d.]+)\s+Kd=([\d.]+)\s+Base=(\d+)",
                         message, flags=re.IGNORECASE)
@@ -909,6 +922,11 @@ class App(tk.Tk):
                 elif kind == "error":
                     self.disconnect()
                     self.status_label.config(text=payload, fg=ROSE)
+                elif kind == "csv_export":
+                    self.log(payload)
+                elif kind == "csv_closed":
+                    self.csv_status.set(payload)
+                    self.log(payload)
         except queue.Empty:
             pass
         try:
@@ -934,15 +952,15 @@ class App(tk.Tk):
             self.rate_label.config(
                 text=f"RX {rx_hz:.0f} Hz | APP {app_hz:.0f} Hz | "
                      f"q={self.q.qsize()} dropUI={drops} CRC={errors}")
-            if self.recorder is not None:
-                state = "GHI" if self.recorder.recording else "TẠM DỪNG"
-                csv_hz = (self.recorder.written - self.last_csv_total) / interval
+            if self.run_csv.active is not None:
+                rec = self.run_csv.active
+                csv_hz = (rec.written - self.last_csv_total) / interval
                 self.csv_status.set(
-                    f"CSV {state}: {csv_hz:.0f} Hz | tổng={self.recorder.written} "
-                    f"đợi={self.recorder.queue.qsize()} dropCSV={self.recorder.dropped}"
-                    + (f" LỖI={self.recorder.error}" if self.recorder.error else "")
-                    + f" | {self.recorder.path.name}")
-                self.last_csv_total = self.recorder.written
+                    f"CSV GHI: {csv_hz:.0f} Hz | tổng={rec.written} "
+                    f"đợi={rec.queue.qsize()} dropCSV={rec.dropped}"
+                    + (f" LỖI={rec.error}" if rec.error else "")
+                    + f" | {rec.path.name}")
+                self.last_csv_total = rec.written
             self.last_rx_total = total
             self.frames = 0
             self.rate_time = now
@@ -953,6 +971,10 @@ class App(tk.Tk):
                 self.next_diag_poll = now + self.diag_interval_s
             else:
                 self.next_diag_poll = None
+        if self.stop_ack_deadline is not None and now >= self.stop_ack_deadline:
+            self.finish_run_csv("STOP: HẾT HẠN XÁC NHẬN — CHƯA RÕ ĐỘNG CƠ ĐÃ DỪNG")
+            self.control_state.set("STOP chưa được ESP32 xác nhận. Kiểm tra động cơ!")
+            self.control_state_label.configure(fg=ROSE)
         if self.last_diag_rx is not None and now - self.last_diag_rx > 6.0:
             self.loop_debug.set("LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (DIAG quá hạn)")
             self.last_diag_rx = None
@@ -1037,8 +1059,7 @@ class App(tk.Tk):
 
     def on_close(self):
         self.disconnect()
-        if self.recorder is not None:
-            self.recorder.stop()
+        self.run_csv.close_all()
         self.session_log_file.close()
         self.destroy()
 

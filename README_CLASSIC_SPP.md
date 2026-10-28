@@ -75,3 +75,10 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 - CSV status additionally displays the actual disk writer throughput in rows/s, total persisted rows, queue depth and dropped rows. This is separate from firmware SPP TX Hz, Python RX Hz and GUI APP Hz.
 - Incoming text responses (including ESTOP acknowledgments and periodic DIAG) use a separate high-priority Python queue. GUI telemetry backlog cannot block the SPP reader when it needs to forward these responses. Binary telemetry still goes to disk first, then UI.
 - Compact Tkinter control row/buttons and responsive sensor graph widths complement the two equal dashboard columns and dedicated lower-right terminal.
+
+
+## One CSV per START/STOP, simplified controls
+- Only **BẮT ĐẦU DÒ LINE** and **DỪNG** are shown in the app. The former E-STOP and RESET_ESTOP dashboard buttons were removed; Escape now sends the normal STOP command. Firmware still supports ESTOP/RESET_ESTOP manually over SPP for safety diagnostics, but normal STOP is not a physical emergency cutoff.
+- Bluetooth connection alone does not create CSV. Every START immediately creates a new persistent `logs/linerobot_300hz_TIMESTAMP.csv` and begins capturing every valid SPP frame before sending AUTO. After ESP32 confirms STOP with `MOTOR: STOP`, the app detaches the logger, flushes any queued rows asynchronously and closes that CSV, keeping Bluetooth connected.
+- Each subsequent START generates a new file; export copies the latest file. Disconnect, failed AUTO, ADC errors, external ESTOP, or STOP without acknowledgment close the current CSV with a clearly labeled reason. A 2-second STOP-ack timeout does not prove the motors have stopped.
+- Data columns and 300Hz SPP stream remain unchanged. CSV status reports actual write rate, samples and drops during each run. Existing `run_csv_lifecycle.py` coordinates the per-run writer threads.
