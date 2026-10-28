@@ -1,8 +1,27 @@
 #include <Arduino.h>
+#include "pinout.h"
 #include "sensor.h"
 #include "motor.h"
 #include "ble_control.h"
 #include "pid_controller.h"
+
+namespace {
+volatile uint32_t encoderLeftPulses = 0;
+volatile uint32_t encoderRightPulses = 0;
+portMUX_TYPE encoderMux = portMUX_INITIALIZER_UNLOCKED;
+
+void IRAM_ATTR onEncoderLeftPulse() {
+  portENTER_CRITICAL_ISR(&encoderMux);
+  ++encoderLeftPulses;
+  portEXIT_CRITICAL_ISR(&encoderMux);
+}
+
+void IRAM_ATTR onEncoderRightPulse() {
+  portENTER_CRITICAL_ISR(&encoderMux);
+  ++encoderRightPulses;
+  portEXIT_CRITICAL_ISR(&encoderMux);
+}
+}  // namespace
 
 unsigned long lastPrintTime = 0;
 
@@ -19,6 +38,13 @@ void setup() {
 
   // 2. Khởi tạo điều khiển 2 động cơ PWM
   motor_init();
+
+  // One pulse input per wheel. Use 3.3 V-compatible encoder outputs.
+  // Current speed counter uses the first output channel from each encoder.
+  pinMode(PIN_ENCODER_L1, INPUT_PULLUP);
+  pinMode(PIN_ENCODER_R1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_L1), onEncoderLeftPulse, RISING);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_R1), onEncoderRightPulse, RISING);
 
   // 3. Khởi tạo PID với cấu hình mặc định
   pid_init(2.2f, 0.0f, 10.0f, 120);
@@ -78,9 +104,17 @@ void loop() {
       sensor_print_states();
     }
 
-    // Xuất giá trị PWM 2 động cơ, sai số và tên Case lên BLE
+    // Send one compact debug snapshot: PWM, pulse counters and both ADC arrays.
     if (ble_is_connected()) {
-      ble_send_pwm_telemetry(leftPwm, rightPwm, err, caseName);
+      uint32_t leftEncoderSnapshot;
+      uint32_t rightEncoderSnapshot;
+      portENTER_CRITICAL(&encoderMux);
+      leftEncoderSnapshot = encoderLeftPulses;
+      rightEncoderSnapshot = encoderRightPulses;
+      portEXIT_CRITICAL(&encoderMux);
+
+      ble_send_debug_telemetry(
+          leftPwm, rightPwm, leftEncoderSnapshot, rightEncoderSnapshot);
     }
   }
 

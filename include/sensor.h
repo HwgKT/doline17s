@@ -3,18 +3,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "pinout.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// =================== CẤU HÌNH CHÂN (PIN CONFIG) ===================
-#define PIN_LINE_SIG          36      // Chân đọc Analog (ADC1_CH0)
-#define PIN_MUX_A             17      // S0
-#define PIN_MUX_B             18      // S1
-#define PIN_MUX_C             19      // S2
-#define PIN_MUX_D             23      // S3
-#define PIN_CALIB             34      // Nút nhấn hiệu chuẩn (Calibration)
 
 // =================== THÔNG SỐ CẢM BIẾN ===================
 #define N_SENSORS             16      // Tổng số mắt

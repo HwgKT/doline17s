@@ -8,6 +8,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <string>
+#include <string.h>
 
 // Chuẩn dịch vụ Nordic UART (tương thích app Serial Bluetooth Terminal, nRF Connect, v.v.)
 #define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -49,6 +50,74 @@ void ble_send_pwm_telemetry(int16_t left, int16_t right, float error, const char
              left, right, error, caseName ? caseName : "Unknown");
     pTxCharacteristic->setValue((uint8_t*)buffer, strlen(buffer));
     pTxCharacteristic->notify();
+}
+
+namespace {
+constexpr uint8_t kDebugMagic = 0xA7;
+constexpr uint8_t kDebugPayloadLength = 56;
+constexpr uint8_t kDebugFragmentPayloadLength = 16;
+constexpr uint8_t kDebugFragmentCount = 4;
+uint8_t debugTelemetrySequence = 0;
+
+void writeU16LE(uint8_t* destination, uint16_t value) {
+    destination[0] = static_cast<uint8_t>(value & 0xFF);
+    destination[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+}
+
+void writeU32LE(uint8_t* destination, uint32_t value) {
+    destination[0] = static_cast<uint8_t>(value & 0xFF);
+    destination[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    destination[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+    destination[3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+
+void packUnsignedBits(uint8_t* destination, size_t startBit,
+                      uint16_t value, uint8_t bitWidth) {
+    for (uint8_t bit = 0; bit < bitWidth; ++bit) {
+        if (value & static_cast<uint16_t>(1U << bit)) {
+            const size_t outputBit = startBit + bit;
+            destination[outputBit >> 3] |=
+                static_cast<uint8_t>(1U << (outputBit & 7));
+        }
+    }
+}
+}  // namespace
+
+void ble_send_debug_telemetry(int16_t left, int16_t right,
+                              uint32_t encoder_left, uint32_t encoder_right) {
+    if (!deviceConnected || pTxCharacteristic == nullptr) return;
+
+    // Payload: signed PWM L/R (4 B), encoder counters (8 B),
+    // 16 raw ADC values packed at 12 bits (24 B), calibrated at 10 bits (20 B).
+    uint8_t payload[kDebugPayloadLength] = {};
+    writeU16LE(payload, static_cast<uint16_t>(left));
+    writeU16LE(payload + 2, static_cast<uint16_t>(right));
+    writeU32LE(payload + 4, encoder_left);
+    writeU32LE(payload + 8, encoder_right);
+
+    for (uint8_t i = 0; i < N_SENSORS; ++i) {
+        const uint16_t raw = sensorRaw[i] > 4095 ? 4095 : sensorRaw[i];
+        const uint16_t calibrated = sensor_get_calibrated(i);
+        packUnsignedBits(payload, 12U * 8U + i * 12U, raw, 12);
+        packUnsignedBits(payload, 36U * 8U + i * 10U,
+                         calibrated > 1000 ? 1000 : calibrated, 10);
+    }
+
+    const uint8_t sequence = debugTelemetrySequence++;
+    for (uint8_t fragment = 0; fragment < kDebugFragmentCount; ++fragment) {
+        const uint8_t offset = fragment * kDebugFragmentPayloadLength;
+        const uint8_t remaining = kDebugPayloadLength - offset;
+        const uint8_t chunkLength = remaining > kDebugFragmentPayloadLength
+            ? kDebugFragmentPayloadLength : remaining;
+        uint8_t frame[3 + kDebugFragmentPayloadLength] = {};
+        frame[0] = kDebugMagic;
+        frame[1] = sequence;
+        frame[2] = fragment;
+        memcpy(frame + 3, payload + offset, chunkLength);
+        pTxCharacteristic->setValue(frame, chunkLength + 3);
+        pTxCharacteristic->notify();
+        delay(1); // Let the BLE task submit each notification before the next one.
+    }
 }
 
 uint8_t ble_get_current_speed(void) {

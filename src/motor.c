@@ -12,10 +12,10 @@ void motor_init(void) {
     ledcSetup(CH_R2, MOTOR_PWM_FREQ, MOTOR_PWM_RESOLUTION);
 
     // Gán chân điều khiển vào các kênh PWM tương ứng
-    ledcAttachPin(IN_L1, CH_L1);
-    ledcAttachPin(IN_L2, CH_L2);
-    ledcAttachPin(IN_R1, CH_R1);
-    ledcAttachPin(IN_R2, CH_R2);
+    ledcAttachPin(PIN_MOTOR_L1, CH_L1);
+    ledcAttachPin(PIN_MOTOR_L2, CH_L2);
+    ledcAttachPin(PIN_MOTOR_R1, CH_R1);
+    ledcAttachPin(PIN_MOTOR_R2, CH_R2);
 
     // Mặc định dừng cả 2 động cơ khi khởi động
     motor_stop();
