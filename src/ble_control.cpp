@@ -2,6 +2,7 @@
 #include "motor.h"
 #include "sensor.h"
 #include "pid_controller.h"
+#include "encoder.h"
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -51,6 +52,15 @@ void ble_send_pwm_telemetry(int16_t left, int16_t right, float error, const char
     pTxCharacteristic->notify();
 }
 
+void ble_send_encoder_telemetry(int32_t left, int32_t right) {
+    if (!deviceConnected || pTxCharacteristic == nullptr) return;
+    char buffer[48];
+    snprintf(buffer, sizeof(buffer), "ENC: L=%ld R=%ld\n",
+             static_cast<long>(left), static_cast<long>(right));
+    pTxCharacteristic->setValue((uint8_t*)buffer, strlen(buffer));
+    pTxCharacteristic->notify();
+}
+
 uint8_t ble_get_current_speed(void) {
     return currentSpeed;
 }
@@ -75,6 +85,20 @@ static void processBleCommand(const std::string& rxValue) {
 
     // Chuyển ký tự đầu thành chữ in hoa để dễ so khớp
     char firstChar = toupper(cmd[0]);
+
+    if (cmd == "ENC_RESET" || cmd == "RESET_ENCODER") {
+        encoder_reset_counts();
+        ble_send_string("ENC_RESET:OK\n");
+        return;
+    }
+
+    if (cmd == "ENC" || cmd == "ENCODER" || cmd == "ENC?") {
+        int32_t leftCount = 0;
+        int32_t rightCount = 0;
+        encoder_get_counts(&leftCount, &rightCount);
+        ble_send_encoder_telemetry(leftCount, rightCount);
+        return;
+    }
 
     // ========================================================
     // 1. NHÓM LỆNH HIỆU CHUẨN CẢM BIẾN (LIA QUA LẠI - SWEEP CALIBRATION)
@@ -390,7 +414,7 @@ void ble_control_update(void) {
 
     if (deviceConnected && !oldDeviceConnected) {
         oldDeviceConnected = deviceConnected;
-        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
+        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID | ENC: Doc encoder\nENC_RESET: Dat bo dem encoder ve 0\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
     }
 }
 

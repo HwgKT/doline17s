@@ -22,11 +22,11 @@ static int calibButtonState = LOW;
 static unsigned long lastCalibChangeTime = 0;
 
 void sensor_init(void) {
-    pinMode(PIN_MUX_A, OUTPUT);
-    pinMode(PIN_MUX_B, OUTPUT);
-    pinMode(PIN_MUX_C, OUTPUT);
-    pinMode(PIN_MUX_D, OUTPUT);
-    pinMode(PIN_CALIB, INPUT);
+    pinMode(PIN_MUX_S0, OUTPUT);
+    pinMode(PIN_MUX_S1, OUTPUT);
+    pinMode(PIN_MUX_S2, OUTPUT);
+    pinMode(PIN_MUX_S3, OUTPUT);
+    pinMode(PIN_CALIB_BUTTON, INPUT);
 
     // GPIO36 trên ESP32 là chân input-only
     analogReadResolution(12); // Độ phân giải 12-bit (0 - 4095)
@@ -41,10 +41,10 @@ void sensor_init(void) {
 }
 
 void sensor_mux_select(uint8_t channel) {
-    digitalWrite(PIN_MUX_A, channel & 0x01);
-    digitalWrite(PIN_MUX_B, (channel >> 1) & 0x01);
-    digitalWrite(PIN_MUX_C, (channel >> 2) & 0x01);
-    digitalWrite(PIN_MUX_D, (channel >> 3) & 0x01);
+    digitalWrite(PIN_MUX_S0, channel & 0x01);
+    digitalWrite(PIN_MUX_S1, (channel >> 1) & 0x01);
+    digitalWrite(PIN_MUX_S2, (channel >> 2) & 0x01);
+    digitalWrite(PIN_MUX_S3, (channel >> 3) & 0x01);
 }
 
 uint16_t sensor_read_mux(uint8_t channel) {
@@ -188,7 +188,7 @@ bool sensor_is_calibrating(void) {
 }
 
 bool sensor_is_button_pressed(void) {
-    int reading = digitalRead(PIN_CALIB);
+    int reading = digitalRead(PIN_CALIB_BUTTON);
     if (reading != lastCalibReading) {
         lastCalibChangeTime = millis();
     }

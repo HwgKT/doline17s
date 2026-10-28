@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "sensor.h"
 #include "motor.h"
+#include "encoder.h"
 #include "ble_control.h"
 #include "pid_controller.h"
 
@@ -19,6 +20,9 @@ void setup() {
 
   // 2. Khởi tạo điều khiển 2 động cơ PWM
   motor_init();
+
+  // 2.1 Khởi tạo bộ đếm encoder hai bánh
+  encoder_init();
 
   // 3. Khởi tạo PID với cấu hình mặc định
   pid_init(2.2f, 0.0f, 10.0f, 120);
@@ -66,6 +70,9 @@ void loop() {
     int16_t rightPwm = motor_get_right_speed();
     float err = pid_get_last_error();
     const char* caseName = pid_get_case_name(pid_get_current_case());
+    int32_t leftEncoderCount = 0;
+    int32_t rightEncoderCount = 0;
+    encoder_get_counts(&leftEncoderCount, &rightEncoderCount);
 
     if (pid_is_auto_mode()) {
       Serial.printf("[%s] Err: %.1f | PWM L:%d R:%d | Corr: %.1f\n",
@@ -78,9 +85,14 @@ void loop() {
       sensor_print_states();
     }
 
+    Serial.printf("[ENC] L:%ld R:%ld\n",
+                  static_cast<long>(leftEncoderCount),
+                  static_cast<long>(rightEncoderCount));
+
     // Xuất giá trị PWM 2 động cơ, sai số và tên Case lên BLE
     if (ble_is_connected()) {
       ble_send_pwm_telemetry(leftPwm, rightPwm, err, caseName);
+      ble_send_encoder_telemetry(leftEncoderCount, rightEncoderCount);
     }
   }
 

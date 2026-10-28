@@ -48,6 +48,7 @@ void ble_send_sensor_states(void);
  * @param caseName Tên trường hợp dò line hiện tại
  */
 void ble_send_pwm_telemetry(int16_t left, int16_t right, float error, const char* caseName);
+void ble_send_encoder_telemetry(int32_t left, int32_t right);
 
 // =================== CẤU HÌNH TỐC ĐỘ ĐỘNG CƠ ===================
 

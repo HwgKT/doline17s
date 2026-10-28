@@ -967,6 +967,16 @@
           <button class="btn-preset" onclick="setPresetSpeed(255)">Tối đa (255)</button>
         </div>
       </div>
+
+      <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(34,211,238,0.18); border-radius: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: #cbd5e1;">
+          <span>Encoder trái: <strong id="encoderLeftCount" style="color: #22d3ee; font-family: 'JetBrains Mono';">0</strong></span>
+          <span>Encoder phải: <strong id="encoderRightCount" style="color: #22d3ee; font-family: 'JetBrains Mono';">0</strong></span>
+        </div>
+        <button class="btn-action-sm" id="btnResetEncoder" onclick="sendCommand('ENC_RESET')" title="Đặt bộ đếm hai bánh về 0">
+          ↺ Đặt lại xung
+        </button>
+      </div>
     </div>
 
     <!-- CỘT PHẢI: HIỆU CHUẨN CẢM BIẾN & HIỂN THỊ 16 MẮT -->
@@ -1356,6 +1366,19 @@
       }
 
       // 5. Nhận thông báo đổi cực tính cảm biến
+      if (raw.includes('ENC:')) {
+        const encoderMatch = raw.match(/ENC:\s*L=(-?\d+)\s+R=(-?\d+)/);
+        if (encoderMatch) {
+          document.getElementById('encoderLeftCount').textContent = encoderMatch[1];
+          document.getElementById('encoderRightCount').textContent = encoderMatch[2];
+        }
+      }
+
+      if (raw.includes('ENC_RESET:OK')) {
+        document.getElementById('encoderLeftCount').textContent = '0';
+        document.getElementById('encoderRightCount').textContent = '0';
+      }
+
       if (raw.includes('POLARITY:')) {
         log(`Đã cập nhật cực tính: ${raw}`, 'rx');
       }
