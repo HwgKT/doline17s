@@ -56,7 +56,11 @@ void apply(const Profile &p) {
   for (int i = 0; i < N_SENSORS; ++i) {
     minValues[i] = p.white[i];
     maxValues[i] = p.black[i];
-    thresholds[i] = (uint32_t(p.white[i]) + p.black[i] + 1U) / 2U; // exact CAL>=500 boundary
+    // Per-eye raw threshold = W_i + ceil((B_i - W_i)*450/1000).
+    // Integer rounding makes raw>=TH_i equivalent to CAL_i>=450.
+    const uint32_t contrast = uint32_t(p.black[i]) - p.white[i];
+    thresholds[i] = uint16_t(uint32_t(p.white[i]) +
+      (contrast * SENSOR_BLACK_THRESHOLD_CAL + 999U) / 1000U);
   }
   calibrationReady = true;
 }
@@ -222,7 +226,10 @@ uint16_t sensor_get_calibrated(uint8_t index) {
   if (x >= black) return 1000;
   return (uint32_t(x - white) * 1000UL) / (black - white);
 }
-bool sensor_is_black(uint8_t i) { return sensor_get_calibrated(i) >= 500; }
+bool sensor_is_black(uint8_t i) {
+  // Use this sensor's independently calibrated ADC threshold, not a global cutoff.
+  return calibrationReady && i < N_SENSORS && sensorRaw[i] >= thresholds[i];
+}
 uint16_t sensor_get_line_bits(void) {
   uint16_t bits = 0;
   for (int i = 0; i < N_SENSORS; ++i)

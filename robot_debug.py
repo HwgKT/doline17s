@@ -35,6 +35,10 @@ PAYLOAD_LEN = struct.calcsize(FMT)  # 69
 FRAME_LEN = len(HDR) + PAYLOAD_LEN + 1  # 72
 ADC_MAX, PWM_MAX, HIST_LEN = 4095, 255, 300
 MIN_CALIB_DELTA = 150
+BLACK_THRESHOLD_CAL = 450  # 45% of each eye's calibrated W->B contrast (not RAW)
+def eye_raw_threshold(white, black):
+    """Exact RAW cutoff for firmware's normalized CAL>=450 rule."""
+    return white + ((black - white) * BLACK_THRESHOLD_CAL + 999) // 1000
 # Time-normalized derivative: keep Kd=0 until hardware re-tuning.
 PROFILES = {
     "Siêu bám": (1.45, 0.0, 0.00, 105),
@@ -245,7 +249,7 @@ class App(tk.Tk):
                        command=lambda text=cmd: self.send_command(text)).pack(side="left", padx=4)
         ttk.Button(modes, text="Reset ENC", width=12,
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
-        self.label(left, "RAW: 0–4095   T_i=(W_i+B_i)/2   CAL: 0–1000   0=TRẮNG   1=ĐEN",
+        self.label(left, "RAW: 0–4095  |  T_i=W_i+45%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
                    fg=MUTED).pack(anchor="w")
 
         self.label(panel, "Tốc độ PWM (0–255)", bg=PANEL,
@@ -413,7 +417,7 @@ class App(tk.Tk):
                 white, black = self.cal_min[i], self.cal_max[i]
                 cal = normalize_adc(raw, white, black)
                 self.sensor_table.item(str(i), values=(i, raw, white, black,
-                                     (white + black + 1) // 2, cal, int(cal >= 500)))
+                                     eye_raw_threshold(white, black), cal, int(cal >= BLACK_THRESHOLD_CAL)))
             else:
                 self.sensor_table.item(str(i), values=(i, raw, "—", "—", "—", "—", "—"))
 
@@ -581,7 +585,7 @@ class App(tk.Tk):
         adc = list(s[1:17])
         if self.calibration_ok:
             cal = [normalize_adc(adc[i], self.cal_min[i], self.cal_max[i]) for i in range(16)]
-            bits = [int(value >= 500) for value in cal]
+            bits = [int(value >= BLACK_THRESHOLD_CAL) for value in cal]
             word = "".join(str(bit) for bit in bits)
         else:
             cal, bits, word = [""] * 16, [""] * 16, ""
@@ -634,7 +638,7 @@ class App(tk.Tk):
                     return
                 if (0 <= eye < 16 and 0 <= white <= 4095 and
                         0 <= black <= 4095 and black - white >= MIN_CALIB_DELTA and
-                        threshold == (white + black + 1) // 2):
+                        threshold == eye_raw_threshold(white, black)):
                     self.cal_data[eye] = (white, black)
         elif message == "CAL_DUMP_DONE":
             if len(self.cal_data) == 16:
@@ -717,7 +721,7 @@ class App(tk.Tk):
         for i, adc in enumerate(adc_values):
             low, high = self.cal_min[i], self.cal_max[i]
             cal = normalize_adc(adc, low, high) if self.calibration_ok else None
-            black = cal >= 500 if cal is not None else None
+            black = cal >= BLACK_THRESHOLD_CAL if cal is not None else None
             digit = ("1" if black else "0") if black is not None else "—"
             bits.append(digit)
             x0, x1 = i * step + 4, (i + 1) * step - 4
@@ -726,7 +730,7 @@ class App(tk.Tk):
             c.create_rectangle(x0, top + height - bar_height, x1,
                                top + height, fill=color, outline="")
             if self.calibration_ok:
-                threshold = (low + high + 1) // 2
+                threshold = eye_raw_threshold(low, high)
                 yt = top + height * (1 - threshold / ADC_MAX)
                 c.create_line(x0, yt, x1, yt, fill=AMBER, width=2)
             else:

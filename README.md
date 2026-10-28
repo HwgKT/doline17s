@@ -152,17 +152,26 @@ pio run -t monitor
 1. Đặt đủ 16 mắt lên cùng một mặt **trắng** đồng nhất, giữ nguyên chiều cao, gửi `CAL_WHITE` (hoặc bấm nút CALIB một lần), chờ `CAL_WHITE_DONE`.
 2. Chuyển đủ 16 mắt sang cùng một mặt **đen** đồng nhất, gửi `CAL_BLACK` (hoặc bấm nút CALIB lần hai sau bước trắng), chờ `CAL_OK_SAVED`.
 3. `CAL_FAILED` có nghĩa là độ tương phản của ít nhất một mắt < 150 ADC, nhiễu quá lớn, hoặc không ghi được NVS; dữ liệu hợp lệ cũ được giữ nguyên.
-4. Gửi `CAL_DUMP` để đọc 16 mức white/black được lưu và ngưỡng trung bình; app Python `robot_debug.py` tự truy vấn NVS sau khi kết nối.
+4. Gửi `CAL_DUMP` để đọc 16 mức white/black được lưu và ngưỡng riêng (45% độ tương phản) của từng mắt; app Python `robot_debug.py` tự truy vấn NVS sau khi kết nối.
 5. Nếu ESP32 mất nguồn, firmware tự tải lại profile NVS hợp lệ. Cực tính phần cứng cố định: **ADC đen > ADC trắng**; `INV` không còn đảo cực.
 
 SPP device: **`LineRobot`**; BLE Web **không được khởi tạo trong `mainv4`**. Protocol telemetry 72 byte và các chức năng PID/encoder giữ nguyên.
 
 ## Debug SPP và CSV trong app Python (mainv4)
 
-- **Không có ngưỡng RAW chung** cho 16 mắt. Mắt `i` có `T_i = ceil((white_i + black_i) / 2)` tải từ NVS bằng `CAL_DUMP`. `CAL_i = clamp(1000*(ADC_i-white_i)/(black_i-white_i),0,1000)`; `logic_i = (CAL_i >= 500)`. `0=TRẮNG`, `1=ĐEN`. Trước khi đọc đủ NVS, app hiện `—`, không đoán logic theo ngưỡng giả.
+- **Không có ngưỡng RAW chung** cho 16 mắt. Mắt `i` có `T_i = white_i + ceil(0.45 * (black_i - white_i))` tải từ NVS bằng `CAL_DUMP`. `CAL_i = clamp(1000*(ADC_i-white_i)/(black_i-white_i),0,1000)`; `logic_i = (CAL_i >= 450)`. `0=TRẮNG`, `1=ĐEN`. Trước khi đọc đủ NVS, app hiện `—`, không đoán logic theo ngưỡng giả.
 - **App:** `robot_debug.py` có nút `Bảng 16 mắt` hiển thị RAW, W, B, T_i, CAL, logic từng mắt; terminal `Mở rộng`, `Xuất TXT`, `Xuất CSV`. Tùy chọn `Xem mẫu PID` mặc định bật, chỉ in 5 Hz để không tràn terminal; `Ghi CSV` lưu **toàn bộ** telemetry ở tần số nhận được, không giảm mẫu.
 - **SPP telemetry:** giữ nguyên 72 byte/frame, header `AA 55`, payload 69 byte (`<I16H2i2h5fB`), byte XOR; để tương thích app cũ. Payload chứa `t_ms` tại snapshot sau PID, `adc0..15` raw 12-bit, `encL/encR` signed quadrature x4, `pwmL/pwmR` sau điều khiển (có dấu), `err,p,i,d,out,mode`. Dữ liệu đã chuẩn hóa và 16 bit logic do app **tính từ profile NVS thực**; không gửi lặp 16 giá trị CAL/logic qua Bluetooth.
 - **Tần số gửi:** mặc định 100 Hz (72×100 = 7200 bytes/s dữ liệu ứng dụng), chỉnh `STREAM:20`, `STREAM:50`, `STREAM:100`, `STREAM:0` (tạm ngừng). `STREAM` truy vấn trạng thái. Không gửi các dòng TXT cho từng mẫu trên ESP32. Tần số thực đo phụ thuộc tốc độ quét ADC/vòng lặp và kết nối SPP; kiểm tra `tx=...Hz`, tỷ lệ lỗi gói và `loop=...Hz`. Lịch TX dùng pha cộng dồn, bỏ lượt quá hạn (không gửi dồn). Đã bỏ `delay(5)` trong `loop()` và dùng `yield()` để nhường scheduler; `delay(300)` trong `setup()` vẫn giữ nguyên.
 - **CSV:** cột `host_iso` là thời gian PC nhận/xử lý, `t_ms` là đồng hồ ESP32, `adc0..15`, `cal0..15`, `logic0..15`, encoder, PWM, PID và chuỗi `logic16`. Các cột CAL/logic để trống trước khi tải đủ profile NVS. Xuất CSV lưu tối đa 15.000 mẫu gần nhất; `Ghi CSV` ghi liên tục để thu thập thí nghiệm dài hơn. Xuất TXT chỉ là log lệnh/trạng thái/PID preview, không thay thế CSV toàn tốc độ.
 - **Kết nối:** tên Classic SPP là `LineRobot`; COM Windows chọn `Outgoing`. `COM4` kiểu CP210x chỉ là cổng USB trên máy người dùng ví dụ, không phải SPP.
 
+
+## Tinh chỉnh ngưỡng phát hiện đen (450/1000)
+
+- Ngưỡng cũ: midpoint = 50% khoảng trắng→đen. Ngưỡng mới: 45% khoảng tương phản, giảm nhẹ để line đen yếu được phát hiện sớm hơn.
+- **Mỗi mắt có ngưỡng RAW riêng**: `T_i = W_i + ceil((B_i - W_i) * 450 / 1000)` (ADC đen cao hơn ADC trắng). `0 = TRẮNG` khi ADC dưới ngưỡng; `1 = ĐEN` khi ADC >= ngưỡng.
+- NVS chỉ chứa W/B; firmware tự tính ngưỡng 45% khi khởi động. Không cần hiệu chuẩn lại nếu profile NVS cũ vẫn hợp lệ.
+- Thuật toán PID dùng đúng ngưỡng đen của từng mắt, thống nhất với hiển thị/CSV của app Python. Bộ lọc trọng tâm `CAL >= 150` được giữ nguyên, tránh thay đổi quá nhiều tầng điều khiển cùng lúc.
+- **Chất lượng calibration** vẫn dùng chênh lệch >=150 ADC và độ nhiễu <=90; không hạ các ngưỡng kiểm tra chất lượng này.
+- Hạ ngưỡng tăng độ nhạy nhưng có thể tăng dương tính giả nếu mặt trắng tối/nhiễu; thử trên robot thực và kiểm tra tất cả 16 mắt trước khi chạy nhanh.

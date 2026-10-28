@@ -132,7 +132,8 @@ bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount) {
         if (cal >= 150) {
             sumCalibrated += cal;
             sumWeights += (float)cal * SENSOR_WEIGHTS[i];
-            if (cal >= 500) {
+            // Match the exact per-eye black/white logic used by the bitmask.
+            if (sensor_is_black(i)) {
                 count++;
             }
         }
