@@ -973,7 +973,7 @@
           <span>Encoder trái: <strong id="encoderLeftCount" style="color: #22d3ee; font-family: 'JetBrains Mono';">0</strong></span>
           <span>Encoder phải: <strong id="encoderRightCount" style="color: #22d3ee; font-family: 'JetBrains Mono';">0</strong></span>
         </div>
-        <button class="btn-action-sm" id="btnResetEncoder" onclick="sendCommand('ENC_RESET')" title="Đặt bộ đếm hai bánh về 0">
+        <button class="btn-action-sm" id="btnResetEncoder" onclick="resetEncoderCounts()" title="Đặt bộ đếm hai bánh về 0 qua BLE">
           ↺ Đặt lại xung
         </button>
       </div>
@@ -1293,6 +1293,14 @@
         log(`Lỗi gửi lệnh: ${err.message}`, 'err');
         return false;
       }
+    }
+
+    async function resetEncoderCounts() {
+      if (connectionType !== 'ble') {
+        log('Hãy kết nối BLE để đặt lại bộ đếm encoder.', 'err');
+        return false;
+      }
+      return sendCommand('ENC_RESET');
     }
 
     function handleIncomingData(raw) {
