@@ -323,7 +323,7 @@ class App(tk.Tk):
         self.scope = tk.Canvas(left, bg=PANEL, width=570, height=165, highlightthickness=0)
         self.scope.pack(fill="x")
         encoder_actions = tk.Frame(left, bg=BG)
-        encoder_actions.pack(fill="x", pady=5
+        encoder_actions.pack(fill="x", pady=5)
         ttk.Button(encoder_actions, text="Reset ENC",
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
         self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
