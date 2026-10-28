@@ -55,7 +55,7 @@ void ble_send_pwm_telemetry(int16_t left, int16_t right, float error, const char
  * the default MTU notification payload limit.
  */
 void ble_send_debug_telemetry(int16_t left, int16_t right,
-                              uint32_t encoder_left, uint32_t encoder_right);
+                              int32_t encoder_left, int32_t encoder_right);
 
 // =================== CẤU HÌNH TỐC ĐỘ ĐỘNG CƠ ===================
 

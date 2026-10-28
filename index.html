@@ -1076,6 +1076,11 @@
           </div>
         </div>
 
+        <button class="btn-action-sm" id="btnResetEncoder" onclick="resetEncoderCounts()"
+          title="Dat bo dem encoder hai banh ve 0 qua BLE">
+          ↺ Đặt lại xung encoder
+        </button>
+
         <div class="line-indicator-preview">
           <span>◄ Mắt 0 (Trái ngoài cùng)</span>
           <span>Trung tâm (Mắt 7-8)</span>
@@ -1383,6 +1388,14 @@
     // The ESP32 sends 4 fragments; update the UI only after a complete snapshot.
     let debugAssembly = null;
 
+    async function resetEncoderCounts() {
+      if (connectionType !== 'ble') {
+        log('Ket noi BLE de dat lai bo dem encoder.', 'err');
+        return false;
+      }
+      return sendCommand('ENC_RESET');
+    }
+
     function handleBleNotification(value) {
       if (value && value.byteLength > 0 && value.getUint8(0) === 0xA7) {
         handleDebugFragment(value);
@@ -1428,8 +1441,8 @@
       const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
       const leftPwm = view.getInt16(0, true);
       const rightPwm = view.getInt16(2, true);
-      const leftEncoder = view.getUint32(4, true);
-      const rightEncoder = view.getUint32(8, true);
+      const leftEncoder = view.getInt32(4, true);
+      const rightEncoder = view.getInt32(8, true);
       const rawValues = [];
       const calibratedValues = [];
 
@@ -1454,6 +1467,11 @@
 
     function handleIncomingData(raw) {
       log(`RX <- ${raw}`, 'rx');
+
+      if (raw.includes('ENC_RESET:OK')) {
+        document.getElementById('debugEncoderLeft').textContent = '0';
+        document.getElementById('debugEncoderRight').textContent = '0';
+      }
 
       // 1. Nhận chuỗi trạng thái 16 mắt cảm biến: "SENSORS: 0000001100000000"
       if (raw.includes('SENSORS:')) {

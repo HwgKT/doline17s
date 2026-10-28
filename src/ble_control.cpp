@@ -2,6 +2,7 @@
 #include "motor.h"
 #include "sensor.h"
 #include "pid_controller.h"
+#include "encoder.h"
 #include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -84,16 +85,16 @@ void packUnsignedBits(uint8_t* destination, size_t startBit,
 }  // namespace
 
 void ble_send_debug_telemetry(int16_t left, int16_t right,
-                              uint32_t encoder_left, uint32_t encoder_right) {
+                              int32_t encoder_left, int32_t encoder_right) {
     if (!deviceConnected || pTxCharacteristic == nullptr) return;
 
-    // Payload: signed PWM L/R (4 B), encoder counters (8 B),
+    // Payload: signed PWM L/R (4 B), signed encoder counts (8 B),
     // 16 raw ADC values packed at 12 bits (24 B), calibrated at 10 bits (20 B).
     uint8_t payload[kDebugPayloadLength] = {};
     writeU16LE(payload, static_cast<uint16_t>(left));
     writeU16LE(payload + 2, static_cast<uint16_t>(right));
-    writeU32LE(payload + 4, encoder_left);
-    writeU32LE(payload + 8, encoder_right);
+    writeU32LE(payload + 4, static_cast<uint32_t>(encoder_left));
+    writeU32LE(payload + 8, static_cast<uint32_t>(encoder_right));
 
     for (uint8_t i = 0; i < N_SENSORS; ++i) {
         const uint16_t raw = sensorRaw[i] > 4095 ? 4095 : sensorRaw[i];
@@ -144,6 +145,12 @@ static void processBleCommand(const std::string& rxValue) {
 
     // Chuyển ký tự đầu thành chữ in hoa để dễ so khớp
     char firstChar = toupper(cmd[0]);
+
+    if (cmd == "ENC_RESET" || cmd == "RESET_ENCODER") {
+        encoder_reset_counts();
+        ble_send_string("ENC_RESET:OK\n");
+        return;
+    }
 
     // ========================================================
     // 1. NHÓM LỆNH HIỆU CHUẨN CẢM BIẾN (LIA QUA LẠI - SWEEP CALIBRATION)
@@ -459,7 +466,7 @@ void ble_control_update(void) {
 
     if (deviceConnected && !oldDeviceConnected) {
         oldDeviceConnected = deviceConnected;
-        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
+        ble_send_string("KET NOI BLE THANH CONG!\n=== HUONG DAN ===\nA: Auto | M: Lai tay | S: Dung\nPWM: Xem PWM | PID: Xem PID | ENC_RESET: Dat encoder ve 0\nKP:2.2 | KI:0 | KD:10 | BASE:120: Chinh PID\n");
     }
 }
 
