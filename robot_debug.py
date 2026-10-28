@@ -20,6 +20,8 @@ import operator
 import functools
 import queue
 import re
+import shutil
+import tempfile
 import struct
 import threading
 import time
@@ -73,6 +75,8 @@ class Reader(threading.Thread):
         self.buf = bytearray()
         self.text_buf = bytearray()
         self.bad = 0
+        self.frames_rx = 0
+        self.frames_dropped = 0
 
     def run(self):
         while self.running:
@@ -119,7 +123,11 @@ class Reader(threading.Thread):
                 return
             data = bytes(self.buf[2:2 + PAYLOAD_LEN])
             if xor_sum(data) == self.buf[2 + PAYLOAD_LEN]:
-                self.out_queue.put(("data", struct.unpack(FMT, data)))
+                self.frames_rx += 1
+                try:
+                    self.out_queue.put_nowait(("data", struct.unpack(FMT, data)))
+                except queue.Full:
+                    self.frames_dropped += 1
                 del self.buf[:FRAME_LEN]
             else:
                 self.bad += 1
@@ -136,23 +144,31 @@ class App(tk.Tk):
         self.geometry("1350x900")
         self.minsize(1090, 770)
         self.configure(bg=BG)
-        self.q = queue.Queue()
+        self.q = queue.Queue(maxsize=4096)  # bounded at 300 Hz
         self.reader = None
         self.csv_file = None
         self.csv_writer = None
+        # Full-session disk-backed caches: export never truncates by deque capacity.
+        # Temporary files are deleted when the app closes.
+        self.session_csv_file = tempfile.TemporaryFile(mode="w+t", newline="", encoding="utf-8")
+        self.session_csv_writer = csv.writer(self.session_csv_file)
+        self.session_csv_writer.writerow(CSV_HEADER)
+        self.session_csv_rows = 0
+        self.session_log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
         self.hist = collections.deque(maxlen=HIST_LEN)
-        self.recent_rows = collections.deque(maxlen=15000)  # last ~2.5 minutes at 100 Hz
-        self.log_lines = collections.deque(maxlen=30000)
+        self.recent_rows = collections.deque(maxlen=15000)  # UI cache only, ~50 sec at 300 Hz
+        self.log_lines = collections.deque(maxlen=30000)  # display cache; TXT export uses disk
         self.log_window = None
         self.log_mirror = None
         self.sensor_window = None
         self.sensor_table = None
         self.preview_pid_log = tk.BooleanVar(value=True)
         self.last_preview_ms = None
-        self.stream_rate = tk.StringVar(value="100")
+        self.stream_rate = tk.StringVar(value="300")
         self.prev = None
         self.wheel_speed = [0.0, 0.0]
         self.frames = 0
+        self.last_rx_total = 0
         self.rate_time = time.monotonic()
         self.values = {}
         self.last_adc = [0] * 16
@@ -189,14 +205,15 @@ class App(tk.Tk):
         self.csv_btn.pack(side="left", padx=8)
         self.label(top, "SPP Hz", fg=MUTED).pack(side="left", padx=(10, 3))
         self.rate_combo = ttk.Combobox(top, textvariable=self.stream_rate,
-                                       values=("20", "50", "100", "0"),
+                                       values=("300", "200", "100", "50", "20", "0"),
                                        width=5, state="readonly")
         self.rate_combo.pack(side="left")
         self.rate_combo.bind("<<ComboboxSelected>>",
                              lambda _e: self.send_command("STREAM:" + self.stream_rate.get()))
         self.status_label = self.label(top, "Chưa kết nối", fg=ROSE)
         self.status_label.pack(side="left", padx=5)
-        self.rate_label = self.label(top, "0 Hz | 0 lỗi gói", fg=MUTED)
+        ttk.Button(top, text="Đo TX/Loop", command=self.request_diagnostics).pack(side="left", padx=3)
+        self.rate_label = self.label(top, "RX 0 Hz | APP 0 Hz | CRC 0", fg=MUTED)
         self.rate_label.pack(side="right")
 
         body = tk.Frame(self, bg=BG)
@@ -356,6 +373,7 @@ class App(tk.Tk):
     def log(self, message):
         line = f"[{datetime.datetime.now().astimezone().isoformat(timespec='milliseconds')}] {message}\n"
         self.log_lines.append(line)
+        self.session_log_file.write(line)
         self.console.configure(state="normal")
         self.console.insert("end", line)
         if int(self.console.index("end-1c").split(".")[0]) > 1200:
@@ -370,6 +388,8 @@ class App(tk.Tk):
 
     def clear_terminal(self):
         self.log_lines.clear()
+        self.session_log_file.seek(0)
+        self.session_log_file.truncate()
         for widget in (self.console, self.log_mirror):
             if widget is not None and widget.winfo_exists():
                 widget.configure(state="normal")
@@ -441,7 +461,12 @@ class App(tk.Tk):
             return
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.writelines(self.log_lines)
+                self.session_log_file.flush()
+                self.session_log_file.seek(0)
+                try:
+                    shutil.copyfileobj(self.session_log_file, f)
+                finally:
+                    self.session_log_file.seek(0, 2)
             self.log(f"Đã xuất terminal TXT: {path}")
         except OSError as exc:
             self.log(f"Không thể xuất TXT: {exc}")
@@ -454,10 +479,13 @@ class App(tk.Tk):
             return
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f)
-                writer.writerow(CSV_HEADER)
-                writer.writerows(self.recent_rows)
-            self.log(f"Đã xuất {len(self.recent_rows)} mẫu telemetry ra CSV: {path}")
+                self.session_csv_file.flush()
+                self.session_csv_file.seek(0)
+                try:
+                    shutil.copyfileobj(self.session_csv_file, f)
+                finally:
+                    self.session_csv_file.seek(0, 2)
+            self.log(f"Đã xuất {self.session_csv_rows} mẫu của toàn phiên telemetry ra CSV: {path}")
         except OSError as exc:
             self.log(f"Không thể xuất CSV: {exc}")
 
@@ -491,6 +519,9 @@ class App(tk.Tk):
         self.control_state_label.configure(fg=AMBER)
         self.update_control_buttons()
         self.prev = None
+        self.last_rx_total = self.reader.frames_rx
+        self.frames = 0
+        self.rate_time = time.monotonic()
         self.connect_btn.config(text="Ngắt")
         self.status_label.config(text=f"Đã mở {port}", fg=GREEN)
         self.log(f"Đã mở {port}; chờ frame SPP từ ESP32")
@@ -500,6 +531,10 @@ class App(tk.Tk):
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
         self.send_command("STREAM:" + self.stream_rate.get())
+
+    def request_diagnostics(self):
+        self.send_command("DIAG")
+        self.send_command("PERF")
 
     def disconnect(self):
         if self.reader:
@@ -658,6 +693,8 @@ class App(tk.Tk):
         self.frames += 1
         row = self.sample_csv_row(s)
         self.recent_rows.append(row)
+        self.session_csv_writer.writerow(row)
+        self.session_csv_rows += 1
         if self.csv_writer:
             self.csv_writer.writerow(row)
         self.last_adc = list(s[1:17])
@@ -794,7 +831,7 @@ class App(tk.Tk):
     def tick(self):
         last = None
         try:
-            while True:
+            for _ in range(512):
                 kind, payload = self.q.get_nowait()
                 if kind == "data":
                     self.on_sample(payload)
@@ -810,8 +847,16 @@ class App(tk.Tk):
             self.update_view(last)
         now = time.monotonic()
         if now - self.rate_time >= 1:
+            interval = now - self.rate_time
+            total = self.reader.frames_rx if self.reader else self.last_rx_total
+            rx_hz = (total - self.last_rx_total) / interval
+            app_hz = self.frames / interval
             errors = self.reader.bad if self.reader else 0
-            self.rate_label.config(text=f"{self.frames / (now - self.rate_time):.0f} Hz | {errors} lỗi gói")
+            drops = self.reader.frames_dropped if self.reader else 0
+            self.rate_label.config(
+                text=f"RX {rx_hz:.0f} Hz | APP {app_hz:.0f} Hz | "
+                     f"q={self.q.qsize()} dropUI={drops} CRC={errors}")
+            self.last_rx_total = total
             self.frames = 0
             self.rate_time = now
         self.after(30, self.tick)
@@ -897,6 +942,8 @@ class App(tk.Tk):
         self.disconnect()
         if self.csv_file:
             self.csv_file.close()
+        self.session_csv_file.close()
+        self.session_log_file.close()
         self.destroy()
 
 
