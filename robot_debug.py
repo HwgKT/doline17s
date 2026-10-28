@@ -231,6 +231,8 @@ class App(tk.Tk):
         for title, cmd in (("Auto", "A"), ("Manual", "M"), ("DỪNG", "S")):
             ttk.Button(modes, text=title, width=12,
                        command=lambda text=cmd: self.send_command(text)).pack(side="left", padx=4)
+        ttk.Button(modes, text="Reset ENC", width=12,
+                   command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
         self.label(left, "Chỉ số CAL/0-1 được tính từ Min/Max đo ở PC, không đọc từ ESP32.",
                    fg=MUTED).pack(anchor="w")
 
@@ -370,6 +372,10 @@ class App(tk.Tk):
         try:
             self.reader.send(command)
             self.log(f"TX > {command}")
+            if command.upper() in ("ENC_RESET", "RESET_ENCODER"):
+                # Discard the old tick/time baseline before computing speed.
+                self.prev = None
+                self.wheel_speed = [0.0, 0.0]
             return True
         except (serial.SerialException, OSError) as exc:
             self.log(f"Lỗi gửi: {exc}")

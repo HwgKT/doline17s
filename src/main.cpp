@@ -4,6 +4,7 @@
 #include "pinout.h"
 #include "sensor.h"
 #include "motor.h"
+#include "encoder.h"
 #include "pid_controller.h"
 #include "bt_telemetry.h"
 
@@ -12,20 +13,12 @@ constexpr uint32_t TX_PERIOD_MS=50;       // 20 Hz telemetry for bring-up
 constexpr uint32_t DIAG_PERIOD_MS=1000;   // 1 Hz USB diagnostic
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
-volatile uint32_t leftPulses=0, rightPulses=0;
-portMUX_TYPE encoderLock=portMUX_INITIALIZER_UNLOCKED;
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 uint8_t manualSpeed=120;
 uint32_t lastTx=0, lastDiag=0, lastBlink=0, lastManual=0;
 uint32_t loopCount=0, pidCount=0, txCount=0;
 String serialLine;
 
-void IRAM_ATTR countLeft() {
-  portENTER_CRITICAL_ISR(&encoderLock); ++leftPulses; portEXIT_CRITICAL_ISR(&encoderLock);
-}
-void IRAM_ATTR countRight() {
-  portENTER_CRITICAL_ISR(&encoderLock); ++rightPulses; portEXIT_CRITICAL_ISR(&encoderLock);
-}
 void ledWrite(bool on) {
   ledOn=on;
   digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
@@ -74,7 +67,7 @@ void command(const String &raw) {
   Serial.printf("[CMD] %s\n",s.c_str());
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING PID PWM STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 C K INV 3S 2S RACE");
+    reply("HELP: PING PID PWM ENC ENC_RESET STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 C K INV 3S 2S RACE");
     return;
   }
   if(s=="PID"){showPid();return;}
@@ -83,6 +76,17 @@ void command(const String &raw) {
       motor_get_left_speed(),motor_get_right_speed(),
       pid_get_last_error(),pid_get_correction());
     reply(b);return;
+  }
+  if(s=="ENC"||s=="ENCODER"){
+    int32_t l=0,r=0;
+    encoder_get_counts(&l,&r);
+    char b[92];
+    snprintf(b,sizeof(b),"ENC: L=%ld R=%ld (signed x4)",(long)l,(long)r);
+    reply(b);return;
+  }
+  if(s=="ENC_RESET"||s=="RESET_ENCODER"){
+    encoder_reset_counts();
+    reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
     char b[150];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d",
@@ -175,9 +179,9 @@ void sendFrame(){
   if(!sppStarted||!btConnected())return;
   Telemetry t{};
   for(int i=0;i<N_SENSORS;++i)t.adc[i]=sensorRaw[i];
-  uint32_t l,r;
-  portENTER_CRITICAL(&encoderLock);l=leftPulses;r=rightPulses;portEXIT_CRITICAL(&encoderLock);
-  t.encL=(int32_t)l;t.encR=(int32_t)r;
+  int32_t l=0,r=0;
+  encoder_get_counts(&l,&r);
+  t.encL=l;t.encR=r;
   t.pwmL=motor_get_left_speed();t.pwmR=motor_get_right_speed();
   t.err=pid_is_auto_mode()?pid_get_last_error():0.0f;
   t.p=pid_get_term_p();t.i=pid_get_term_i();t.d=pid_get_term_d();
@@ -194,9 +198,7 @@ void setup() {
   Serial.printf("[LED] GPIO%d active_%s blink=waiting solid=connected\n",
     PIN_DEBUG_LED,DEBUG_LED_ACTIVE_HIGH?"HIGH":"LOW");
   sensor_init();motor_init();
-  pinMode(PIN_ENCODER_L1,INPUT_PULLUP);pinMode(PIN_ENCODER_R1,INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_L1),countLeft,RISING);
-  attachInterrupt(digitalPinToInterrupt(PIN_ENCODER_R1),countRight,RISING);
+  encoder_init(); // mainv2 signed quadrature x4 on A and B channels
   pid_init(2.2f,0.0f,0.0f,120); // preserve seconds-based derivative default Kd=0
   sppStarted=btBegin("LineRobot");
   Serial.printf("[BT] %s | device=LineRobot\n",sppStarted?"SPP STARTED":"SPP INIT FAILED");
@@ -222,9 +224,11 @@ void loop() {
   if(now-lastTx>=TX_PERIOD_MS){lastTx=now;sendFrame();}
   if(now-lastDiag>=DIAG_PERIOD_MS){
     float sec=(now-lastDiag)/1000.0f;
-    Serial.printf("[DIAG] bt=%d calib=%d auto=%d loop=%.1fHz pid=%.1fHz tx=%.1fHz\n",
+    int32_t encL=0,encR=0;
+    encoder_get_counts(&encL,&encR);
+    Serial.printf("[DIAG] bt=%d calib=%d auto=%d loop=%.1fHz pid=%.1fHz tx=%.1fHz encL=%ld encR=%ld\n",
       btConnected()?1:0,calibrationReady?1:0,pid_is_auto_mode()?1:0,
-      loopCount/sec,pidCount/sec,txCount/sec);
+      loopCount/sec,pidCount/sec,txCount/sec,(long)encL,(long)encR);
     loopCount=pidCount=txCount=0;lastDiag=now;
   }
   delay(5);
