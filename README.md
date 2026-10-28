@@ -88,10 +88,11 @@ Bạn có thể gửi các lệnh sau từ máy tính (qua cáp USB 115200 baud)
 
 | Lệnh | Ý nghĩa & Chức năng |
 | :--- | :--- |
-| **`A`** hoặc **`AUTO`** | **BẬT** chế độ tự động dò line theo PID |
+| **`AUTO`** / **`A`** / **`START`** | Bật PID dò line nếu calibration hợp lệ và E-STOP không khóa |
 | **`M`** hoặc **`MANUAL`** | **TẮT** tự động, chuyển sang lái tay |
-| **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
-| **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: thông số cũ chưa phù hợp công thức D mới, cần tinh chỉnh lại |
+| **`ESTOP`** | Dừng PWM, tắt AUTO, chốt khóa khẩn cấp phần mềm |
+| **`RESET_ESTOP`** | Mở khóa nhưng động cơ vẫn dừng |
+| **`STATUS`** | Đọc trạng thái AUTO, calibration, `estop=0/1`, PWM |
 | **`CAL_WHITE`** / **`C`** | Bắt đầu lấy mẫu 16 mắt trên nền **trắng** |
 | **`CAL_BLACK`** | Sau `CAL_WHITE_DONE`, bắt đầu lấy mẫu trên nền **đen** và lưu NVS nếu đạt |
 | **`CAL_STATUS`** | Xem trạng thái hiệu chuẩn trên ESP32 |
@@ -179,3 +180,7 @@ SPP device: **`LineRobot`**; BLE Web **không được khởi tạo trong `mainv
 ### Profiling vòng loop/PID (mainv4)
 
 Mỗi giây, USB terminal in `[PERF]` và `[PERF_LOOP]`. Các trường `adc_us`, `pid_us`, `comm_us`, `tx_us`, `busy_us` có dạng trung bình/cao nhất tính bằng microgiây; `other_us` là phần không nằm trong các khối đo riêng. `period_us=min/avg/max` đo khoảng cách giữa hai lần bắt đầu loop, `jitter_pp_us=max-min`. `peak_observed_hz` là đỉnh đã quan sát; `ceiling_busy_hz` và `ceiling_adc_hz` chỉ là giới hạn lạc quan suy từ thời gian đo, KHÔNG phải Hz đã đạt ổn định. `TASKS` in thống kê runtime FreeRTOS nếu framework có bật trace/runtime stats, nếu không sẽ báo không khả dụng. Các thời gian đo trong `[PERF]` không phải % CPU theo task. Khi đang hiệu chuẩn, `adc_us` có thể bao gồm thống kê và thao tác NVS. Hãy đo khi BT tắt, BT+STREAM:100, rồi AUTO với bánh xe kê lên để đối chiếu.
+
+### Python App: bắt đầu và dừng khẩn cấp (mainv4)
+
+`robot_debug.py` có nút **BẮT ĐẦU DÒ LINE** và **DỪNG KHẨN CẤP** (hoặc phím Esc). Dừng khẩn cấp gửi `ESTOP`, firmware trả `ESTOP: LATCHED`. Bấm **Mở khóa E-STOP** rồi đợi `ESTOP: CLEARED (MOTORS OFF)` trước khi bắt đầu lại. Không có tự động chạy khi mở khóa. Bốn nút preset Siêu bám / 3S / 2S / Race đã bỏ ở app và firmware. Giao thức SPP 72 byte vẫn tương thích. Đây là dừng phần mềm qua Bluetooth, không thay thế công tắc ngắt nguồn động cơ vật lý.

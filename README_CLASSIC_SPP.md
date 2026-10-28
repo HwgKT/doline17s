@@ -7,7 +7,7 @@ LED onboard GPIO2: blinking each 400 ms when disconnected; solid when SPP connec
 
 Bluetooth telemetry: header AA 55 + packed 69-byte payload + 1 XOR checksum = 72 bytes. Python struct <I16H2i2h5fB, targeted every 10 ms (100 Hz by default, configurable via STREAM:0/20/50/100). ADC readings are RAW (0..4095), not calibrated 0..1000. PC-calibrated displays are independent of ESP calibration.
 
-Both USB and SPP commands: PING, HELP, STATUS, PID, PWM, ENC, ENC_RESET, P, A, M, S, F, B, L, R, C, K, INV, KP:x, KI:x, KD:x, BASE:n, V:n, STAGE1, STAGE2, 3S, 2S, RACE. A binary packet is never sent to USB serial; diagnostic text is printed once per second.
+Both USB and SPP commands: PING, HELP, STATUS, PID, PWM, ENC, ENC_RESET, P, AUTO/START, STOP, ESTOP, RESET_ESTOP, M, F, B, L, R, KP:x, KI:x, KD:x, BASE:n, V:n, CAL_WHITE, CAL_BLACK, CAL_STATUS, CAL_DUMP. Old presets were removed. A binary packet is never sent to USB serial; diagnostic text is printed once per second.
 
 IMPORTANT PID D-term: Based on d3529b7, the D formula is still Kd*(e[k]-e[k-1])/measuredDt where measuredDt is in seconds from micros(). Invalid dt and the first derivative sample after mode/case/Kd changes are skipped. Kd defaults to ZERO. All built-in presets force Kd=0. Old Kd=3.4/3.9/10 must NOT be reused without re-tuning. Only debug P/I/D getters were added; D formula is unchanged.
 
@@ -28,3 +28,7 @@ Smoke test:
 - USB and SPP command `TASKS` requests FreeRTOS runtime counters **only if compiled into the framework**; otherwise it prints an explicit unavailable message. Stage timings measure elapsed wall time, not per-task CPU percentages.
 - Record 10–20 samples in three conditions: Bluetooth disconnected idle; Bluetooth connected `STREAM:100`; and AUTO enabled with wheels raised. Compare mean/maximum times and jitter before changing ADC averaging or PID frequency.
 
+
+## Line follow and latched E-STOP
+
+The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP** (`ESTOP`), plus an explicit **Mở khóa E-STOP** (`RESET_ESTOP`). E-STOP stops PWM and AUTO immediately when the command is processed and latches motion inhibition. AUTO and manual F/B/L/R respond `ERR: ESTOP_LATCHED` until reset. `RESET_ESTOP` does not start either motor. `STATUS` includes `estop=0/1`; confirmation is `ESTOP: LATCHED`. The ESP32 still stops on SPP disconnection. This software stop is not a hardware power cut and cannot guarantee emergency protection if the radio link, firmware or driver fails. 72-byte binary telemetry remains unchanged.

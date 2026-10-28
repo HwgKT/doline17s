@@ -39,13 +39,6 @@ BLACK_THRESHOLD_CAL = 400  # 40% of each eye's calibrated W->B contrast (not RAW
 def eye_raw_threshold(white, black):
     """Exact RAW cutoff for firmware's normalized CAL>=400 rule."""
     return white + ((black - white) * BLACK_THRESHOLD_CAL + 999) // 1000
-# Time-normalized derivative: keep Kd=0 until hardware re-tuning.
-PROFILES = {
-    "Siêu bám": (1.45, 0.0, 0.00, 105),
-    "Pin 3S": (1.55, 0.0, 0.00, 115),
-    "Pin 2S": (1.55, 0.0, 0.00, 145),
-    "Race": (1.65, 0.0, 0.00, 135),
-}
 CSV_HEADER = (["host_iso", "t_ms"] +
               [f"adc{i}" for i in range(16)] +
               [f"cal{i}" for i in range(16)] +
@@ -169,9 +162,14 @@ class App(tk.Tk):
         self.cal_min = [0] * 16
         self.cal_max = [4095] * 16
         self.cal_data = {}
+        self.estop_latched = None  # Unknown until firmware STATUS.
+        self.estop_pending = False
+        self.start_pending = False
+        self.auto_running = False
         self._build()
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.bind_all("<Escape>", lambda _event: self.emergency_stop())
         self.after(30, self.tick)
 
     def label(self, parent, text="", fg=FG, bg=None, **kw):
@@ -211,6 +209,30 @@ class App(tk.Tk):
         panel = tk.Frame(right, bg=PANEL)
         panel.pack(fill="both", expand=True, padx=12, pady=12)
 
+        self.label(panel, "ĐIỀU KHIỂN DÒ LINE", bg=PANEL,
+                   font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 6))
+        control = tk.Frame(panel, bg=PANEL)
+        control.pack(fill="x", pady=(0, 4))
+        self.start_btn = tk.Button(control, text="BẮT ĐẦU DÒ LINE",
+                                   command=self.start_line, font=("Segoe UI", 10, "bold"),
+                                   bg=GREEN, fg="#ffffff", activebackground="#059669",
+                                   relief="flat", height=2)
+        self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.estop_btn = tk.Button(control, text="DỪNG KHẨN CẤP",
+                                   command=self.emergency_stop, font=("Segoe UI", 10, "bold"),
+                                   bg=ROSE, fg="#ffffff", activebackground="#be123c",
+                                   relief="flat", height=2)
+        self.estop_btn.pack(side="left", fill="x", expand=True)
+        self.reset_estop_btn = ttk.Button(panel, text="Mở khóa E-STOP (không chạy lại)",
+                                          command=self.reset_estop)
+        self.reset_estop_btn.pack(fill="x", pady=(0, 4))
+        self.control_state = tk.StringVar(value="Chưa kết nối / chưa xác định trạng thái")
+        self.control_state_label = self.label(panel, textvariable=self.control_state,
+                                              bg=PANEL, fg=AMBER, wraplength=395,
+                                              anchor="w", justify="left")
+        self.control_state_label.pack(fill="x", pady=(0, 8))
+        self.update_control_buttons()
+
         sensor_head = tk.Frame(left, bg=BG)
         sensor_head.pack(fill="x")
         self.label(sensor_head, "16 mắt: RAW / T_i / CAL / 0-1", font=("Segoe UI", 11, "bold")).pack(side="left")
@@ -241,13 +263,9 @@ class App(tk.Tk):
         self.label(left, "Scope: PWM trái / PWM phải / PID out", fg=MUTED).pack(anchor="w", pady=(11, 3))
         self.scope = tk.Canvas(left, bg=PANEL, width=715, height=190, highlightthickness=0)
         self.scope.pack(fill="x")
-        modes = tk.Frame(left, bg=BG)
-        modes.pack(fill="x", pady=12)
-        self.label(modes, "Điều khiển", fg=MUTED).pack(side="left", padx=(0, 9))
-        for title, cmd in (("Auto", "A"), ("Manual", "M"), ("DỪNG", "S")):
-            ttk.Button(modes, text=title, width=12,
-                       command=lambda text=cmd: self.send_command(text)).pack(side="left", padx=4)
-        ttk.Button(modes, text="Reset ENC", width=12,
+        encoder_actions = tk.Frame(left, bg=BG)
+        encoder_actions.pack(fill="x", pady=12)
+        ttk.Button(encoder_actions, text="Reset ENC",
                    command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
         self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
                    fg=MUTED).pack(anchor="w")
@@ -284,15 +302,6 @@ class App(tk.Tk):
         pid_actions.pack(fill="x", pady=(6, 3))
         ttk.Button(pid_actions, text="Áp dụng PID", command=self.apply_pid).pack(side="left", fill="x", expand=True, padx=(0, 3))
         ttk.Button(pid_actions, text="Đọc lại PID", command=lambda: self.send_command("PID")).pack(side="left", fill="x", expand=True)
-
-        self.label(panel, "Presets (không tự bật Auto)", bg=PANEL, fg=MUTED).pack(anchor="w", pady=(9, 4))
-        profiles = tk.Frame(panel, bg=PANEL)
-        profiles.pack(fill="x")
-        for index, name in enumerate(PROFILES):
-            ttk.Button(profiles, text=name, command=lambda p=name: self.apply_profile(p)).grid(
-                row=index // 2, column=index % 2, sticky="ew", padx=2, pady=2)
-        profiles.grid_columnconfigure(0, weight=1)
-        profiles.grid_columnconfigure(1, weight=1)
 
         self.label(panel, "Calibration firmware — 16 mắt / NVS", bg=PANEL,
                    font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(12, 4))
@@ -470,12 +479,20 @@ class App(tk.Tk):
             self.log(str(exc))
             return
         self.reader.start()
+        self.estop_latched = None
+        self.estop_pending = False
+        self.start_pending = False
+        self.auto_running = False
+        self.control_state.set("Đang kết nối — chờ STATUS từ firmware.")
+        self.control_state_label.configure(fg=AMBER)
+        self.update_control_buttons()
         self.prev = None
         self.connect_btn.config(text="Ngắt")
         self.status_label.config(text=f"Đã mở {port}", fg=GREEN)
         self.log(f"Đã mở {port}; chờ frame SPP từ ESP32")
         self.calibration_ok = False
         self.cal_data = {}
+        self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
         self.send_command("STREAM:" + self.stream_rate.get())
@@ -487,7 +504,14 @@ class App(tk.Tk):
             self.reader = None
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
-        self.log("Đã đóng COM. Dừng động cơ cần được bảo đảm trên firmware.")
+        self.estop_latched = None
+        self.estop_pending = False
+        self.start_pending = False
+        self.auto_running = False
+        self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
+        self.control_state_label.configure(fg=ROSE)
+        self.update_control_buttons()
+        self.log("Đã đóng COM. Firmware phải dừng động cơ khi SPP mất kết nối.")
 
     def send_command(self, command):
         command = command.strip()
@@ -548,12 +572,44 @@ class App(tk.Tk):
         self.log("Đã GỬI các lệnh PID, đang chờ firmware xác nhận.")
         return True
 
-    def apply_profile(self, name):
-        kp, ki, kd, base = PROFILES[name]
-        for key, value in (("Kp", kp), ("Ki", ki), ("Kd", kd), ("Base", base)):
-            self.pid_vars[key].set(str(value))
-        self.log(f"Preset {name}: Kp={kp}, Ki={ki}, Kd={kd}, Base={base} (không tự Auto)")
-        self.apply_pid()
+    def update_control_buttons(self):
+        connected = self.reader is not None and self.reader.is_alive()
+        can_start = (connected and self.estop_latched is False
+                     and not self.estop_pending and not self.start_pending)
+        self.start_btn.configure(state="normal" if can_start else "disabled")
+        can_reset = connected and self.estop_latched is True and not self.estop_pending
+        self.reset_estop_btn.configure(state="normal" if can_reset else "disabled")
+
+    def start_line(self):
+        if self.estop_latched is not False:
+            self.log("Không thể bắt đầu: E-STOP đang khóa hoặc chưa xác nhận trạng thái.")
+            return
+        if self.send_command("AUTO"):
+            self.start_pending = True
+            self.control_state.set("Đã gửi AUTO — chờ ESP32 xác nhận.")
+            self.update_control_buttons()
+
+    def emergency_stop(self):
+        # A sent Bluetooth command is NOT proof that the motor has stopped.
+        self.auto_running = False
+        self.start_pending = False
+        self.estop_latched = True
+        self.estop_pending = True
+        self.control_state.set("Đang gửi E-STOP — chưa có xác nhận từ ESP32!")
+        self.control_state_label.configure(fg=ROSE)
+        self.update_control_buttons()
+        if not self.send_command("ESTOP"):
+            self.estop_pending = False
+            self.control_state.set("KHÔNG XÁC NHẬN ĐƯỢC E-STOP — NGẮT NGUỒN ĐỘNG CƠ!")
+            self.update_control_buttons()
+
+    def reset_estop(self):
+        if self.estop_latched is not True or self.estop_pending:
+            return
+        if self.send_command("RESET_ESTOP"):
+            self.estop_pending = True
+            self.control_state.set("Đang gửi mở khóa — chờ ESP32 xác nhận.")
+            self.update_control_buttons()
 
     def start_calibration(self):
         if self.send_command("CAL_WHITE"):
@@ -620,6 +676,58 @@ class App(tk.Tk):
 
     def on_text(self, message):
         self.log(f"RX < {message}")
+        if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
+            self.estop_latched = True
+            self.estop_pending = False
+            self.start_pending = False
+            self.auto_running = False
+            self.control_state.set("E-STOP ĐÃ CHỐT — ĐỘNG CƠ DỪNG (ESP32 xác nhận).")
+            self.control_state_label.configure(fg=ROSE)
+            self.update_control_buttons()
+        elif message == "ESTOP: CLEARED (MOTORS OFF)":
+            self.estop_latched = False
+            self.estop_pending = False
+            self.start_pending = False
+            self.auto_running = False
+            self.control_state.set("Đã mở khóa E-STOP — động cơ vẫn dừng.")
+            self.control_state_label.configure(fg=GREEN)
+            self.update_control_buttons()
+        elif message == "MODE: AUTO PID":
+            self.start_pending = False
+            self.auto_running = True
+            self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
+            self.control_state_label.configure(fg=GREEN)
+            self.update_control_buttons()
+        elif message.startswith("ERR: CALIB_REQUIRED_OR_PENDING"):
+            self.start_pending = False
+            self.auto_running = False
+            self.control_state.set("Không thể bắt đầu: cần hoàn tất calibration TRẮNG/ĐEN.")
+            self.control_state_label.configure(fg=AMBER)
+            self.update_control_buttons()
+        elif message.startswith("STATUS:"):
+            estop = re.search(r"\bestop=(\d)\b", message)
+            auto = re.search(r"\bauto=(\d)\b", message)
+            if estop:
+                self.estop_latched = estop.group(1) == "1"
+                self.estop_pending = False
+                self.start_pending = False
+                self.auto_running = bool(auto and auto.group(1) == "1")
+                if self.estop_latched:
+                    self.control_state.set("E-STOP đang khóa — cần mở khóa thủ công.")
+                    self.control_state_label.configure(fg=ROSE)
+                elif self.auto_running:
+                    self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
+                    self.control_state_label.configure(fg=GREEN)
+                else:
+                    self.control_state.set("SẴN SÀNG — động cơ đang dừng.")
+                    self.control_state_label.configure(fg=GREEN)
+                self.update_control_buttons()
+        elif message in ("MOTOR: STOP", "MODE: MANUAL"):
+            self.auto_running = False
+            self.start_pending = False
+            if self.estop_latched is False:
+                self.control_state.set("Đã dừng — sẵn sàng khởi động lại.")
+            self.update_control_buttons()
         pid = re.search(r"PID:\s*Kp=([\d.]+)\s+Ki=([\d.]+)\s+Kd=([\d.]+)\s+Base=(\d+)",
                         message, flags=re.IGNORECASE)
         if pid:

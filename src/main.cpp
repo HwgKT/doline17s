@@ -15,6 +15,7 @@ constexpr uint32_t DIAG_PERIOD_MS=1000;   // 1 Hz USB diagnostic
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
+bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
 uint16_t streamPeriodMs=10; // 100 Hz default; STREAM:0/20/50/100 at runtime
 uint32_t lastTx=0, lastDiag=0, lastBlink=0, lastManual=0;
@@ -56,20 +57,22 @@ void showCalib() {
   reply(String("CAL_STATUS READY=")+(calibrationReady?"1":"0")+
         " STATE="+String((int)sensor_calibration_state()));
 }
-void setPreset(float kp,int base,const char *name) {
-  // Old Kd=3.4/3.9/10 presets do not apply after the /dt derivative fix.
-  pid_set_tunings(kp,0.0f,0.0f); pid_set_base_speed(base);
-  manualSpeed=(uint8_t)base;
-  reply(String("PRESET: ")+name+" (Kd=0, tune D again)");
-  showPid();
-}
 void command(const String &raw) {
   String s=raw;s.trim();s.toUpperCase();
   if(!s.length())return;
+  // Highest-priority commands: E-STOP cuts PWM and prevents all new motion.
+  if(s=="ESTOP"||s=="E_STOP"||s=="EMERGENCY_STOP"){
+    estopLatched=true; safeStop();
+    reply("ESTOP: LATCHED");return;
+  }
+  if(s=="RESET_ESTOP"){
+    safeStop();estopLatched=false; // Unlock only: motors remain stopped.
+    reply("ESTOP: CLEARED (MOTORS OFF)");return;
+  }
   Serial.printf("[CMD] %s\n",s.c_str());
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING PID PWM ENC ENC_RESET STATUS TASKS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP STREAM:0/20/50/100 3S 2S RACE");
+    reply("HELP: PING STATUS PID TASKS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:2.2 KI:0 KD:0 BASE:120 STREAM:0/20/50/100 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -107,9 +110,9 @@ void command(const String &raw) {
     reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
-    char b[150];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d",
-      btConnected()?1:0,pid_is_auto_mode()?1:0,calibrationReady?1:0,
-      sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
+    char b[170];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d",
+      btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
+      calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
       motor_get_left_speed(),motor_get_right_speed());
     reply(b);return;
   }
@@ -121,7 +124,8 @@ void command(const String &raw) {
   if(s=="S"||s=="STOP"||s=="M"||s=="MANUAL"){
     safeStop();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
   }
-  if(s=="A"||s=="AUTO"){
+  if(s=="A"||s=="AUTO"||s=="START"){
+    if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
     if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
     manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
   }
@@ -166,11 +170,8 @@ void command(const String &raw) {
     pid_set_base_speed(v);manualSpeed=(uint8_t)v;
     reply(String("SPEED SET: ")+v);return;
   }
-  if(s=="BAM"||s=="GRIP"){setPreset(1.45f,105,"GRIP");return;}
-  if(s=="3S"||s=="STAGE1"||s=="SAFE12"){setPreset(1.55f,115,"3S");return;}
-  if(s=="2S"){setPreset(1.55f,145,"2S");return;}
-  if(s=="RACE"||s=="RACE10"||s=="STAGE2"){setPreset(1.65f,135,"RACE");return;}
   if(s=="F"||s=="B"||s=="L"||s=="R"){
+    if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
     safeStop();
     if(s=="F")motor_forward(manualSpeed);
     if(s=="B")motor_backward(manualSpeed);
@@ -236,7 +237,7 @@ void setup() {
   pid_init(2.2f,0.0f,0.0f,120); // preserve seconds-based derivative default Kd=0
   sppStarted=btBegin("LineRobot");
   Serial.printf("[BT] %s | device=LineRobot\n",sppStarted?"SPP STARTED":"SPP INIT FAILED");
-  Serial.println("[READY] USB 115200 newline; PING/PID/STATUS/CAL_WHITE/CAL_BLACK/A/M/S");
+  Serial.println("[READY] USB 115200 newline; STATUS/AUTO/STOP/ESTOP/RESET_ESTOP/CAL_WHITE/CAL_BLACK");
   lastTx=lastDiag=lastBlink=millis();
 }
 void loop() {
@@ -303,4 +304,4 @@ void loop() {
   if(diagDue) perfReport();
   // Loop start-to-start time includes yield and background scheduler work.
   yield();
-
+}
