@@ -62,3 +62,10 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 ### Live loop-frequency display in Python app
 - App automatically requests DIAG over Bluetooth SPP every two seconds while connected, and displays actual firmware LOOP, PID and SPP TX (sent-to-stack) rates in a dedicated status strip. Actual received packet rate remains in the RX counter. PID=0 Hz is normal when AUTO is off.
 - Manual Do TX/Loop button still requests DIAG and PERF; its DIAG resets the timing window. First measurement after reconnect can include disconnected time; use subsequent stable measurements. Stale indicators reset after six seconds without DIAG. No USB Serial logging is re-enabled.
+
+
+## Continuous 300 Hz SPP CSV recorder
+- The Python app creates a persistent logs/linerobot_300hz_TIMESTAMP.csv automatically on first Bluetooth connection, then continuously appends each decoded CRC-valid 72-byte SPP frame using a dedicated writer thread. Capturing happens in the SPP reader thread, BEFORE delivering frames to the Tkinter GUI queue; UI lag cannot suppress logging.
+- A bounded recorder queue holds up to 8192 frames; it never waits on disk writes in the receiver. CSV writer flushes to disk at least once each second and drains the queue on normal shutdown. The app status reports persisted row count, pending queue, dropCSV (queue overflow), and disk errors. Compare that to the ESP32 DIAG and Python RX Hz. At 300 frames/s, expect about 300 CSV rows/s if all frames reach the PC.
+- CSV columns remain: receive host_iso, ESP32 t_ms, all adc0..adc15, optional cal0..cal15 and logic0..logic15 (filled after NVS calibration download), encL, encR, pwmL, pwmR, err, p, i, d, out, mode, logic16. Early frames before NVS download leave calibrated/logic fields blank, not the raw or control fields.
+- Ghi CSV button now pauses/resumes background recording; recording begins automatically, without clicking. Xuất CSV copies a point-in-time snapshot of the persistent session file in the background. The original file stays in logs/ after app exit. The separate terminal TXT export is unchanged.

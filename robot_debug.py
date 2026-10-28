@@ -30,6 +30,7 @@ from tkinter import filedialog, ttk
 
 import serial
 from serial.tools import list_ports
+from spp_csv_recorder import TelemetryCsvRecorder
 
 HDR = b"\xAA\x55"
 FMT = "<I16H2i2h5fB"
@@ -67,10 +68,11 @@ def normalize_adc(raw, low, high, black_is_high=True):
 class Reader(threading.Thread):
     """Read a mixed SPP stream of framed binary samples and text replies."""
 
-    def __init__(self, port, out_queue):
+    def __init__(self, port, out_queue, recorder=None):
         super().__init__(daemon=True)
         self.ser = serial.Serial(port, 115200, timeout=0.05)
         self.out_queue = out_queue
+        self.recorder = recorder
         self.running = True
         self.buf = bytearray()
         self.text_buf = bytearray()
@@ -124,8 +126,12 @@ class Reader(threading.Thread):
             data = bytes(self.buf[2:2 + PAYLOAD_LEN])
             if xor_sum(data) == self.buf[2 + PAYLOAD_LEN]:
                 self.frames_rx += 1
+                sample = struct.unpack(FMT, data)
+                # Logging precedes GUI delivery; Tk slowdown cannot throttle disk writes.
+                if self.recorder is not None:
+                    self.recorder.submit(sample)
                 try:
-                    self.out_queue.put_nowait(("data", struct.unpack(FMT, data)))
+                    self.out_queue.put_nowait(("data", sample))
                 except queue.Full:
                     self.frames_dropped += 1
                 del self.buf[:FRAME_LEN]
@@ -146,14 +152,8 @@ class App(tk.Tk):
         self.configure(bg=BG)
         self.q = queue.Queue(maxsize=4096)  # bounded at 300 Hz
         self.reader = None
-        self.csv_file = None
-        self.csv_writer = None
-        # Full-session disk-backed caches: export never truncates by deque capacity.
-        # Temporary files are deleted when the app closes.
-        self.session_csv_file = tempfile.TemporaryFile(mode="w+t", newline="", encoding="utf-8")
-        self.session_csv_writer = csv.writer(self.session_csv_file)
-        self.session_csv_writer.writerow(CSV_HEADER)
-        self.session_csv_rows = 0
+        self.recorder = None  # Automatic persistent writer starts on first SPP connect.
+        self.csv_status = tk.StringVar(value="CSV: chưa kết nối")
         self.session_log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
         self.hist = collections.deque(maxlen=HIST_LEN)
         self.recent_rows = collections.deque(maxlen=15000)  # UI cache only, ~50 sec at 300 Hz
@@ -225,7 +225,9 @@ class App(tk.Tk):
         diag_bar = tk.Frame(self, bg=PANEL)
         diag_bar.pack(fill="x", padx=12, pady=(0, 5))
         self.label(diag_bar, textvariable=self.loop_debug, fg=CYAN, bg=PANEL,
-                   font=("Consolas", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+                   font=("Consolas", 10, "bold")).pack(anchor="w", padx=10, pady=(2, 0))
+        self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
+                   font=("Consolas", 9)).pack(anchor="w", padx=10, pady=(0, 2))
 
         # Balanced 50/50 columns; bottom-right quarter reserved for SPP console.
         body = tk.Frame(self, bg=BG)
@@ -516,14 +518,22 @@ class App(tk.Tk):
         if not path:
             return
         try:
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                self.session_csv_file.flush()
-                self.session_csv_file.seek(0)
+            if self.recorder is None:
+                self.log("Chưa có dữ liệu CSV; kết nối Bluetooth trước")
+                return
+
+            def export_job():
                 try:
-                    shutil.copyfileobj(self.session_csv_file, f)
-                finally:
-                    self.session_csv_file.seek(0, 2)
-            self.log(f"Đã xuất {self.session_csv_rows} mẫu của toàn phiên telemetry ra CSV: {path}")
+                    count = self.recorder.export_snapshot(path)
+                    message = f"Đã xuất CSV ({count} mẫu): {path}"
+                except (OSError, ValueError) as exc:
+                    message = f"Lỗi xuất CSV: {exc}"
+                try:
+                    self.q.put_nowait(("csv_export", message))
+                except queue.Full:
+                    pass
+
+            threading.Thread(target=export_job, daemon=True).start()
         except OSError as exc:
             self.log(f"Không thể xuất CSV: {exc}")
 
@@ -542,7 +552,13 @@ class App(tk.Tk):
             self.log("Chưa chọn COM")
             return
         try:
-            self.reader = Reader(port, self.q)
+            if self.recorder is None:
+                self.recorder = TelemetryCsvRecorder(CSV_HEADER)
+                self.recorder.start()
+                self.csv_btn.config(text="Tạm dừng CSV")
+                self.csv_status.set(f"CSV GHI: {self.recorder.path.name}")
+            self.recorder.set_calibration()
+            self.reader = Reader(port, self.q, self.recorder)
         except (serial.SerialException, OSError, ValueError) as exc:
             self.status_label.config(text=f"Lỗi COM: {exc}", fg=ROSE)
             self.log(str(exc))
@@ -566,6 +582,7 @@ class App(tk.Tk):
         self.connect_btn.config(text="Ngắt")
         self.status_label.config(text=f"Đã mở {port}", fg=GREEN)
         self.log(f"Đã mở {port}; chờ frame SPP từ ESP32")
+        self.log(f"Ghi CSV nền: {self.recorder.path}")
         self.calibration_ok = False
         self.cal_data = {}
         self.send_command("STATUS")
@@ -591,6 +608,8 @@ class App(tk.Tk):
         self.auto_running = False
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
+        if self.recorder:
+            self.recorder.set_calibration()
         self.next_diag_poll = None
         self.last_diag_rx = None
         self.loop_debug.set("LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (mất kết nối)")
@@ -705,22 +724,13 @@ class App(tk.Tk):
             self.cal_state.set("Đã gửi Lấy ĐEN; chờ ESP32 xác nhận.")
 
     def toggle_csv(self):
-        if self.csv_file:
-            self.csv_file.close()
-            self.csv_file = self.csv_writer = None
-            self.csv_btn.config(text="Ghi CSV")
-            self.log("Đã đóng CSV")
+        if self.recorder is None:
+            self.log("Kết nối Bluetooth để tự động tạo file CSV.")
             return
-        filename = time.strftime("robot_log_%Y%m%d_%H%M%S.csv")
-        try:
-            self.csv_file = open(filename, "w", newline="", encoding="utf-8")
-        except OSError as exc:
-            self.log(f"Không mở được CSV: {exc}")
-            return
-        self.csv_writer = csv.writer(self.csv_file)
-        self.csv_writer.writerow(CSV_HEADER)
-        self.csv_btn.config(text="Dừng CSV")
-        self.log(f"Bắt đầu ghi {filename}")
+        self.recorder.recording = not self.recorder.recording
+        self.csv_btn.config(text="Tạm dừng CSV" if self.recorder.recording else "Ghi tiếp CSV")
+        self.log(("Tiếp tục CSV: " if self.recorder.recording else "Tạm dừng CSV: ")
+                 + str(self.recorder.path))
 
     def sample_csv_row(self, s):
         adc = list(s[1:17])
@@ -738,10 +748,7 @@ class App(tk.Tk):
         self.frames += 1
         row = self.sample_csv_row(s)
         self.recent_rows.append(row)
-        self.session_csv_writer.writerow(row)
-        self.session_csv_rows += 1
-        if self.csv_writer:
-            self.csv_writer.writerow(row)
+        # Independent CSV worker handles all received frames, even if UI drops.
         self.last_adc = list(s[1:17])
         t, left, right = s[0], s[17], s[18]
         if self.preview_pid_log.get() and s[26] == 1:
@@ -857,6 +864,8 @@ class App(tk.Tk):
                 self.cal_min = [self.cal_data[i][0] for i in range(16)]
                 self.cal_max = [self.cal_data[i][1] for i in range(16)]
                 self.calibration_ok = True
+                if self.recorder is not None:
+                    self.recorder.set_calibration(self.cal_min, self.cal_max)
                 self.cal_state.set("Đã tải NVS 16/16 mắt; dữ liệu CAL 0–1000 theo ESP32.")
                 self.draw_bars(self.last_adc)
             else:
@@ -898,6 +907,8 @@ class App(tk.Tk):
                 elif kind == "error":
                     self.disconnect()
                     self.status_label.config(text=payload, fg=ROSE)
+                elif kind == "csv_export":
+                    self.log(payload)
         except queue.Empty:
             pass
         if last is not None:
@@ -913,6 +924,13 @@ class App(tk.Tk):
             self.rate_label.config(
                 text=f"RX {rx_hz:.0f} Hz | APP {app_hz:.0f} Hz | "
                      f"q={self.q.qsize()} dropUI={drops} CRC={errors}")
+            if self.recorder is not None:
+                state = "GHI" if self.recorder.recording else "TẠM DỪNG"
+                self.csv_status.set(
+                    f"CSV {state}: ghi={self.recorder.written} "
+                    f"đợi={self.recorder.queue.qsize()} dropCSV={self.recorder.dropped}"
+                    + (f" LỖI={self.recorder.error}" if self.recorder.error else "")
+                    + f" | {self.recorder.path.name}")
             self.last_rx_total = total
             self.frames = 0
             self.rate_time = now
@@ -1007,9 +1025,8 @@ class App(tk.Tk):
 
     def on_close(self):
         self.disconnect()
-        if self.csv_file:
-            self.csv_file.close()
-        self.session_csv_file.close()
+        if self.recorder is not None:
+            self.recorder.stop()
         self.session_log_file.close()
         self.destroy()
 
