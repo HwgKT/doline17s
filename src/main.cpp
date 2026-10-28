@@ -120,10 +120,11 @@ void command(const String &raw) {
     reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
-    char b[170];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d",
+    char b[220];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu",
       btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
       calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
-      motor_get_left_speed(),motor_get_right_speed());
+      motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
+      sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count());
     reply(b);return;
   }
   if(s=="P"||s=="SENSORS"){
@@ -137,6 +138,7 @@ void command(const String &raw) {
   if(s=="A"||s=="AUTO"||s=="START"){
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
     if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
     manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
   }
@@ -186,6 +188,7 @@ void command(const String &raw) {
   if(s=="F"||s=="B"||s=="L"||s=="R"){
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
     safeStop();
     if(s=="F")motor_forward(manualSpeed);
     if(s=="B")motor_backward(manualSpeed);
@@ -272,6 +275,10 @@ void loop() {
   else if(wasCalibrating)sensor_update_calibration_loop();
   else sensor_read_all();
   perfRecord(PERF_ADC, micros()-stageStartUs);
+  if(!sensor_adc_ready() && (pid_is_auto_mode() || manualActive)){
+    safeStop();
+    reply("ERR: ADC_READ_FAULT_MOTORS_STOPPED");
+  }
   switch(sensor_take_calibration_event()){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
     case CAL_WHITE_DONE:    reply("CAL_WHITE_DONE"); break;

@@ -206,7 +206,7 @@ void adcBenchStep() {
     printRow(reportIndex);
     if (++reportIndex >= kModes) {
       printing = false;
-      Serial.println("[ADC_BENCH] DONE; firmware keeps production ADC=ARDUINO/4");
+      Serial.println("[ADC_BENCH] DONE; production sensor mode=IDF_GPIO_1");
     }
   }
 }

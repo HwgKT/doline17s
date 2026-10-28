@@ -9,7 +9,7 @@ extern "C" {
 #define N_SENSORS 16
 #define SENSOR_START_IDX 0
 #define SENSOR_END_IDX 15
-#define ADC_SAMPLES 4
+#define ADC_SAMPLES 1  // Production: IDF ADC1 + direct-GPIO MUX; one retained sample
 #define MIN_CALIBRATION_DELTA 150
 // Black starts 40% of the way from calibrated white to black (previously 50%).
 // This is a normalized detection threshold, NOT a shared raw ADC threshold.
@@ -30,6 +30,9 @@ void sensor_init(void);
 void sensor_mux_select(uint8_t channel);
 uint16_t sensor_read_mux(uint8_t channel);
 void sensor_read_all(void);
+bool sensor_adc_ready(void);
+const char *sensor_adc_mode(void);
+uint32_t sensor_adc_error_count(void);
 bool sensor_capture_white(void);
 bool sensor_capture_black(void);
 void sensor_update_calibration_loop(void);

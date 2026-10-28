@@ -230,7 +230,10 @@ class App(tk.Tk):
         self.control_state_label = self.label(panel, textvariable=self.control_state,
                                               bg=PANEL, fg=AMBER, wraplength=395,
                                               anchor="w", justify="left")
-        self.control_state_label.pack(fill="x", pady=(0, 8))
+        self.control_state_label.pack(fill="x", pady=(0, 4))
+        self.adc_status = tk.StringVar(value="ADC: chờ STATUS")
+        self.label(panel, textvariable=self.adc_status, bg=PANEL, fg=CYAN,
+                   font=("Consolas", 9)).pack(anchor="w", pady=(0, 8))
         self.update_control_buttons()
 
         sensor_head = tk.Frame(left, bg=BG)
@@ -484,6 +487,7 @@ class App(tk.Tk):
         self.start_pending = False
         self.auto_running = False
         self.control_state.set("Đang kết nối — chờ STATUS từ firmware.")
+        self.adc_status.set("ADC: chờ STATUS")
         self.control_state_label.configure(fg=AMBER)
         self.update_control_buttons()
         self.prev = None
@@ -509,6 +513,7 @@ class App(tk.Tk):
         self.start_pending = False
         self.auto_running = False
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
+        self.adc_status.set("ADC: chưa kết nối")
         self.control_state_label.configure(fg=ROSE)
         self.update_control_buttons()
         self.log("Đã đóng COM. Firmware phải dừng động cơ khi SPP mất kết nối.")
@@ -707,6 +712,11 @@ class App(tk.Tk):
         elif message.startswith("STATUS:"):
             estop = re.search(r"\bestop=(\d)\b", message)
             auto = re.search(r"\bauto=(\d)\b", message)
+            adc_mode = re.search(r"\badc=([A-Z0-9_]+)\b", message)
+            adc_ok = re.search(r"\badc_ok=(\d)\b", message)
+            if adc_mode:
+                ready = bool(adc_ok and adc_ok.group(1) == "1")
+                self.adc_status.set(f"ADC: {adc_mode.group(1)} | {'READY' if ready else 'FAULT'}")
             if estop:
                 self.estop_latched = estop.group(1) == "1"
                 self.estop_pending = False
