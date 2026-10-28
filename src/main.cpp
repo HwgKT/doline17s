@@ -12,14 +12,14 @@
 #include "spp_debug.h"
 
 namespace {
-// 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
+// 100 Hz * 72 B = 7.2 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
-uint16_t streamHz=300;
-uint32_t streamPeriodUs=1000000UL/300;
+uint16_t streamHz=100;
+uint32_t streamPeriodUs=1000000UL/100;
 uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 BtTxStats lastTxStats{};
@@ -300,7 +300,7 @@ void loop() {
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
-  // 300 Hz = 3333-us slots. No stale bursts; bounded nonblocking enqueue.
+  // No stale bursts; bounded nonblocking enqueue at the selected stream rate.
   const uint32_t txNow=micros();
   if(streamPeriodUs&&!adcBenchActive()){
     const uint32_t elapsed=txNow-lastTxUs;

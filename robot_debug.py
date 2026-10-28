@@ -160,7 +160,7 @@ class App(tk.Tk):
         self.csv_status = tk.StringVar(value="CSV: chờ START")
         self.session_log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
         self.hist = collections.deque(maxlen=HIST_LEN)
-        self.recent_rows = collections.deque(maxlen=15000)  # UI cache only, ~50 sec at 300 Hz
+        self.recent_rows = collections.deque(maxlen=15000)  # UI cache only, ~150 sec at 100 Hz
         self.log_lines = collections.deque(maxlen=30000)  # display cache; TXT export uses disk
         self.log_window = None
         self.log_mirror = None
@@ -168,7 +168,7 @@ class App(tk.Tk):
         self.sensor_table = None
         self.preview_pid_log = tk.BooleanVar(value=True)
         self.last_preview_ms = None
-        self.stream_rate = tk.StringVar(value="300")
+        self.stream_rate = tk.StringVar(value="100")
         self.prev = None
         self.wheel_speed = [0.0, 0.0]
         self.frames = 0

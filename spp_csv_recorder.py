@@ -12,7 +12,7 @@ class TelemetryCsvRecorder(threading.Thread):
         folder = Path(__file__).resolve().parent / "logs"
         folder.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.path = folder / f"linerobot_300hz_{stamp}.csv"
+        self.path = folder / f"linerobot_{stamp}.csv"
         self.output = self.path.open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.writer(self.output)
         self.writer.writerow(header)
