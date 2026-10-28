@@ -33,7 +33,7 @@ typedef struct {
   float Kd;
   int16_t baseSpeed; // Tốc độ chuẩn (ví dụ 160)
   int16_t maxSpeed;  // Tốc độ tối đa (255)
-  int16_t minSpeed;  // Tốc độ tối thiểu (-120 để quay ngược bánh khi cua)
+  int16_t minSpeed;  // Stability test: 0; no reverse PWM under AUTO
 } PID_Config_t;
 
 // =================== CÁC HÀM KHỞI TẠO & CÀI ĐẶT ===================
@@ -62,6 +62,9 @@ void pid_set_auto_mode(bool enable);
  * @brief Kiểm tra xem đang chạy tự động dò line hay lái tay
  */
 bool pid_is_auto_mode(void);
+bool pid_line_is_confirmed(void);
+uint32_t pid_get_confirmed_line_loss_count(void);
+uint32_t pid_get_line_reacquisition_count(void);
 
 // =================== CÁC HÀM XỬ LÝ CHÍNH ===================
 
@@ -70,7 +73,8 @@ bool pid_is_auto_mode(void);
  * chính giữa)
  * @param outPosition Con trỏ lưu vị trí tính được
  * @param outBlackCount Con trỏ lưu số lượng mắt đang thấy vạch đen
- * @return true nếu có ít nhất 1 mắt thấy đen, false nếu mất line
+ * @return true nếu có mắt vượt ngưỡng RAW riêng TH_i; chỉ mắt đó
+ *         góp phần vào trọng tâm Analog 0–1000
  */
 bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount);
 

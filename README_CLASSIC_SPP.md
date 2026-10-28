@@ -95,3 +95,14 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 - START waits for a complete validated NVS CAL_DUMP so the row cannot accidentally contain placeholders; otherwise it re-requests CAL_DUMP rather than opening an incomplete CSV. Every START creates one new file; STOP closes it as before.
 - For pandas telemetry analysis use pandas.read_csv(path, skiprows=[1]), or filter out the row where host_iso is CAL_THRESHOLDS. To inspect the thresholds, read the second row under adc0..adc15.
 - This is an app-only CSV change; the firmware and SPP 300-Hz stream are unchanged.
+
+
+## PID stability fix - five requested items (29 Oct 2026)
+1. Keep all 16 independently calibrated NVS thresholds, no recalibration or threshold change; TH_i remains WHITE_i + ceil(0.4*(BLACK_i-WHITE_i)).
+2. Logic black/white remains sensorRaw[i] >= thresholds[i] through sensor_is_black(i), independently for each eye.
+3. Analog CAL_i=0..1000 still weights the 16-eye centroid, but only the eyes passing the SAME per-eye TH_i logic participate. Removes the old conflict CAL>=150 for centroid versus CAL>=400 for line detection.
+4. AUTO must observe stable black detection for 10ms before starting/relocking. After lock, transient no-black lasts at most 25ms while driving forward at min(Base,65). Confirmed >=25ms absence stops both motors and never auto-pivots/reverses; subsequent reacquisition requires 10ms stable black.
+5. Straight-line stability/test mode disables auto sharp-90 and T-corner pivots. Both motor commands in AUTO are clamped 0..220, never negative; this sacrifices tight 90-degree corner behavior until basic tracking and sensor wiring are validated.
+The existing on-demand SPP DIAG reply now includes case=, line=, lost=, reacq= while keeping all old fields; Python app still decodes them. Stream default is now 300Hz (72-byte frames). Binary payload/CSV schema unchanged.
+Hardware acceptance: raise wheels for first boot. With sensors all on white: no reverse PWM, no drive until a real line is seen steadily for 10ms. With line lost after startup, PWM may briefly become (65,65) for <25ms, then must settle at (0,0); reacquire on real line to resume. STOP/ESTOP commands remain available. Verify forward motor polarity and sensor order before higher speeds.
+Known unresolved investigation: prior CSV showed near-duplicate sensors 4/12,5/13,6/14,7/15. Calibration and MUX wiring should be checked independently of PID.

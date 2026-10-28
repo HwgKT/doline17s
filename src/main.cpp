@@ -12,14 +12,14 @@
 #include "spp_debug.h"
 
 namespace {
-// 100 Hz * 72 B = 7.2 kB/s. USB debug fully disabled.
+// 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
-uint16_t streamHz=100;
-uint32_t streamPeriodUs=1000000UL/100;
+uint16_t streamHz=300;
+uint32_t streamPeriodUs=1000000UL/300;
 uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 BtTxStats lastTxStats{};
@@ -97,14 +97,18 @@ void command(const String &raw) {
     char b[290];
     snprintf(b,sizeof(b),
       "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
-      "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld",
+      "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
+      "case=%u line=%u lost=%lu reacq=%lu",
       btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
       loopCount/sec,pidCount/sec,
       (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
       (unsigned long)(tx.dropped-lastTxStats.dropped),
       (unsigned long)(tx.failed-lastTxStats.failed),
       (unsigned long)skippedSlots,(unsigned long)tx.pending,
-      (long)encL,(long)encR);
+      (long)encL,(long)encR,
+      (unsigned)pid_get_current_case(),pid_line_is_confirmed()?1U:0U,
+      (unsigned long)pid_get_confirmed_line_loss_count(),
+      (unsigned long)pid_get_line_reacquisition_count());
     lastDiagUs=t;loopCount=pidCount=txCount=0;
     lastTxStats=tx;skippedSlots=0;
     reply(b);return;
