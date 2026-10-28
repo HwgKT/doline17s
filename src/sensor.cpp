@@ -1,4 +1,5 @@
 #include "sensor.h"
+#include "spp_debug.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <driver/adc.h>
@@ -132,20 +133,20 @@ void finish() {
     memcpy(whiteNoise, sd, sizeof(whiteNoise));
     state = CAL_WHITE_READY;
     pending = CAL_WHITE_DONE;
-    Serial.println("[CAL] WHITE captured: 16 channels.");
+    sppLogLine("[CAL] WHITE captured: 16 channels.");
     return;
   }
   Profile p = {};
   p.magic = MAGIC; p.version = VERSION; p.count = N_SENSORS;
   bool ok = true;
-  Serial.println("[CAL] eye white black delta sigmaWhite sigmaBlack valid");
+  sppLogLine("[CAL] eye white black delta sigmaWhite sigmaBlack valid");
   for (int i = 0; i < N_SENSORS; ++i) {
     p.white[i] = whiteStage[i]; p.black[i] = mean[i];
     const int delta = int(mean[i]) - int(whiteStage[i]);
     const bool eyeOk = delta >= MIN_CALIBRATION_DELTA &&
         whiteNoise[i] <= CAL_MAX_STDDEV && sd[i] <= CAL_MAX_STDDEV;
     if (!eyeOk) ok = false;
-    Serial.printf("[CAL] %02d %u %u %d %u %u %d\n",
+    sppLogPrintf("[CAL] %02d %u %u %d %u %u %d\n",
       i, p.white[i], p.black[i], delta, whiteNoise[i], sd[i], eyeOk ? 1 : 0);
   }
   p.crc = signature(p);
@@ -153,11 +154,11 @@ void finish() {
     apply(p);
     lastCalibrationOK = true;
     state = CAL_READY; pending = CAL_SAVED;
-    Serial.println("[CAL] CAL_OK_SAVED: NVS committed");
+    sppLogLine("[CAL] CAL_OK_SAVED: NVS committed");
   } else {
     lastCalibrationOK = false;
     state = CAL_FAILED; pending = CAL_ERROR;
-    Serial.println("[CAL] CAL_FAILED: previous RAM calibration retained");
+    sppLogLine("[CAL] CAL_FAILED: previous RAM calibration retained");
   }
 }
 } // namespace
@@ -173,12 +174,12 @@ void sensor_init(void) {
   const esp_err_t attenResult = widthResult == ESP_OK ?
       adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11) : ESP_FAIL;
   fastAdcReady = widthResult == ESP_OK && attenResult == ESP_OK;
-  Serial.printf("[ADC] mode=IDF_GPIO_1 ready=%d gpio=%d bits=12 atten=11dB settle=6us discard=1 samples=1 post=3us\n",
+  sppLogPrintf("[ADC] mode=IDF_GPIO_1 ready=%d gpio=%d bits=12 atten=11dB settle=6us discard=1 samples=1 post=3us\n",
                 fastAdcReady ? 1 : 0, PIN_LINE_SIG);
-  if (!fastAdcReady) Serial.println("[ADC] INIT_FAILED: MOTOR CONTROL INHIBITED");
+  if (!fastAdcReady) sppLogLine("[ADC] INIT_FAILED: MOTOR CONTROL INHIBITED");
   calibrationReady = false;
   state = load() ? CAL_READY : CAL_EMPTY;
-  Serial.printf("[CAL] boot: %s\n", calibrationReady ? "NVS_RESTORED" : "NO_VALID_PROFILE");
+  sppLogPrintf("[CAL] boot: %s\n", calibrationReady ? "NVS_RESTORED" : "NO_VALID_PROFILE");
 }
 void sensor_mux_select(uint8_t ch) {
   digitalWrite(PIN_MUX_S0, ch & 1U);
@@ -196,7 +197,7 @@ uint16_t sensor_read_mux(uint8_t ch) {
   if (discard < 0 || discard > 4095 || raw < 0 || raw > 4095) {
     ++fastAdcErrors;
     fastAdcReady = false; // Latch fault: never drive using invalid ADC values.
-    Serial.printf("[ADC] READ_FAILED ch=%u discard=%d sample=%d; MOTION INHIBITED\n",
+    sppLogPrintf("[ADC] READ_FAILED ch=%u discard=%d sample=%d; MOTION INHIBITED\n",
                   (unsigned)ch, discard, raw);
     return 0;
   }
@@ -222,13 +223,13 @@ bool sensor_capture_white(void) {
   if (!fastAdcReady || isCalibrating) return false;
   lastCalibrationOK = false;
   resetAccum(); isCalibrating = true; state = CAL_WHITE_RUNNING; pending = CAL_WHITE_STARTED;
-  Serial.println("[CAL] WHITE: hold all 16 sensors stationary on uniform WHITE");
+  sppLogLine("[CAL] WHITE: hold all 16 sensors stationary on uniform WHITE");
   return true;
 }
 bool sensor_capture_black(void) {
   if (!fastAdcReady || isCalibrating || state != CAL_WHITE_READY) return false;
   resetAccum(); isCalibrating = true; state = CAL_BLACK_RUNNING; pending = CAL_BLACK_STARTED;
-  Serial.println("[CAL] BLACK: hold all 16 sensors stationary on uniform BLACK");
+  sppLogLine("[CAL] BLACK: hold all 16 sensors stationary on uniform BLACK");
   return true;
 }
 void sensor_update_calibration_loop(void) {
@@ -248,10 +249,10 @@ CalEvent sensor_take_calibration_event(void) {
   CalEvent e = pending; pending = CAL_NONE; return e;
 }
 void sensor_print_calibration(void) {
-  Serial.printf("[CAL] READY=%d STATE=%d\n", calibrationReady ? 1 : 0, int(state));
+  sppLogPrintf("[CAL] READY=%d STATE=%d\n", calibrationReady ? 1 : 0, int(state));
   if (!calibrationReady) return;
   for (int i = 0; i < N_SENSORS; ++i)
-    Serial.printf("[CAL] eye=%02d W=%u B=%u TH=%u\n",
+    sppLogPrintf("[CAL] eye=%02d W=%u B=%u TH=%u\n",
       i, minValues[i], maxValues[i], thresholds[i]);
 }
 bool sensor_is_button_pressed(void) {
@@ -289,6 +290,11 @@ uint16_t sensor_get_line_bits(void) {
   return bits;
 }
 void sensor_print_states(void) {
-  for (int i = 0; i < N_SENSORS; ++i)
-    Serial.printf("%d%s", sensor_is_black(i) ? 1 : 0, i == N_SENSORS-1 ? "\n" : " ");
+  String line;
+  line.reserve(2*N_SENSORS);
+  for(int i=0;i<N_SENSORS;++i){
+    line += sensor_is_black(i) ? '1' : '0';
+    if(i<N_SENSORS-1)line += ' ';
+  }
+  sppLogLine(line);
 }

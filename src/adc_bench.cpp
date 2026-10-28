@@ -1,4 +1,5 @@
 #include "adc_bench.h"
+#include "spp_debug.h"
 #include "pinout.h"
 #include "sensor.h"
 #include <Arduino.h>
@@ -128,7 +129,7 @@ void printRow(uint8_t mode) {
   }
   // Total field is measured from scan entry to exit; phase sums do not
   // include timestamp overhead, result accumulation or loop scheduling.
-  Serial.printf(
+  sppLogPrintf(
     "[ADC_BENCH] method=%s samples=%u scans=%u scan_us=%.0f/%.0f "
     "mux_us=%.1f settle_us=%.1f discard_us=%.1f read_us=%.1f "
     "wait_us=%.1f noise_adc=%.2f/%.2f mae_adc=%.2f maxerr_adc=%lu "
@@ -159,9 +160,9 @@ bool adcBenchStart() {
   passIndex = 0;
   reportIndex = 0;
   running = true;
-  Serial.println("[ADC_BENCH] START modes=9 scans_per_mode=64 pins=GPIO36/17/18/19/23");
-  Serial.println("[ADC_BENCH] Fixed scene required: WHITE, BLACK or EDGE; motors OFF");
-  Serial.println("[ADC_BENCH] Mode 0 ARDUINO/4 is the per-pass reference; no NVS or PID changes");
+  sppLogLine("[ADC_BENCH] START modes=9 scans_per_mode=64 pins=GPIO36/17/18/19/23");
+  sppLogLine("[ADC_BENCH] Fixed scene required: WHITE, BLACK or EDGE; motors OFF");
+  sppLogLine("[ADC_BENCH] Mode 0 ARDUINO/4 is the per-pass reference; no NVS or PID changes");
   return true;
 }
 
@@ -171,11 +172,11 @@ void adcBenchCancel() {
   if (!adcBenchActive()) return;
   running = false;
   printing = false;
-  Serial.println("[ADC_BENCH] CANCELLED");
+  sppLogLine("[ADC_BENCH] CANCELLED");
 }
 
 void adcBenchStatus() {
-  Serial.printf("[ADC_BENCH] state=%s pass=%u/%u mode=%u/%u\n",
+  sppLogPrintf("[ADC_BENCH] state=%s pass=%u/%u mode=%u/%u\n",
       running ? "RUNNING" : printing ? "REPORT" : "IDLE",
       (unsigned)passIndex, (unsigned)kScansPerMode,
       (unsigned)modeIndex, (unsigned)kModes);
@@ -194,10 +195,10 @@ void adcBenchStep() {
         running = false;
         printing = true;
         reportIndex = 0;
-        Serial.println("[ADC_BENCH] RESULT reference=ARDUINO/4; stationary scene");
-        Serial.println("[ADC_BENCH] noise=stddev across scans; mismatch=changed black/white"
+        sppLogLine("[ADC_BENCH] RESULT reference=ARDUINO/4; stationary scene");
+        sppLogLine("[ADC_BENCH] noise=stddev across scans; mismatch=changed black/white"
                        " classification vs paired ARDUINO/4; near100=ref within 100 ADC of threshold");
-        Serial.println("[ADC_BENCH] discard_delta=discarded first read vs averaged kept reads"
+        sppLogLine("[ADC_BENCH] discard_delta=discarded first read vs averaged kept reads"
                        " (settling proxy, NOT proof of crosstalk)");
       }
     }
@@ -206,7 +207,7 @@ void adcBenchStep() {
     printRow(reportIndex);
     if (++reportIndex >= kModes) {
       printing = false;
-      Serial.println("[ADC_BENCH] DONE; production sensor mode=IDF_GPIO_1");
+      sppLogLine("[ADC_BENCH] DONE; production sensor mode=IDF_GPIO_1");
     }
   }
 }

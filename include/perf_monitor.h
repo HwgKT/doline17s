@@ -13,5 +13,5 @@ enum PerfStage : uint8_t {
 void perfLoopBegin(uint32_t startUs);
 void perfRecord(PerfStage stage, uint32_t elapsedUs);
 void perfLoopEnd(uint32_t bodyUs);
-void perfReport();      // USB Serial, every second.
-void perfTaskReport();  // TASKS command: only if FreeRTOS runtime stats are compiled in.
+void perfReport();      // SPP-only PERF command, resets measurement interval.
+void perfTaskReport();  // SPP-only TASKS command if runtime stats are available.

@@ -1,4 +1,5 @@
 #include "perf_monitor.h"
+#include "spp_debug.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -64,7 +65,7 @@ void perfReport() {
   const uint32_t jitterPp = periodMetric.samples
       ? periodMetric.maxUs - periodMetric.minUs : 0;
 
-  Serial.printf(
+  sppLogPrintf(
       "[PERF] adc_us=%.0f/%lu pid_us=%.0f/%lu comm_us=%.0f/%lu "
       "tx_us=%.0f/%lu busy_us=%.0f/%lu other_us=%.0f n=%lu\n",
       avgAdc, (unsigned long)adc.maxUs,
@@ -73,7 +74,7 @@ void perfReport() {
       mean(tx), (unsigned long)tx.maxUs,
       avgBody, (unsigned long)bodyMetric.maxUs,
       otherAvg, (unsigned long)bodyMetric.samples);
-  Serial.printf(
+  sppLogPrintf(
       "[PERF_LOOP] period_us=%lu/%.0f/%lu jitter_pp_us=%lu "
       "peak_observed_hz=%.1f ceiling_busy_hz=%.1f ceiling_adc_hz=%.1f "
       "pid_samples=%lu tx_samples=%lu\n",
@@ -94,10 +95,10 @@ void perfTaskReport() {
   uint32_t totalRunTime = 0;
   const UBaseType_t n = uxTaskGetSystemState(tasks, MAX_TASKS, &totalRunTime);
   if (!n || !totalRunTime) {
-    Serial.println("[TASKS] no runtime counters (or task array too small)");
+    sppLogLine("[TASKS] no runtime counters (or task array too small)");
     return;
   }
-  Serial.printf("[TASKS] tasks=%u runtime_ticks=%lu since_boot (all cores)\n",
+  sppLogPrintf("[TASKS] tasks=%u runtime_ticks=%lu since_boot (all cores)\n",
                 (unsigned)n, (unsigned long)totalRunTime);
   for (UBaseType_t rank = 0; rank < 8 && rank < n; ++rank) {
     UBaseType_t best = n;
@@ -108,11 +109,11 @@ void perfTaskReport() {
     }
     if (best == n) break;
     const float pct = 100.0f * tasks[best].ulRunTimeCounter / totalRunTime;
-    Serial.printf("[TASKS] %s runtime=%.1f%%\n", tasks[best].pcTaskName, pct);
+    sppLogPrintf("[TASKS] %s runtime=%.1f%%\n", tasks[best].pcTaskName, pct);
     tasks[best].ulRunTimeCounter = 0;
   }
 #else
-  Serial.println("[TASKS] RTOS runtime stats disabled; per-task CPU share unavailable. "
+  sppLogLine("[TASKS] RTOS runtime stats disabled; per-task CPU share unavailable. "
                  "Use PERF comm/adc/pid/tx wall times.");
 #endif
 }
