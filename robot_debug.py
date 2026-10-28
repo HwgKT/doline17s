@@ -270,7 +270,7 @@ class App(tk.Tk):
         self.stop_btn.pack(side="left", fill="x", expand=True)
         self.control_state = tk.StringVar(value="Chưa kết nối / chưa xác định trạng thái")
         self.control_state_label = self.label(panel, textvariable=self.control_state,
-                                              bg=PANEL, fg=AMBER, wraplength=570,
+                                              bg=PANEL, fg=AMBER, wraplength=430,
                                               font=("Segoe UI", 9),
                                               anchor="w", justify="left")
         self.control_state_label.pack(fill="x", pady=(0, 1))
@@ -375,7 +375,7 @@ class App(tk.Tk):
         self.cal_state = tk.StringVar(value="Chưa tải profile calibration từ ESP32")
         self.label(panel, textvariable=self.cal_state, bg=PANEL, fg=AMBER,
                    font=("Segoe UI", 8), justify="left", anchor="w",
-                   wraplength=570).pack(fill="x", pady=(1, 0))
+                   wraplength=430).pack(fill="x", pady=(1, 0))
 
         terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
