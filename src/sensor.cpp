@@ -56,7 +56,7 @@ void apply(const Profile &p) {
   for (int i = 0; i < N_SENSORS; ++i) {
     minValues[i] = p.white[i];
     maxValues[i] = p.black[i];
-    thresholds[i] = (uint32_t(p.white[i]) + p.black[i]) / 2U;
+    thresholds[i] = (uint32_t(p.white[i]) + p.black[i] + 1U) / 2U; // exact CAL>=500 boundary
   }
   calibrationReady = true;
 }

@@ -413,7 +413,7 @@ class App(tk.Tk):
                 white, black = self.cal_min[i], self.cal_max[i]
                 cal = normalize_adc(raw, white, black)
                 self.sensor_table.item(str(i), values=(i, raw, white, black,
-                                     (white + black) // 2, cal, int(cal >= 500)))
+                                     (white + black + 1) // 2, cal, int(cal >= 500)))
             else:
                 self.sensor_table.item(str(i), values=(i, raw, "—", "—", "—", "—", "—"))
 
@@ -634,7 +634,7 @@ class App(tk.Tk):
                     return
                 if (0 <= eye < 16 and 0 <= white <= 4095 and
                         0 <= black <= 4095 and black - white >= MIN_CALIB_DELTA and
-                        threshold == (white + black) // 2):
+                        threshold == (white + black + 1) // 2):
                     self.cal_data[eye] = (white, black)
         elif message == "CAL_DUMP_DONE":
             if len(self.cal_data) == 16:
@@ -726,7 +726,7 @@ class App(tk.Tk):
             c.create_rectangle(x0, top + height - bar_height, x1,
                                top + height, fill=color, outline="")
             if self.calibration_ok:
-                threshold = (low + high) // 2
+                threshold = (low + high + 1) // 2
                 yt = top + height * (1 - threshold / ADC_MAX)
                 c.create_line(x0, yt, x1, yt, fill=AMBER, width=2)
             else:
