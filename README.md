@@ -175,3 +175,7 @@ SPP device: **`LineRobot`**; BLE Web **không được khởi tạo trong `mainv
 - Thuật toán PID dùng đúng ngưỡng đen của từng mắt, thống nhất với hiển thị/CSV của app Python. Bộ lọc trọng tâm `CAL >= 150` được giữ nguyên, tránh thay đổi quá nhiều tầng điều khiển cùng lúc.
 - **Chất lượng calibration** vẫn dùng chênh lệch >=150 ADC và độ nhiễu <=90; không hạ các ngưỡng kiểm tra chất lượng này.
 - Hạ ngưỡng tăng độ nhạy nhưng có thể tăng dương tính giả nếu mặt trắng tối/nhiễu; thử trên robot thực và kiểm tra tất cả 16 mắt trước khi chạy nhanh.
+
+### Profiling vòng loop/PID (mainv4)
+
+Mỗi giây, USB terminal in `[PERF]` và `[PERF_LOOP]`. Các trường `adc_us`, `pid_us`, `comm_us`, `tx_us`, `busy_us` có dạng trung bình/cao nhất tính bằng microgiây; `other_us` là phần không nằm trong các khối đo riêng. `period_us=min/avg/max` đo khoảng cách giữa hai lần bắt đầu loop, `jitter_pp_us=max-min`. `peak_observed_hz` là đỉnh đã quan sát; `ceiling_busy_hz` và `ceiling_adc_hz` chỉ là giới hạn lạc quan suy từ thời gian đo, KHÔNG phải Hz đã đạt ổn định. `TASKS` in thống kê runtime FreeRTOS nếu framework có bật trace/runtime stats, nếu không sẽ báo không khả dụng. Các thời gian đo trong `[PERF]` không phải % CPU theo task. Khi đang hiệu chuẩn, `adc_us` có thể bao gồm thống kê và thao tác NVS. Hãy đo khi BT tắt, BT+STREAM:100, rồi AUTO với bánh xe kê lên để đối chiếu.

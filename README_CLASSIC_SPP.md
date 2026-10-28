@@ -20,4 +20,11 @@ Smoke test:
 4. Send PING with newline; expect PONG.
 5. Pair LineRobot on Windows; LED solid and USB log [BT] CONNECTED.
 6. Observe [DIAG], telemetry up to ~100 Hz (actual rate depends on loop timing and SPP link), and PID: Kd=0.00 before running any motor.
-7. `loop()` no longer uses `delay(5)` (it calls `yield()`); USB `[DIAG]` reports measured `loop/pid/tx` rates. The SPP scheduler advances its phase and skips overdue slots rather than bursting frames. Start with wheels off the ground. Build and hardware behavior have not yet been verified.
+7. `loop()` has no `delay(5)` (only `yield()`); USB `[DIAG]`, `[PERF]`, and `[PERF_LOOP]` report loop frequency and stage timing. The SPP scheduler skips missed slots, never bursts stale frames. Start with wheels off the ground. Build and hardware behavior have not yet been verified.
+
+## Runtime profiling
+- `[PERF]`: `adc_us`, `pid_us`, `comm_us`, `tx_us`, `busy_us` are **average/maximum microseconds**. `other_us` is the remaining loop work (buttons, log output, safety). During calibration, `adc_us` also includes statistics and occasionally NVS writes.
+- `[PERF_LOOP]`: `period_us=min/mean/max` measures start-to-start intervals (including scheduler interruptions, yield, and USB log spikes); `jitter_pp_us=max-min`; `peak_observed_hz=1e6/minPeriod`. `ceiling_busy_hz=1e6/averageBodyTime` and `ceiling_adc_hz=1e6/averageAdcTime` are **optimistic calculated ceilings**, not demonstrated sustained PID frequencies. `pid_samples=0` means AUTO was off.
+- USB and SPP command `TASKS` requests FreeRTOS runtime counters **only if compiled into the framework**; otherwise it prints an explicit unavailable message. Stage timings measure elapsed wall time, not per-task CPU percentages.
+- Record 10–20 samples in three conditions: Bluetooth disconnected idle; Bluetooth connected `STREAM:100`; and AUTO enabled with wheels raised. Compare mean/maximum times and jitter before changing ADC averaging or PID frequency.
+

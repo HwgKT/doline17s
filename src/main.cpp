@@ -7,6 +7,7 @@
 #include "encoder.h"
 #include "pid_controller.h"
 #include "bt_telemetry.h"
+#include "perf_monitor.h"
 
 namespace {
 // Packed 72-byte SPP telemetry; 100 Hz target = 7.2 kB/s (72 bytes/frame).
@@ -68,7 +69,7 @@ void command(const String &raw) {
   Serial.printf("[CMD] %s\n",s.c_str());
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING PID PWM ENC ENC_RESET STATUS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP STREAM:0/20/50/100 3S 2S RACE");
+    reply("HELP: PING PID PWM ENC ENC_RESET STATUS TASKS P A M S F B L R V:120 KP:2.2 KI:0 KD:0 BASE:120 CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP STREAM:0/20/50/100 3S 2S RACE");
     return;
   }
   if(s=="STREAM"){
@@ -86,6 +87,7 @@ void command(const String &raw) {
     reply(String("STREAM Hz=")+(streamPeriodMs?String(1000U/streamPeriodMs):String("0"))+
           " FRAME_BYTES=72");return;
   }
+  if(s=="TASKS"){perfTaskReport();return;}
   if(s=="PID"){showPid();return;}
   if(s=="PWM"){
     char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
@@ -238,16 +240,22 @@ void setup() {
   lastTx=lastDiag=lastBlink=millis();
 }
 void loop() {
+  const uint32_t loopStartUs=micros();
+  perfLoopBegin(loopStartUs);
   uint32_t now=millis();++loopCount;
+  uint32_t stageStartUs=micros();
   connectionState(now);pollUSB();
   if(sppStarted)btPollCommands(command);
+  perfRecord(PERF_COMM, micros()-stageStartUs);
   if(sensor_is_button_pressed() && !sensor_is_calibrating()){
     safeStop();
     sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
   }
   const bool wasCalibrating=sensor_is_calibrating();
+  stageStartUs=micros();
   if(wasCalibrating)sensor_update_calibration_loop();
   else sensor_read_all();
+  perfRecord(PERF_ADC, micros()-stageStartUs);
   switch(sensor_take_calibration_event()){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
     case CAL_WHITE_DONE:    reply("CAL_WHITE_DONE"); break;
@@ -256,7 +264,11 @@ void loop() {
     case CAL_ERROR:         reply("CAL_FAILED");showCalib(); break;
     default: break;
   }
-  if(pid_is_auto_mode()&&!sensor_is_calibrating()){pid_line_follow_step();++pidCount;}
+  if(pid_is_auto_mode()&&!sensor_is_calibrating()){
+    stageStartUs=micros();
+    pid_line_follow_step();++pidCount;
+    perfRecord(PERF_PID, micros()-stageStartUs);
+  }
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
@@ -268,10 +280,15 @@ void loop() {
     const uint32_t elapsed=txNow-lastTx;
     if(elapsed>=streamPeriodMs){
       lastTx+=(elapsed/streamPeriodMs)*streamPeriodMs;
-      sendFrame();
+      if(sppStarted&&btConnected()){
+        stageStartUs=micros();
+        sendFrame();
+        perfRecord(PERF_TX, micros()-stageStartUs);
+      }
     }
   }
-  if(now-lastDiag>=DIAG_PERIOD_MS){
+  const bool diagDue=(now-lastDiag>=DIAG_PERIOD_MS);
+  if(diagDue){
     float sec=(now-lastDiag)/1000.0f;
     int32_t encL=0,encR=0;
     encoder_get_counts(&encL,&encR);
@@ -281,7 +298,9 @@ void loop() {
       loopCount/sec,pidCount/sec,txCount/sec,(long)encL,(long)encR);
     loopCount=pidCount=txCount=0;lastDiag=now;
   }
-  // No fixed 5 ms delay: allow the control loop to run as soon as ADC is ready.
-  // Keep cooperative scheduling for the ESP32 Bluetooth/FreeRTOS tasks.
+  // The body includes the [DIAG] print if due, but not [PERF] printing.
+  perfLoopEnd(micros()-loopStartUs);
+  if(diagDue) perfReport();
+  // Loop start-to-start time includes yield and background scheduler work.
   yield();
-}
+
