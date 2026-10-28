@@ -170,6 +170,12 @@ class App(tk.Tk):
         self.frames = 0
         self.last_rx_total = 0
         self.rate_time = time.monotonic()
+        # Report actual firmware loop/PID rates using periodic SPP DIAG.
+        self.diag_interval_s = 2.0
+        self.next_diag_poll = None
+        self.last_diag_rx = None
+        self.loop_debug = tk.StringVar(
+            value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -215,6 +221,11 @@ class App(tk.Tk):
         ttk.Button(top, text="Đo TX/Loop", command=self.request_diagnostics).pack(side="left", padx=3)
         self.rate_label = self.label(top, "RX 0 Hz | APP 0 Hz | CRC 0", fg=MUTED)
         self.rate_label.pack(side="right")
+
+        diag_bar = tk.Frame(self, bg=PANEL)
+        diag_bar.pack(fill="x", padx=12, pady=(0, 5))
+        self.label(diag_bar, textvariable=self.loop_debug, fg=CYAN, bg=PANEL,
+                   font=("Consolas", 10, "bold")).pack(anchor="w", padx=10, pady=5)
 
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=12, pady=3)
@@ -522,6 +533,9 @@ class App(tk.Tk):
         self.last_rx_total = self.reader.frames_rx
         self.frames = 0
         self.rate_time = time.monotonic()
+        self.last_diag_rx = None
+        self.next_diag_poll = self.rate_time + self.diag_interval_s
+        self.loop_debug.set("LOOP: đang đo...    PID: -- Hz    SPP TX: -- Hz")
         self.connect_btn.config(text="Ngắt")
         self.status_label.config(text=f"Đã mở {port}", fg=GREEN)
         self.log(f"Đã mở {port}; chờ frame SPP từ ESP32")
@@ -533,7 +547,8 @@ class App(tk.Tk):
         self.send_command("STREAM:" + self.stream_rate.get())
 
     def request_diagnostics(self):
-        self.send_command("DIAG")
+        if self.send_command("DIAG"):
+            self.next_diag_poll = time.monotonic() + self.diag_interval_s
         self.send_command("PERF")
 
     def disconnect(self):
@@ -549,6 +564,9 @@ class App(tk.Tk):
         self.auto_running = False
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
+        self.next_diag_poll = None
+        self.last_diag_rx = None
+        self.loop_debug.set("LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (mất kết nối)")
         self.control_state_label.configure(fg=ROSE)
         self.update_control_buttons()
         self.log("Đã đóng COM. Firmware phải dừng động cơ khi SPP mất kết nối.")
@@ -746,6 +764,18 @@ class App(tk.Tk):
             self.control_state.set("Không thể bắt đầu: cần hoàn tất calibration TRẮNG/ĐEN.")
             self.control_state_label.configure(fg=AMBER)
             self.update_control_buttons()
+        elif message.startswith("DIAG:"):
+            loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
+            pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
+            sent = re.search(r"\bsent=(\d+(?:\.\d+)?)Hz\b", message)
+            dropped = re.search(r"\bdrop=(\d+)\b", message)
+            if loop and pid and sent:
+                self.last_diag_rx = time.monotonic()
+                warning = f"    TX drop: {dropped.group(1)}" if dropped else ""
+                self.loop_debug.set(
+                    f"LOOP: {float(loop.group(1)):.1f} Hz    "
+                    f"PID: {float(pid.group(1)):.1f} Hz    "
+                    f"SPP TX: {float(sent.group(1)):.1f} Hz{warning}")
         elif message.startswith("STATUS:"):
             estop = re.search(r"\bestop=(\d)\b", message)
             auto = re.search(r"\bauto=(\d)\b", message)
@@ -859,6 +889,16 @@ class App(tk.Tk):
             self.last_rx_total = total
             self.frames = 0
             self.rate_time = now
+        # One small SPP text request per 2 seconds; no USB traffic.
+        if self.next_diag_poll is not None and now >= self.next_diag_poll:
+            if self.reader is not None and self.reader.is_alive():
+                self.send_command("DIAG")
+                self.next_diag_poll = now + self.diag_interval_s
+            else:
+                self.next_diag_poll = None
+        if self.last_diag_rx is not None and now - self.last_diag_rx > 6.0:
+            self.loop_debug.set("LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (DIAG quá hạn)")
+            self.last_diag_rx = None
         self.after(30, self.tick)
 
     def update_view(self, s):

@@ -57,3 +57,8 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 - Python app defaults to 300 Hz and shows **RX Hz** (actual frame decode in reader thread), **APP Hz** (samples processed in GUI), `q` (pending GUI queue), `dropUI`, and `CRC` errors. GUI screen refresh remains ~33 Hz; it is not the telemetry rate.
 - **Xuất CSV** now exports the **entire app session**, not just the last 15,000 frames. **Xuất TXT** exports the entire terminal log since app startup or the last explicit **Xóa**. Both use auto-created temporary disk-backed session files; these are deleted when the app closes. **Ghi CSV** still writes an explicit persistent CSV file continuously for measurements that must survive crashes/app shutdown. Large exports take disk space and time.
 - App history deques and the visible terminal remain bounded for UI responsiveness, but no longer limit session export. `ADC_BENCH` and calibration debug text are routed through SPP. No hardware measurement at 300 Hz has yet been reported; test with wheels raised.
+
+
+### Live loop-frequency display in Python app
+- App automatically requests DIAG over Bluetooth SPP every two seconds while connected, and displays actual firmware LOOP, PID and SPP TX (sent-to-stack) rates in a dedicated status strip. Actual received packet rate remains in the RX counter. PID=0 Hz is normal when AUTO is off.
+- Manual Do TX/Loop button still requests DIAG and PERF; its DIAG resets the timing window. First measurement after reconnect can include disconnected time; use subsequent stable measurements. Stale indicators reset after six seconds without DIAG. No USB Serial logging is re-enabled.
