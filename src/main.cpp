@@ -260,7 +260,7 @@ void setup() {
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
-  pid_init(2.2f,0.0f,0.0f,120); // preserve seconds-based derivative default Kd=0
+  pid_init(2.0f,0.0f,0.0f,100); // conservative baseline while validating sharp-turn behavior
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
