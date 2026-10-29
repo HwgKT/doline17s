@@ -23,7 +23,8 @@ typedef enum
   LINE_CASE_T_LEFT = 6,     // Case 6: Ngã 3 chữ T bên trái
   LINE_CASE_T_RIGHT = 7,    // Case 7: Ngã 3 chữ T bên phải
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
-  LINE_CASE_DASHED_LINE = 9 // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
+  LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
+  LINE_CASE_STARTUP_COAST = 10 // Case 10: Khởi động mất line, chạy thẳng có giới hạn
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
@@ -33,7 +34,7 @@ typedef struct {
   float Kd;
   int16_t baseSpeed; // Tốc độ chuẩn (ví dụ 160)
   int16_t maxSpeed;  // Tốc độ tối đa (255)
-  int16_t minSpeed;  // Stability test: 0; no reverse PWM under AUTO
+  int16_t minSpeed;  // Legacy field; normal PID may issue signed wheel commands
 } PID_Config_t;
 
 // =================== CÁC HÀM KHỞI TẠO & CÀI ĐẶT ===================

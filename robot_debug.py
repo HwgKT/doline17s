@@ -194,6 +194,9 @@ class App(tk.Tk):
         self.estop_pending = False
         self.start_pending = False
         self.auto_running = False
+        self.run_elapsed_seconds = 0.0
+        self.run_started_at = None
+        self.run_timer_var = tk.StringVar(value="00:00:00")
         self._build()
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -269,6 +272,14 @@ class App(tk.Tk):
                                   bg=ROSE, fg="#ffffff", activebackground="#be123c",
                                   relief="flat", height=1, pady=1)
         self.stop_btn.pack(side="left", fill="x", expand=True)
+        run_timer = tk.Frame(panel, bg=PANEL)
+        run_timer.pack(fill="x", pady=(1, 2))
+        self.label(run_timer, "Thời gian xe chạy", bg=PANEL, fg=MUTED,
+                   font=("Segoe UI", 9)).pack(side="left")
+        self.label(run_timer, textvariable=self.run_timer_var, bg=PANEL, fg=CYAN,
+                   font=("Consolas", 12, "bold")).pack(side="left", padx=8)
+        ttk.Button(run_timer, text="Reset thời gian",
+                   command=self.reset_run_timer).pack(side="right")
         self.control_state = tk.StringVar(value="Chưa kết nối / chưa xác định trạng thái")
         self.control_state_label = self.label(panel, textvariable=self.control_state,
                                               bg=PANEL, fg=AMBER, wraplength=430,
@@ -559,7 +570,7 @@ class App(tk.Tk):
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
-        self.auto_running = False
+        self.set_auto_running(False)
         self.control_state.set("Đang kết nối — chờ STATUS từ firmware.")
         self.adc_status.set("ADC: chờ STATUS")
         self.control_state_label.configure(fg=AMBER)
@@ -603,7 +614,7 @@ class App(tk.Tk):
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
-        self.auto_running = False
+        self.set_auto_running(False)
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
         self.next_diag_poll = None
@@ -681,6 +692,31 @@ class App(tk.Tk):
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
+
+    def set_auto_running(self, running):
+        now = time.monotonic()
+        if running and not self.auto_running:
+            self.run_started_at = now
+        elif not running and self.auto_running:
+            if self.run_started_at is not None:
+                self.run_elapsed_seconds += now - self.run_started_at
+            self.run_started_at = None
+        self.auto_running = running
+        self.update_run_timer_display(now)
+
+    def reset_run_timer(self):
+        self.run_elapsed_seconds = 0.0
+        self.run_started_at = time.monotonic() if self.auto_running else None
+        self.update_run_timer_display()
+
+    def update_run_timer_display(self, now=None):
+        elapsed = self.run_elapsed_seconds
+        if self.auto_running and self.run_started_at is not None:
+            elapsed += (time.monotonic() if now is None else now) - self.run_started_at
+        total_seconds = max(0, int(elapsed))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self.run_timer_var.set(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
 
     def finish_run_csv(self, reason):
         recorder = self.run_csv.finish(self.reader, reason)
@@ -782,7 +818,7 @@ class App(tk.Tk):
             self.estop_latched = True
             self.estop_pending = False
             self.start_pending = False
-            self.auto_running = False
+            self.set_auto_running(False)
             self.control_state.set("Firmware báo E-STOP đã chốt; có thể RESET_ESTOP qua terminal.")
             self.control_state_label.configure(fg=ROSE)
             self.finish_run_csv("ESTOP ĐÃ XÁC NHẬN")
@@ -791,20 +827,20 @@ class App(tk.Tk):
             self.estop_latched = False
             self.estop_pending = False
             self.start_pending = False
-            self.auto_running = False
+            self.set_auto_running(False)
             self.control_state.set("Đã mở khóa E-STOP — động cơ vẫn dừng.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
         elif message == "MODE: AUTO PID":
             self.start_pending = False
             self.start_confirmed = True
-            self.auto_running = True
+            self.set_auto_running(True)
             self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
         elif message.startswith("ERR: CALIB_REQUIRED_OR_PENDING"):
             self.start_pending = False
-            self.auto_running = False
+            self.set_auto_running(False)
             self.control_state.set("Không thể bắt đầu: cần hoàn tất calibration TRẮNG/ĐEN.")
             self.control_state_label.configure(fg=AMBER)
             self.finish_run_csv("AUTO BỊ TỪ CHỐI: CALIBRATION")
@@ -812,7 +848,7 @@ class App(tk.Tk):
         elif message in ("ERR: ADC_NOT_READY", "ERR: ADC_BENCH_ACTIVE"):
             if self.start_pending and not self.start_confirmed:
                 self.start_pending = False
-                self.auto_running = False
+                self.set_auto_running(False)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
                 self.update_control_buttons()
         elif message.startswith("DIAG:"):
@@ -839,8 +875,9 @@ class App(tk.Tk):
                 self.estop_latched = estop.group(1) == "1"
                 self.estop_pending = False
                 self.start_pending = False
-                self.auto_running = bool(auto and auto.group(1) == "1")
+                self.set_auto_running(bool(auto and auto.group(1) == "1"))
                 if self.estop_latched:
+                    self.set_auto_running(False)
                     self.control_state.set("E-STOP đang khóa — gửi RESET_ESTOP trong terminal để mở khóa.")
                     self.control_state_label.configure(fg=ROSE)
                     self.finish_run_csv("STATUS: ESTOP ĐANG KHÓA")
@@ -856,7 +893,7 @@ class App(tk.Tk):
         elif message in ("MOTOR: STOP", "MODE: MANUAL",
                               "[SAFE] MANUAL DEADMAN: MOTOR STOP",
                               "ERR: ADC_READ_FAULT_MOTORS_STOPPED"):
-            self.auto_running = False
+            self.set_auto_running(False)
             self.start_pending = False
             self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + message)
             if self.estop_latched is False:
@@ -956,6 +993,7 @@ class App(tk.Tk):
         if last is not None:
             self.update_view(last)
         now = time.monotonic()
+        self.update_run_timer_display(now)
         if now - self.rate_time >= 1:
             interval = now - self.rate_time
             total = self.reader.frames_rx if self.reader else self.last_rx_total

@@ -10,9 +10,9 @@ static const float SENSOR_WEIGHTS[N_SENSORS] = {
       5.0f,  15.0f,  25.0f,  35.0f,  45.0f,  55.0f,  65.0f,  75.0f
 };
 
-// Conservative starting tune for physical validation. Gains can still be changed
-// by the existing SPP commands; sharp turns have their own bounded controller.
-static PID_Config_t pidConfig = {2.0f, 0.0f, 0.0f, 100, 220, 0};
+// Optimised tune for sharp-turn responsiveness.  Gains are still live-tuneable
+// via the SPP KP:/KI:/KD: commands.
+static PID_Config_t pidConfig = {3.8f, 0.015f, 2.0f, 100, 255, -100};
 static bool autoMode = false;
 static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0, integralError = 0, lastCorrection = 0;
@@ -20,58 +20,180 @@ static float lastPTerm = 0, lastITerm = 0, lastDTerm = 0;
 static float lastKnownPosition = 0;
 static uint32_t lastComputeTimeUs = 0;
 static bool derivativeHistoryValid = false;
+static float lastDashedCorrection = 0;   // remembered PID output for dashed-line coast
 
 namespace {
 constexpr uint32_t LINE_ACQUIRE_MS = 10;
-constexpr uint32_t LINE_LOSS_MS = 25;
+constexpr uint32_t LINE_LOSS_MS = 40;           // was 25 — longer coast before declaring lost
+constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
+constexpr uint32_t FINISH_LINE_HOLD_MS = 50;
+constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
+constexpr int16_t LINE_SEARCH_PWM = 85;
+constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
+constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
+constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
+constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
 
 // A sharp turn is entered only when the centroid reaches the outer region.
-// A bounded one-wheel-forward maneuver is used; AUTO never commands reverse.
-constexpr float SHARP_TURN_POSITION = 43.0f;
-constexpr float SHARP_TURN_POSITION_WITH_OUTER_EYES = 31.0f;
-constexpr uint32_t SHARP_TURN_TIMEOUT_MS = 550;
+// If the line is lost, AUTO pivots in place to search for it.
+constexpr float SHARP_TURN_POSITION = 40.0f;          // was 43 — enter turn earlier
+constexpr float SHARP_TURN_POSITION_WITH_OUTER_EYES = 28.0f; // was 31
+constexpr uint32_t SHARP_TURN_PROFILE_MS = 700;
 constexpr float TURN_CENTERED_POSITION = 22.0f;
-constexpr uint8_t TURN_CENTERED_FRAMES = 3;
-constexpr int16_t TURN_PWM_MIN = 95;
-constexpr int16_t TURN_PWM_MAX = 170;
+constexpr uint8_t TURN_CENTERED_FRAMES = 2;
+constexpr uint16_t TURN_CENTER_SENSOR_MASK = 0x03C0U;
+constexpr uint8_t TURN_CENTER_SENSOR_MIN = 2;
+constexpr int16_t TURN_PWM_MIN = 100;           // was 95 — slightly more aggressive
+constexpr int16_t TURN_PWM_MAX = 185;           // was 170 — allow faster outer wheel
+constexpr float TURN_CURVE_START_POSITION = 28.0f;
+constexpr float TURN_CURVE_END_POSITION = 75.0f;
+constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
+constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
-enum TurnState : uint8_t { TURN_NONE, TURN_LEFT, TURN_RIGHT };
+constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
+constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
+constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
+constexpr float OUTER_STEERING_START_ERROR = 20.0f;
+constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
+
+enum TurnState : uint8_t {
+    TURN_NONE,
+    TURN_LEFT,
+    TURN_RIGHT,
+    SEARCH_LEFT,
+    SEARCH_RIGHT
+};
 TurnState turnState = TURN_NONE;
+TurnState lastTurnDirection = TURN_RIGHT;
 uint32_t turnStartedMs = 0;
+uint32_t searchStartedMs = 0;
+uint32_t autoStartedMs = 0;
+uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
+uint8_t derivativeWarmupFrames = 0;
+uint8_t reacquireSpeedFrames = 0;
+bool turnMissing = false;
+bool startupLossActive = false;
+bool fullLineCandidate = false;
+bool finishLineLatched = false;
+uint32_t fullLineSinceMs = 0;
 
 bool lineLocked = false, previouslyLocked = false;
 bool acquiring = false, missing = false;
 uint32_t acquireSinceMs = 0, missingSinceMs = 0;
 uint32_t confirmedLosses = 0, reacquisitions = 0;
+float governedForwardSpeed = 0.0f;
 
 static int16_t clampPwm(float value) {
     if (value <= 0.0f) return 0;
     if (value >= pidConfig.maxSpeed) return pidConfig.maxSpeed;
     return (int16_t)value;
 }
+static int16_t clampPwmSigned(float value) {
+    if (value >= pidConfig.maxSpeed) return pidConfig.maxSpeed;
+    if (value <= -pidConfig.maxSpeed) return -pidConfig.maxSpeed;
+    return (int16_t)value;
+}
 static uint8_t bitCount16(uint16_t value) {
     return (uint8_t)__builtin_popcount((unsigned)value);
+}
+static float outerSensorSeverity(uint16_t mask) {
+    float severity = 0.0f;
+    for (uint8_t i = 0; i < 4; ++i) {
+        if (mask & (uint16_t)(1U << i)) {
+            const float sensorSeverity = (float)(4U - i) * 0.25f;
+            if (sensorSeverity > severity) severity = sensorSeverity;
+        }
+        const uint8_t rightSensor = (uint8_t)(15U - i);
+        if (mask & (uint16_t)(1U << rightSensor)) {
+            const float sensorSeverity = (float)(4U - i) * 0.25f;
+            if (sensorSeverity > severity) severity = sensorSeverity;
+        }
+    }
+    return severity;
+}
+static bool hasAdjacentLineSensors(uint16_t mask) {
+    return (mask & (uint16_t)(mask >> 1)) != 0;
+}
+static void limitMotorCommandPeak(float& left, float& right, float limit) {
+    const float peak = fmaxf(fabsf(left), fabsf(right));
+    if (peak > limit && peak > 0.0f) {
+        const float scale = limit / peak;
+        left *= scale;
+        right *= scale;
+    }
+}
+static float updateForwardSpeed(float absErr) {
+    const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
+    float targetSpeed = (float)pidConfig.baseSpeed *
+        (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
+    const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
+        ? pidConfig.baseSpeed : 45);
+    if (targetSpeed < minimumSpeed) targetSpeed = minimumSpeed;
+    if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
+    governedForwardSpeed = targetSpeed;
+    return governedForwardSpeed;
 }
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
     lastPTerm = lastITerm = lastDTerm = 0;
     derivativeHistoryValid = false;
+    derivativeWarmupFrames = 0;
 }
 static void resetLineTracking() {
     lineLocked = previouslyLocked = acquiring = missing = false;
     acquireSinceMs = missingSinceMs = 0;
     lastKnownPosition = 0;
     turnState = TURN_NONE;
+    lastTurnDirection = TURN_RIGHT;
     turnStartedMs = 0;
+    searchStartedMs = 0;
+    turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
+    derivativeWarmupFrames = 0;
+    reacquireSpeedFrames = 0;
+    turnMissing = false;
+    startupLossActive = false;
+    fullLineCandidate = false;
+    finishLineLatched = false;
+    fullLineSinceMs = 0;
+    lastDashedCorrection = 0;
+    governedForwardSpeed = 0.0f;
 }
+
+// Sharp turn: outer wheel PWM adapts to how long we've been turning.
+// Start faster, ramp down as timeout approaches to avoid overshooting.
 static int16_t sharpTurnPwm() {
-    int32_t speed = (int32_t)pidConfig.baseSpeed + 30;
+    const uint32_t elapsed = (uint32_t)(millis() - turnStartedMs);
+    // First 200 ms: full power.  Then linearly taper to 70% by timeout.
+    float frac = 1.0f;
+    if (elapsed > 200) {
+        frac = 1.0f - 0.3f * (float)(elapsed - 200) / (float)(SHARP_TURN_PROFILE_MS - 200);
+        if (frac < 0.7f) frac = 0.7f;
+    }
+    int32_t speed = (int32_t)((float)(pidConfig.baseSpeed + 40) * frac);
     if (speed < TURN_PWM_MIN) speed = TURN_PWM_MIN;
     if (speed > TURN_PWM_MAX) speed = TURN_PWM_MAX;
     return (int16_t)speed;
+}
+static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
+    float severity = (fabsf(position) - TURN_CURVE_START_POSITION) /
+                     (TURN_CURVE_END_POSITION - TURN_CURVE_START_POSITION);
+    if (severity < 0.0f) severity = 0.0f;
+    if (severity > 1.0f) severity = 1.0f;
+    const float factor = TURN_CURVE_INNER_FACTOR_OPEN -
+        severity * (TURN_CURVE_INNER_FACTOR_OPEN - TURN_CURVE_INNER_FACTOR_TIGHT);
+    return (int16_t)((float)outer * factor);
+}
+static bool isSearchTurn() {
+    return turnState == SEARCH_LEFT || turnState == SEARCH_RIGHT;
+}
+static bool isLeftTurn() {
+    return turnState == TURN_LEFT || turnState == SEARCH_LEFT;
+}
+static TurnState searchStateFor(TurnState direction) {
+    return direction == TURN_LEFT ? SEARCH_LEFT : SEARCH_RIGHT;
 }
 } // namespace
 
@@ -103,6 +225,7 @@ void pid_set_auto_mode(bool enabled) {
     resetLineTracking();
     clearPidState();
     lastComputeTimeUs = micros();
+    autoStartedMs = millis();
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
@@ -133,34 +256,116 @@ bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount) {
 
 LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     if (!calibrationReady || !sensor_adc_ready()) return LINE_CASE_STOPPED;
+    if (finishLineLatched) return LINE_CASE_STOPPED;
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
 
-    // While turning, keep the maneuver latched even if the line briefly leaves
-    // the array. Stop only on successful centered reacquisition or timeout.
-    if (turnState != TURN_NONE) {
-        if (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION &&
-            blackCount <= 6 && (mask & 0xF00FU) == 0) {
-            if (centeredTurnFrames < TURN_CENTERED_FRAMES) ++centeredTurnFrames;
-        } else {
-            centeredTurnFrames = 0;
+    if (mask == 0xFFFFU) {
+        if (!fullLineCandidate) {
+            fullLineCandidate = true;
+            fullLineSinceMs = now;
         }
-        if (centeredTurnFrames >= TURN_CENTERED_FRAMES) {
+        if (uint32_t(now - fullLineSinceMs) >= FINISH_LINE_HOLD_MS) {
+            finishLineLatched = true;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
-            missing = false;
-            derivativeHistoryValid = false;
-            return LINE_CASE_NORMAL_PID;
+            return LINE_CASE_STOPPED;
         }
-        if (uint32_t(now - turnStartedMs) >= SHARP_TURN_TIMEOUT_MS) {
+    } else {
+        fullLineCandidate = false;
+    }
+
+    if (startupLossActive) {
+        if (blackCount > 0) {
+            startupLossActive = false;
+            missing = false;
+        } else if (uint32_t(now - autoStartedMs) < STARTUP_LOSS_GRACE_MS) {
+            return LINE_CASE_STARTUP_COAST;
+        } else {
+            startupLossActive = false;
+        }
+    }
+
+    // Keep PID steering while a corner remains visible; pivot only after line loss.
+    if (turnState != TURN_NONE) {
+        if (isSearchTurn()) {
+            const bool reliableReacquisition =
+                (blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
+                (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION);
+            if (reliableReacquisition) {
+                if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
+                    ++centeredTurnFrames;
+            } else {
+                centeredTurnFrames = 0;
+            }
+            if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
+                turnState = TURN_NONE;
+                centeredTurnFrames = 0;
+                missing = false;
+                turnMissing = false;
+                derivativeHistoryValid = false;
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+                lineLocked = true;
+                if (previouslyLocked) ++reacquisitions;
+                previouslyLocked = true;
+                if (bitCount16(mask) >= 11) return LINE_CASE_CROSS_LINE;
+                return LINE_CASE_NORMAL_PID;
+            }
+        } else {
+            const bool narrowCenteredLine =
+                blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION &&
+                blackCount <= 6 && (mask & 0xF00FU) == 0;
+            const bool wideCenteredLine =
+                bitCount16(mask & TURN_CENTER_SENSOR_MASK) >= TURN_CENTER_SENSOR_MIN;
+            if (narrowCenteredLine || wideCenteredLine) {
+                if (centeredTurnFrames < TURN_CENTERED_FRAMES)
+                    ++centeredTurnFrames;
+            } else {
+                centeredTurnFrames = 0;
+            }
+            if (centeredTurnFrames >= TURN_CENTERED_FRAMES) {
+                turnState = TURN_NONE;
+                centeredTurnFrames = 0;
+                missing = false;
+                derivativeHistoryValid = false;
+                lineLocked = true;
+                if (previouslyLocked) ++reacquisitions;
+                previouslyLocked = true;
+                if (bitCount16(mask) >= 11) return LINE_CASE_CROSS_LINE;
+                return LINE_CASE_NORMAL_PID;
+            }
+        }
+
+        if (!isSearchTurn() && blackCount == 0) {
+            if (!turnMissing) {
+                turnMissing = true;
+                turnMissingSinceMs = now;
+            } else if (uint32_t(now - turnMissingSinceMs) >= LINE_LOSS_MS) {
+                turnState = searchStateFor(turnState);
+                searchStartedMs = now;
+                centeredTurnFrames = 0;
+                turnMissing = false;
+                clearPidState();
+                return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+            }
+        } else {
+            turnMissing = false;
+        }
+
+        if (isSearchTurn() &&
+            uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
             acquiring = missing = false;
+            turnMissing = false;
             ++confirmedLosses;
             return LINE_CASE_LOST_LINE;
         }
-        return turnState == TURN_LEFT ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+        if (!isSearchTurn() && blackCount > 0)
+            return LINE_CASE_NORMAL_PID;
+        return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
     }
 
     if (blackCount > 0) {
@@ -192,10 +397,12 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (sharpLeft || sharpRight) {
             turnState = sharpLeft ? TURN_LEFT : TURN_RIGHT;
+            lastTurnDirection = turnState;
             turnStartedMs = now;
             centeredTurnFrames = 0;
+            turnMissing = false;
             clearPidState();
-            return turnState == TURN_LEFT ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+            return LINE_CASE_NORMAL_PID;
         }
         return LINE_CASE_NORMAL_PID;
     }
@@ -208,10 +415,21 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     }
     if (uint32_t(now - missingSinceMs) < LINE_LOSS_MS)
         return LINE_CASE_DASHED_LINE;
+    if (previouslyLocked &&
+        uint32_t(now - autoStartedMs) < STARTUP_LOSS_GRACE_MS) {
+        startupLossActive = true;
+        return LINE_CASE_STARTUP_COAST;
+    }
     lineLocked = false;
     missing = false;
     ++confirmedLosses;
-    return LINE_CASE_LOST_LINE;
+    turnState = searchStateFor(lastKnownPosition < 0.0f ? TURN_LEFT :
+                               lastKnownPosition > 0.0f ? TURN_RIGHT :
+                               lastTurnDirection);
+    searchStartedMs = now;
+    centeredTurnFrames = 0;
+    clearPidState();
+    return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
 }
 
 void pid_line_follow_step(void) {
@@ -231,21 +449,47 @@ void pid_line_follow_step(void) {
 
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
-        motor_set_speeds(0, sharpTurnPwm()); // left wheel stopped, right wheel forward
+        if (turnState == SEARCH_LEFT) {
+            motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
+        } else {
+            const int16_t outer = sharpTurnPwm();
+            const int16_t inner = sharpTurnInnerPwm(outer, pos);
+            motor_set_speeds(inner, outer);
+        }
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
-        motor_set_speeds(sharpTurnPwm(), 0); // right wheel stopped, left wheel forward
+        if (turnState == SEARCH_RIGHT) {
+            motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
+        } else {
+            const int16_t outer = sharpTurnPwm();
+            const int16_t inner = sharpTurnInnerPwm(outer, pos);
+            motor_set_speeds(outer, inner);
+        }
     } else if (currentCase == LINE_CASE_NORMAL_PID && good) {
         const float err = pos;
         const float absErr = fabsf(err);
-        const float p = pidConfig.Kp * (1.0f + 0.012f * absErr) * err;
+
+        // Non-linear P gain: ramps up quadratically as error increases.
+        // This makes the robot react gently near center but aggressively near edges.
+        const float p = pidConfig.Kp * (1.0f + 0.018f * absErr) * err;
+
+        // Integral with anti-windup: tighter clamp + decay when error crosses zero
+        if ((integralError > 0 && err < 0) || (integralError < 0 && err > 0))
+            integralError *= 0.5f;  // fast decay on zero-crossing to avoid overshoot
         integralError += err * dt;
-        if (integralError > 150.0f) integralError = 150.0f;
-        if (integralError < -150.0f) integralError = -150.0f;
+        if (integralError > 80.0f) integralError = 80.0f;
+        if (integralError < -80.0f) integralError = -80.0f;
         const float it = pidConfig.Ki * integralError;
+
+        // Derivative on error with low-pass filter to reduce noise spikes
         float d = 0.0f;
-        if (pidConfig.Kd != 0 && derivativeHistoryValid && dtValid)
-            d = pidConfig.Kd * (err - lastError) / measuredDt;
+        if (derivativeWarmupFrames > 0) {
+            --derivativeWarmupFrames;
+        } else if (pidConfig.Kd != 0 && derivativeHistoryValid && dtValid) {
+            const float rawD = pidConfig.Kd * (err - lastError) / measuredDt;
+            // First-order low-pass: alpha=0.6 balances responsiveness vs noise
+            d = 0.6f * rawD + 0.4f * lastDTerm;
+        }
         lastError = err;
         derivativeHistoryValid = true;
         lastPTerm = p;
@@ -253,25 +497,68 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        float base = (float)pidConfig.baseSpeed - absErr * 0.45f;
-        if (base < 50.0f) base = 50.0f;
-        if (base > pidConfig.maxSpeed) base = pidConfig.maxSpeed;
-
-        // Keep ordinary PID corrections from saturating one wheel to zero.
-        // Extreme edge positions are handled by the dedicated turn cases above.
-        float correctionLimit = base * 0.80f;
+        float base = updateForwardSpeed(absErr);
+        const uint16_t sensorMask = sensor_get_line_bits();
+        const float edgeSeverity = outerSensorSeverity(sensorMask);
+        if (edgeSeverity > 0.0f) {
+            const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
+                ? pidConfig.baseSpeed : 45);
+            const float edgeSpeed = fmaxf(
+                minimumSpeed,
+                (float)pidConfig.baseSpeed *
+                    (1.0f - OUTER_SENSOR_SPEED_REDUCTION * edgeSeverity));
+            if (edgeSpeed < base) base = edgeSpeed;
+            governedForwardSpeed = base;
+        }
+        if (reacquireSpeedFrames > 0) {
+            const float rampProgress =
+                (float)(REACQUIRE_SPEED_RAMP_FRAMES -
+                        reacquireSpeedFrames) /
+                (float)(REACQUIRE_SPEED_RAMP_FRAMES - 1U);
+            const float rampSpeed = (float)DROPOUT_FORWARD_PWM +
+                (governedForwardSpeed - (float)DROPOUT_FORWARD_PWM) *
+                    rampProgress;
+            if (rampSpeed < base) base = rampSpeed;
+            --reacquireSpeedFrames;
+        }
+        const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
         float correction = lastCorrection;
         if (correction > correctionLimit) correction = correctionLimit;
         if (correction < -correctionLimit) correction = -correctionLimit;
-        motor_set_speeds(clampPwm(base + correction), clampPwm(base - correction));
+
+        // Save correction for dashed-line coast
+        lastDashedCorrection = correction;
+
+        float leftCommand = base + correction;
+        float rightCommand = base - correction;
+        const float outerErrorRatio = fminf(
+            fmaxf((absErr - OUTER_STEERING_START_ERROR) /
+                  (OUTER_STEERING_FULL_ERROR - OUTER_STEERING_START_ERROR),
+                  0.0f),
+            1.0f);
+        const float steeringSeverity = fmaxf(outerErrorRatio, edgeSeverity);
+        const float steeringPeakLimit = base +
+            ((float)pidConfig.maxSpeed - base) * steeringSeverity;
+        limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
+        motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
-        const int16_t speed = clampPwm((float)pidConfig.baseSpeed);
+        const int16_t speed = clampPwm((float)pidConfig.baseSpeed * 0.7f);
         motor_set_speeds(speed, speed);
     } else if (currentCase == LINE_CASE_DASHED_LINE) {
-        clearPidState();
-        const int16_t speed = clampPwm((float)(pidConfig.baseSpeed < DROPOUT_FORWARD_PWM ?
-                                                pidConfig.baseSpeed : DROPOUT_FORWARD_PWM));
+        // Instead of going straight, coast with the last known correction.
+        // This maintains the turn trajectory through brief line gaps.
+        const float coastBase = fminf(governedForwardSpeed,
+                                      (float)DROPOUT_FORWARD_PWM);
+        const float coastCorrection = lastDashedCorrection * 0.7f; // damped
+        float leftCommand = coastBase + coastCorrection;
+        float rightCommand = coastBase - coastCorrection;
+        limitMotorCommandPeak(leftCommand, rightCommand, coastBase);
+        motor_set_speeds(clampPwmSigned(leftCommand),
+                         clampPwmSigned(rightCommand));
+    } else if (currentCase == LINE_CASE_STARTUP_COAST) {
+        const int16_t speed = pidConfig.baseSpeed < DROPOUT_FORWARD_PWM
+            ? pidConfig.baseSpeed : DROPOUT_FORWARD_PWM;
         motor_set_speeds(speed, speed);
     } else {
         clearPidState();
@@ -295,6 +582,7 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_T_RIGHT: return "CASE 7: Nga 3 Phai";
         case LINE_CASE_STOPPED: return "CASE 8: Dung Xe";
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
+        case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
         default: return "Khong Xac Dinh";
     }
 }
