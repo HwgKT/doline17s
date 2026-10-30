@@ -160,6 +160,8 @@ class App(tk.Tk):
         self.marker_open = False
         self.marker_segment = 0
         self.marker_pending_at = None
+        self.marker_retries = 0
+        self.marker_caps_ok = False
         self.marker_status = tk.StringVar(value="Mốc: chưa có")
         self.stop_ack_deadline = None
         self.start_confirmed = False
@@ -607,6 +609,8 @@ class App(tk.Tk):
         self.cal_thresholds = [None] * 16
         self.cal_data = {}
         self.update_control_buttons()
+        self.marker_caps_ok = False
+        self.send_command("MARK_CAPS")
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
@@ -833,6 +837,7 @@ class App(tk.Tk):
         # Record intent BEFORE send so an immediate firmware ACK never races the UI.
         self.marker_pending[seq] = (kind, segment_id)
         self.marker_pending_at = time.monotonic()
+        self.marker_retries = 0
         if not self.send_command(f"MARK_{kind}:{seq}"):
             self.expire_marker("TX_FAILED")
             return
@@ -852,6 +857,7 @@ class App(tk.Tk):
         _, segment_id = entry
         del self.marker_pending[seq]
         self.marker_pending_at = None
+        self.marker_retries = 0
         recorder = self.run_csv.active
         if recorder is None or not recorder.submit_marker(
                 kind, seq, int(t_ms), int(enc_l), int(enc_r), segment_id, "ACK"):
@@ -916,6 +922,14 @@ class App(tk.Tk):
 
     def on_text(self, message):
         if self.on_marker_ack(message):
+            return
+        if message.startswith("MARK_CAPS:"):
+            self.marker_caps_ok = True
+            self.log("MARK: firmware supports marker ACK")
+            return
+        if message.startswith("ERR: UNKNOWN_COMMAND MARK_"):
+            self.log("MARK: firmware too old; reflash mainv4")
+            self.marker_status.set("MARK: firmware too old")
             return
         self.log(f"RX < {message}")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
@@ -1102,8 +1116,16 @@ class App(tk.Tk):
         if last is not None:
             self.update_view(last)
         now = time.monotonic()
-        if self.marker_pending_at is not None and now - self.marker_pending_at > 2.0:
-            self.expire_marker("ACK_TIMEOUT")
+        if self.marker_pending_at is not None and now - self.marker_pending_at > 1.0:
+            if self.marker_retries < 2 and self.marker_pending and self.reader is not None and self.reader.is_alive():
+                seq, (kind, _) = next(iter(self.marker_pending.items()))
+                self.marker_retries += 1
+                self.marker_pending_at = now
+                self.log(f"MARK retry {self.marker_retries}/2 id={seq}")
+                if not self.send_command(f"MARK_{kind}:{seq}"):
+                    self.expire_marker("TX_FAILED")
+            else:
+                self.expire_marker("ACK_TIMEOUT")
         self.update_run_timer_display(now)
         if now - self.rate_time >= 1:
             interval = now - self.rate_time
