@@ -25,12 +25,26 @@ uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 uint32_t markLedUntilMs=0;
 BtTxStats lastTxStats{};
+// GPIO34 sequence restarts on every boot even when a previous NVS profile exists.
+enum class ButtonStep : uint8_t { WHITE, WHITE_RUNNING, BLACK, BLACK_RUNNING, READY };
+ButtonStep buttonStep=ButtonStep::WHITE;
+const char* buttonStepName(){
+  switch(buttonStep){
+    case ButtonStep::WHITE: return "WHITE";
+    case ButtonStep::WHITE_RUNNING: return "WHITE_RUNNING";
+    case ButtonStep::BLACK: return "BLACK";
+    case ButtonStep::BLACK_RUNNING: return "BLACK_RUNNING";
+    case ButtonStep::READY: return "READY_START";
+  }
+  return "UNKNOWN";
+}
 
 void ledWrite(bool on) {
   ledOn=on;
   digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
 }
 void reply(const String &line) { btSendLine(line); }
+void buttonReport(const char* line) { Serial.println(line); reply(line); }
 void safeStop() {
   pid_set_auto_mode(false); motor_stop(); manualActive=false;
 }
@@ -85,7 +99,7 @@ void command(const String &raw) {
   if(s=="MARK_CAPS"){reply("MARK_CAPS:V2 START END ACK");return;}
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS BTN_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -139,6 +153,12 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  if(s=="BTN_STATUS"){
+    reply(String("BTN_GPIO34 STEP=")+buttonStepName()+
+          " AUTO="+(pid_is_auto_mode()?"1":"0")+
+          " CAL="+(calibrationReady?"1":"0")+
+          " SENSORS="+String((unsigned)sensor_get_line_bits(),HEX));return;
+  }
   if(s=="PWM"){
     char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
       motor_get_left_speed(),motor_get_right_speed(),
@@ -270,7 +290,8 @@ void sendFrame(){
 } // namespace
 
 void setup() {
-  // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
+  // USB: low-rate button/calibration event debug; main telemetry remains SPP.
+  Serial.begin(115200);
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
   sensor_init();motor_init();
   button_init();
@@ -280,7 +301,7 @@ void setup() {
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
   lastBlink=millis();
-  button_led_blink(2); // Self-test begins after initialization, no Bluetooth needed.
+  buttonReport("[GPIO34] click1 WHITE -> click2 BLACK -> click3 START; next click STOP");
 }
 void loop() {
   const uint32_t loopStartUs=micros();
@@ -290,31 +311,35 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  button_led_update(now);
-  const ButtonEvent buttonEvent=button_poll(now);
-  if(buttonEvent==BUTTON_CALIB && !adcBenchActive() && !sensor_is_calibrating()){
+  if(button_pressed(now)) {
     if(pid_is_auto_mode() || manualActive) {
-      safeStop(); // No sensor calibration with motors energized.
-    }
-    if(sensor_calibration_state()==CAL_WHITE_READY){
-      if(sensor_capture_black())reply("BUTTON: CAL_BLACK_ACCEPTED");
-    }else{
-      if(sensor_capture_white())reply("BUTTON: CAL_WHITE_ACCEPTED");
-    }
-  } else if(buttonEvent==BUTTON_START_STOP) {
-    if(pid_is_auto_mode()){
+      safeStop(); // Fourth click stops; fifth click may restart.
+      buttonReport("BUTTON34: STOP");
+    } else if(adcBenchActive() || sensor_is_calibrating()) {
+      buttonReport("BUTTON34: BUSY");
+    } else if(buttonStep==ButtonStep::WHITE) {
       safeStop();
-      button_led_blink(2);
-      reply("BUTTON: MOTOR_STOP");
-    }else if(!estopLatched && !adcBenchActive() && !sensor_is_calibrating() &&
-             sensor_adc_ready() && calibrationReady &&
-             sensor_calibration_state()==CAL_READY){
-      manualActive=false;
-      pid_set_auto_mode(true);
-      button_led_blink(3);
-      reply("BUTTON: AUTO_STARTED");
-    }else{
-      reply("BUTTON: START_REJECTED_CHECK_CALIB_ADC_ESTOP");
+      if(sensor_capture_white()) {
+        buttonStep=ButtonStep::WHITE_RUNNING;
+        buttonReport("BUTTON34: WHITE_ACCEPTED");
+      } else buttonReport("BUTTON34: WHITE_REJECTED_ADC");
+    } else if(buttonStep==ButtonStep::BLACK) {
+      safeStop();
+      if(sensor_capture_black()) {
+        buttonStep=ButtonStep::BLACK_RUNNING;
+        buttonReport("BUTTON34: BLACK_ACCEPTED");
+      } else buttonReport("BUTTON34: BLACK_REJECTED");
+    } else if(buttonStep==ButtonStep::READY) {
+      if(estopLatched) buttonReport("BUTTON34: START_DENIED_ESTOP");
+      else if(!sensor_adc_ready() || !calibrationReady ||
+              sensor_calibration_state()!=CAL_READY)
+        buttonReport("BUTTON34: START_DENIED_CAL_OR_ADC");
+      else {
+        pid_set_auto_mode(true);
+        buttonReport("BUTTON34: AUTO_STARTED");
+      }
+    } else {
+      buttonReport("BUTTON34: CALIB_IN_PROGRESS");
     }
   }
   const bool wasCalibrating=sensor_is_calibrating();
@@ -328,16 +353,27 @@ void loop() {
     reply("ERR: ADC_READ_FAULT_MOTORS_STOPPED");
   }
   switch(sensor_take_calibration_event()){
-    case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
-    case CAL_WHITE_DONE:    button_led_blink(1);reply("CAL_WHITE_DONE"); break;
-    case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
-    case CAL_SAVED:         button_led_blink(3);reply("CAL_OK_SAVED");showCalib(); break;
-    case CAL_ERROR:         reply("CAL_FAILED");showCalib(); break;
+    case CAL_WHITE_STARTED:
+      buttonStep=ButtonStep::WHITE_RUNNING;
+      buttonReport("CAL_WHITE_STARTED"); break;
+    case CAL_WHITE_DONE:
+      buttonStep=ButtonStep::BLACK;
+      buttonReport("CAL_WHITE_DONE: NEXT_PRESS_BLACK"); break;
+    case CAL_BLACK_STARTED:
+      buttonStep=ButtonStep::BLACK_RUNNING;
+      buttonReport("CAL_BLACK_STARTED"); break;
+    case CAL_SAVED:
+      buttonStep=ButtonStep::READY;
+      buttonReport("CAL_OK_SAVED: NEXT_PRESS_START");showCalib(); break;
+    case CAL_ERROR:
+      buttonStep=ButtonStep::WHITE;
+      buttonReport("CAL_FAILED: RETRY_WHITE");showCalib(); break;
     default: break;
   }
   if(pid_is_auto_mode()&&!sensor_is_calibrating()){
     stageStartUs=micros();
     pid_line_follow_step();++pidCount;
+    if(!pid_is_auto_mode()) buttonReport("AUTO: START_BOX_TIMEOUT_MOTORS_STOPPED");
     perfRecord(PERF_PID, micros()-stageStartUs);
   }
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
