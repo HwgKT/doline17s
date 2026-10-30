@@ -32,6 +32,7 @@ constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 constexpr uint32_t START_BOX_TIMEOUT_MS = 2500;
 constexpr int16_t START_BOX_PWM = 90;
 constexpr uint8_t START_BOX_LINE_FRAMES = 3;
+constexpr uint32_t START_BOX_LINE_STABLE_MS = 20;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
 constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -84,6 +85,7 @@ bool startBoxEscaping = false;
 bool startBoxTimedOut = false;
 uint32_t startBoxStartedMs = 0;
 uint8_t startBoxLineFrames = 0;
+uint32_t startBoxLineSinceMs = 0;
 bool fullLineCandidate = false;
 bool finishLineLatched = false;
 uint8_t fullLineFrames = 0;
@@ -169,6 +171,7 @@ static void resetLineTracking() {
     startBoxTimedOut = false;
     startBoxStartedMs = 0;
     startBoxLineFrames = 0;
+    startBoxLineSinceMs = 0;
     fullLineCandidate = false;
     finishLineLatched = false;
     fullLineFrames = 0;
@@ -282,6 +285,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             startBoxEscaping = true;
             startBoxStartedMs = now;
             startBoxLineFrames = 0;
+            startBoxLineSinceMs = 0;
         }
     }
     if (startBoxEscaping) {
@@ -295,7 +299,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         const bool narrowLine =
             blackCount >= 2 && blackCount <= 8 && hasAdjacentLineSensors(mask);
         if (narrowLine) {
-            if (++startBoxLineFrames >= START_BOX_LINE_FRAMES) {
+            if (startBoxLineFrames == 0) startBoxLineSinceMs = now;
+            if (startBoxLineFrames < START_BOX_LINE_FRAMES) ++startBoxLineFrames;
+            if (startBoxLineFrames >= START_BOX_LINE_FRAMES &&
+                (uint32_t)(now - startBoxLineSinceMs) >= START_BOX_LINE_STABLE_MS) {
                 startBoxEscaping = false;
                 startBoxLineFrames = 0;
                 lineLocked = previouslyLocked = true;
@@ -306,6 +313,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             }
         } else {
             startBoxLineFrames = 0;
+            startBoxLineSinceMs = 0;
         }
         // Includes 16-black and temporary all-white while leaving the box.
         return LINE_CASE_STARTUP_COAST;
