@@ -10,6 +10,7 @@
 #include "perf_monitor.h"
 #include "adc_bench.h"
 #include "spp_debug.h"
+#include "button.h"
 
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
@@ -242,7 +243,7 @@ void connectionState(uint32_t now) {
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
     }else{
-      safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
+      if(manualActive)safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
       btDropPendingTelemetry(); // no replay after reconnect
     }
     btPrevious=connected;
@@ -272,6 +273,7 @@ void setup() {
   // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
   sensor_init();motor_init();
+  button_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
   pid_init(2.0f,0.0f,0.0f,100); // conservative baseline while validating sharp-turn behavior
   sppStarted=btBegin("LineRobot");
@@ -287,9 +289,32 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  if(!adcBenchActive() && sensor_is_button_pressed() && !sensor_is_calibrating()){
-    safeStop();
-    sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
+  button_led_update(now);
+  const ButtonEvent buttonEvent=button_poll(now);
+  if(buttonEvent==BUTTON_CALIB && !adcBenchActive() && !sensor_is_calibrating()){
+    if(pid_is_auto_mode() || manualActive) {
+      safeStop(); // No sensor calibration with motors energized.
+    }
+    if(sensor_calibration_state()==CAL_WHITE_READY){
+      if(sensor_capture_black())reply("BUTTON: CAL_BLACK_ACCEPTED");
+    }else{
+      if(sensor_capture_white())reply("BUTTON: CAL_WHITE_ACCEPTED");
+    }
+  } else if(buttonEvent==BUTTON_START_STOP) {
+    if(pid_is_auto_mode()){
+      safeStop();
+      button_led_blink(2);
+      reply("BUTTON: MOTOR_STOP");
+    }else if(!estopLatched && !adcBenchActive() && !sensor_is_calibrating() &&
+             sensor_adc_ready() && calibrationReady &&
+             sensor_calibration_state()==CAL_READY){
+      manualActive=false;
+      pid_set_auto_mode(true);
+      button_led_blink(3);
+      reply("BUTTON: AUTO_STARTED");
+    }else{
+      reply("BUTTON: START_REJECTED_CHECK_CALIB_ADC_ESTOP");
+    }
   }
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
@@ -303,9 +328,9 @@ void loop() {
   }
   switch(sensor_take_calibration_event()){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
-    case CAL_WHITE_DONE:    reply("CAL_WHITE_DONE"); break;
+    case CAL_WHITE_DONE:    button_led_blink(1);reply("CAL_WHITE_DONE"); break;
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
-    case CAL_SAVED:         reply("CAL_OK_SAVED");showCalib(); break;
+    case CAL_SAVED:         button_led_blink(3);reply("CAL_OK_SAVED");showCalib(); break;
     case CAL_ERROR:         reply("CAL_FAILED");showCalib(); break;
     default: break;
   }
