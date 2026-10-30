@@ -81,6 +81,7 @@ void command(const String &raw) {
     snprintf(ack,sizeof(ack),"MARK_ACK:%s:%s:%lu:%ld:%ld",start?"START":"END",id.c_str(),(unsigned long)now,(long)l,(long)r);
     reply(ack);markLedUntilMs=now+150;ledWrite(false);return;
   }
+  if(s=="MARK_CAPS"){reply("MARK_CAPS:V2 START END ACK");return;}
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
     reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
