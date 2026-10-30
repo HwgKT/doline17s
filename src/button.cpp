@@ -5,9 +5,9 @@
 namespace {
 constexpr uint32_t DEBOUNCE_MS=35;
 constexpr uint32_t LED_STEP_MS=100;
-// Original GPIO34 implementation detected HIGH as a press.
-// GPIO35 uses the same external pull-down / active-HIGH wiring assumption.
-constexpr int PRESSED_LEVEL=HIGH;
+// Board schematic: 10k pull-up to 3.3V and normally-open switch to GND.
+// Released = HIGH; pressed = LOW, on BOTH GPIO34 and GPIO35.
+constexpr int PRESSED_LEVEL=LOW;
 struct Key {
   uint8_t pin;
   bool stable=false;
@@ -42,6 +42,7 @@ void button_init(){
   }
   pinMode(PIN_BUTTON_LED,OUTPUT);
   ledWrite(false);
+  button_led_blink(2); // Power-on LED self-test, no Bluetooth required.
 }
 ButtonEvent button_poll(uint32_t now){
   const bool calib=pressed(keys[0],now);
