@@ -26,7 +26,6 @@ namespace {
 constexpr uint32_t LINE_ACQUIRE_MS = 10;
 constexpr uint32_t LINE_LOSS_MS = 40;           // was 25 — longer coast before declaring lost
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
-constexpr uint32_t FINISH_LINE_HOLD_MS = 50;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
 constexpr int16_t LINE_SEARCH_PWM = 85;
@@ -77,7 +76,7 @@ bool turnMissing = false;
 bool startupLossActive = false;
 bool fullLineCandidate = false;
 bool finishLineLatched = false;
-uint32_t fullLineSinceMs = 0;
+uint8_t fullLineFrames = 0;
 
 bool lineLocked = false, previouslyLocked = false;
 bool acquiring = false, missing = false;
@@ -157,7 +156,7 @@ static void resetLineTracking() {
     startupLossActive = false;
     fullLineCandidate = false;
     finishLineLatched = false;
-    fullLineSinceMs = 0;
+    fullLineFrames = 0;
     lastDashedCorrection = 0;
     governedForwardSpeed = 0.0f;
 }
@@ -261,11 +260,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint16_t mask = sensor_get_line_bits();
 
     if (mask == 0xFFFFU) {
-        if (!fullLineCandidate) {
-            fullLineCandidate = true;
-            fullLineSinceMs = now;
-        }
-        if (uint32_t(now - fullLineSinceMs) >= FINISH_LINE_HOLD_MS) {
+        fullLineCandidate = true;
+        if (fullLineFrames < 3) ++fullLineFrames;
+        if (fullLineFrames >= 3) {
             finishLineLatched = true;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
@@ -273,6 +270,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     } else {
         fullLineCandidate = false;
+        fullLineFrames = 0;
     }
 
     if (startupLossActive) {

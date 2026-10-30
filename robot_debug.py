@@ -713,10 +713,12 @@ class App(tk.Tk):
         elapsed = self.run_elapsed_seconds
         if self.auto_running and self.run_started_at is not None:
             elapsed += (time.monotonic() if now is None else now) - self.run_started_at
-        total_seconds = max(0, int(elapsed))
+        total_ticks = max(0, int(elapsed * 100))
+        total_seconds, ticks = divmod(total_ticks, 100)
         hours, remainder = divmod(total_seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
-        self.run_timer_var.set(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+        self.run_timer_var.set(
+            f"{hours:02d}:{minutes:02d}:{seconds:02d}.{ticks:02d}")
 
     def finish_run_csv(self, reason):
         recorder = self.run_csv.finish(self.reader, reason)
