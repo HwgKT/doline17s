@@ -8,8 +8,8 @@
 #define PIN_MUX_S2         19
 #define PIN_MUX_S3         23
 #define PIN_CALIB_BUTTON   34
-#define PIN_START_BUTTON   35
-#define PIN_BUTTON_LED     16
+#define PIN_START_BUTTON   35  // Unused by robot control; hardware test only.
+#define PIN_BUTTON_LED     16  // Damaged LED; unused by robot control.
 #define BUTTON_LED_ACTIVE_HIGH 1
 
 // Quadrature channels A/B per wheel, inherited from mainv2.
