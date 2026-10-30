@@ -156,12 +156,8 @@ class App(tk.Tk):
         self.reader = None
         self.run_csv = RunCsvLifecycle(self.controls_q)
         self.marker_seq = 0
-        self.marker_pending = {}
         self.marker_open = False
         self.marker_segment = 0
-        self.marker_pending_at = None
-        self.marker_retries = 0
-        self.marker_caps_ok = False
         self.marker_status = tk.StringVar(value="Mốc: chưa có")
         self.stop_ack_deadline = None
         self.start_confirmed = False
@@ -609,8 +605,6 @@ class App(tk.Tk):
         self.cal_thresholds = [None] * 16
         self.cal_data = {}
         self.update_control_buttons()
-        self.marker_caps_ok = False
-        self.send_command("MARK_CAPS")
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
@@ -750,7 +744,6 @@ class App(tk.Tk):
             f"{hours:02d}:{minutes:02d}:{seconds:02d}.{ticks:02d}")
 
     def finish_run_csv(self, reason):
-        self.expire_marker("RUN_CLOSED")
         self.marker_open = False
         recorder = self.run_csv.finish(self.reader, reason)
         if recorder is None:
@@ -764,8 +757,6 @@ class App(tk.Tk):
         if self.run_csv.active is not None:
             self.log("CSV đang chạy; không thể START lượt mới")
             return
-        self.marker_pending.clear()
-        self.marker_pending_at = None
         self.marker_open = False
         self.marker_segment = 0
         if self.estop_latched is not False or self.auto_running or self.start_pending:
@@ -809,67 +800,25 @@ class App(tk.Tk):
         else:
             self.finish_run_csv("STOP KHÔNG GỬI ĐƯỢC / CHƯA XÁC NHẬN DỪNG")
 
-    def expire_marker(self, reason):
-        if not self.marker_pending:
-            return
-        recorder = self.run_csv.active
-        for seq, (kind, segment_id) in list(self.marker_pending.items()):
-            if recorder:
-                recorder.submit_marker(kind, seq, None, None, None, segment_id, reason)
-            self.log(f"MARK {kind} #{seq}: {reason}")
-        self.marker_pending.clear()
-        self.marker_pending_at = None
-        self.marker_status.set(f"MARK: {reason}")
-
     def mark_segment(self, kind):
-        if self.run_csv.active is None or self.reader is None or not self.reader.is_alive():
-            self.log("MARK: cần SPP kết nối và CSV đang ghi")
-            return
-        if self.marker_pending:
-            self.log("MARK: đang chờ ACK; không tạo mốc mới")
+        recorder = self.run_csv.active
+        if recorder is None or not recorder.recording:
+            self.log("MARK: CSV is not recording")
             return
         if (kind == "START" and self.marker_open) or (kind == "END" and not self.marker_open):
-            self.log("MARK: yêu cầu START/END xen kẽ")
+            self.log("MARK: alternate START and END")
             return
-        self.marker_seq += 1
-        seq = self.marker_seq
-        segment_id = self.marker_segment + 1 if kind == "START" else self.marker_segment
-        # Record intent BEFORE send so an immediate firmware ACK never races the UI.
-        self.marker_pending[seq] = (kind, segment_id)
-        self.marker_pending_at = time.monotonic()
-        self.marker_retries = 0
-        if not self.send_command(f"MARK_{kind}:{seq}"):
-            self.expire_marker("TX_FAILED")
+        seq = self.marker_seq + 1
+        segment = self.marker_segment + 1 if kind == "START" else self.marker_segment
+        if not recorder.submit_marker(kind, seq, None, None, None, segment, "LOCAL"):
+            self.log("MARK: CSV queue rejected event")
             return
-        self.marker_status.set(f"Đã gửi {kind} #{seq} đoạn {segment_id}; chờ ACK")
-        self.log(f"MARK REQUEST {kind} id={seq} segment={segment_id}")
-
-    def on_marker_ack(self, message):
-        match = re.fullmatch(r"MARK_ACK:(START|END):(\\d+):(\\d+):(-?\\d+):(-?\\d+)", message)
-        if not match:
-            return False
-        kind, seq, t_ms, enc_l, enc_r = match.groups()
-        seq = int(seq)
-        entry = self.marker_pending.get(seq)
-        if entry is None or entry[0] != kind:
-            self.log(f"MARK: ACK trễ/không khớp {message}")
-            return True
-        _, segment_id = entry
-        del self.marker_pending[seq]
-        self.marker_pending_at = None
-        self.marker_retries = 0
-        recorder = self.run_csv.active
-        if recorder is None or not recorder.submit_marker(
-                kind, seq, int(t_ms), int(enc_l), int(enc_r), segment_id, "ACK"):
-            self.log(f"MARK: ACK #{seq} nhưng không ghi được CSV")
-            self.marker_status.set(f"MARK #{seq}: CSV_WRITE_FAILED")
-            return True
+        self.marker_seq = seq
         self.marker_open = kind == "START"
         if kind == "START":
-            self.marker_segment = segment_id
-        self.marker_status.set(f"Đã ghi {kind}, đoạn {segment_id}, t={t_ms}ms")
-        self.log(f"MARK SAVED {kind} segment={segment_id} id={seq} t_ms={t_ms}")
-        return True
+            self.marker_segment = segment
+        self.marker_status.set(f"{kind} segment={segment} event={seq} LOCAL")
+        self.log(f"MARK LOCAL {kind} segment={segment} event={seq}")
 
     def start_calibration(self):
         if self.send_command("CAL_WHITE"):
@@ -921,17 +870,6 @@ class App(tk.Tk):
         self.prev = (t, left, right)
 
     def on_text(self, message):
-        if self.on_marker_ack(message):
-            return
-        if message.startswith("MARK_CAPS:"):
-            self.marker_caps_ok = True
-            self.log("MARK: firmware supports marker ACK")
-            return
-        if message.startswith("ERR: UNKNOWN_COMMAND MARK_"):
-            self.log("MARK: firmware too old; reflash mainv4")
-            self.marker_status.set("MARK: firmware too old")
-            return
-        self.log(f"RX < {message}")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
             self.estop_latched = True
             self.estop_pending = False
@@ -1116,16 +1054,6 @@ class App(tk.Tk):
         if last is not None:
             self.update_view(last)
         now = time.monotonic()
-        if self.marker_pending_at is not None and now - self.marker_pending_at > 1.0:
-            if self.marker_retries < 2 and self.marker_pending and self.reader is not None and self.reader.is_alive():
-                seq, (kind, _) = next(iter(self.marker_pending.items()))
-                self.marker_retries += 1
-                self.marker_pending_at = now
-                self.log(f"MARK retry {self.marker_retries}/2 id={seq}")
-                if not self.send_command(f"MARK_{kind}:{seq}"):
-                    self.expire_marker("TX_FAILED")
-            else:
-                self.expire_marker("ACK_TIMEOUT")
         self.update_run_timer_display(now)
         if now - self.rate_time >= 1:
             interval = now - self.rate_time
