@@ -24,7 +24,7 @@ The old PID stopped after just 3 consecutive full-black frames. That behavior is
 
 - Start moving straight with equal, limited PWM to both motors. Startup PWM cap is **90/255**, also capped by the configured base speed.
 - Continue through the initial black area and a potential short all-white gap without interpreting either as a new line.
-- Switch to normal PID when **2–8 adjacent black sensor channels** are detected for **3 consecutive frames**.
+- Switch to normal PID when **2–8 adjacent black sensor channels** are detected for **at least 3 consecutive frames and 20 ms continuously**.
 - If no suitable line is acquired within **2500 ms** after start, stop both motors and disable AUTO; USB reports `AUTO: START_BOX_TIMEOUT_MOTORS_STOPPED`.
 - Once the start box has been exited, normal black-crossing and all-black finish detection remain in effect (the latter stops after 3 full-black frames).
 
