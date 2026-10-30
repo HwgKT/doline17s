@@ -32,6 +32,7 @@ class TelemetryCsvRecorder(threading.Thread):
         self.stop_event = threading.Event()
         self.recording = True
         self.calibration = None
+        self.header_len = len(header)
         self.enqueued = 0
         self.written = 0
         self.dropped = 0
@@ -54,15 +55,37 @@ class TelemetryCsvRecorder(threading.Thread):
         except queue.Full:
             self.dropped += 1
 
+    def submit_marker(self, kind, seq, t_ms, enc_l, enc_r):
+        if not self.recording or self.stop_event.is_set() or self.error:
+            return False
+        iso = datetime.datetime.now().astimezone().isoformat(timespec="milliseconds")
+        row = [""] * self.header_len
+        row[0], row[1] = iso, t_ms
+        row[50], row[51] = enc_l, enc_r
+        row[-2], row[-1] = kind, seq
+        try:
+            self.queue.put_nowait(("marker", row))
+            return True
+        except queue.Full:
+            self.dropped += 1
+            return False
+
     def run(self):
         last_flush = time.monotonic()
         try:
             while not self.stop_event.is_set() or not self.queue.empty():
                 try:
-                    received_at, sample = self.queue.get(timeout=0.15)
+                    item = self.queue.get(timeout=0.15)
                 except queue.Empty:
                     pass
                 else:
+                    if len(item) == 2 and item[0] == "marker":
+                        with self.file_lock:
+                            self.writer.writerow(item[1])
+                            self.written += 1
+                        self.queue.task_done()
+                        continue
+                    received_at, sample = item
                     raw = list(sample[1:17])
                     profile = self.calibration
                     if profile is None:
@@ -79,7 +102,7 @@ class TelemetryCsvRecorder(threading.Thread):
                         logic = [int(value >= 400) for value in calibrated]
                         logic_word = "".join(str(bit) for bit in logic)
                     row = ([received_at, sample[0], *raw, *calibrated, *logic,
-                            *sample[17:27], logic_word])
+                            *sample[17:27], logic_word, "", ""])
                     with self.file_lock:
                         self.writer.writerow(row)
                         self.written += 1
