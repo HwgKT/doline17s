@@ -22,6 +22,7 @@ uint16_t streamHz=300;
 uint32_t streamPeriodUs=1000000UL/300;
 uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
+uint32_t markLedUntilMs=0;
 BtTxStats lastTxStats{};
 
 void ledWrite(bool on) {
@@ -69,6 +70,17 @@ void command(const String &raw) {
     reply("ESTOP: CLEARED (MOTORS OFF)");return;
   }
   // USB command echo intentionally disabled.
+  if(s.startsWith("MARK_START:")||s.startsWith("MARK_END:")){
+    bool start=s.startsWith("MARK_START:");
+    String id=s.substring(start?11:9);
+    if(!id.length()||id.length()>9){reply("ERR: MARK_ID");return;}
+    for(unsigned i=0;i<id.length();++i)if(id[i]<'0'||id[i]>'9'){reply("ERR: MARK_ID");return;}
+    int32_t l=0,r=0;encoder_get_counts(&l,&r);
+    uint32_t now=millis();
+    char ack[110];
+    snprintf(ack,sizeof(ack),"MARK_ACK:%s:%s:%lu:%ld:%ld",start?"START":"END",id.c_str(),(unsigned long)now,(long)l,(long)r);
+    reply(ack);markLedUntilMs=now+150;ledWrite(false);return;
+  }
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
     reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
@@ -234,7 +246,7 @@ void connectionState(uint32_t now) {
     }
     btPrevious=connected;
   }
-  if(connected){if(!ledOn)ledWrite(true);}
+  if(connected){if((int32_t)(now-markLedUntilMs)>=0){if(!ledOn)ledWrite(true);}else if(ledOn)ledWrite(false);}
   else if(now-lastBlink>=BLINK_MS){lastBlink=now;ledWrite(!ledOn);}
 }
 void sendFrame(){
