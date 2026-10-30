@@ -23,3 +23,10 @@ Thêm hai cột cuối: `event_type`, `event_id`. Dòng telemetry bình thườn
 
 ## Chưa nghiệm thu trên phần cứng
 Thay đổi đã commit nhưng chưa build ESP32 hay test Bluetooth và LED thực tế. Trước chạy thử kiểm tra `python -m py_compile robot_debug.py spp_csv_recorder.py run_csv_lifecycle.py` và `pio run -e esp32dev` (nếu môi trường PlatformIO tương ứng). Kiểm tra số dòng marker, timestamp, encoder và phản hồi LED.
+
+## Nhiều phân đoạn trong một lượt
+Có thể đánh dấu START(đoạn 1), END(đoạn 1), START(đoạn 2), END(đoạn 2), ... không giới hạn số cặp theo cấu trúc file. Mỗi cặp được gán `segment_id` từ 1, còn `event_id` tăng cho từng lần bấm và không reset khi mở lượt CSV mới trong cùng phiên app.
+
+CSV thêm `segment_id`, `event_status` sau hai cột `event_type`, `event_id`. Giá trị `event_status=ACK` xác nhận ESP32 đã phản hồi; `TX_FAILED`, `ACK_TIMEOUT`, `RUN_CLOSED` thể hiện mốc không được xác nhận, không được dùng làm điểm cắt chính xác khi đánh giá PID. Dòng telemetry để trống cả bốn cột event.
+
+Lưu ý: ESP32 và ứng dụng phải dùng firmware/app mới cùng lúc. Nếu không có ACK trong 2 giây, app ghi mốc lỗi vào CSV và cho phép thử lại; việc retry tạo ID mới. Mốc lỗi không có timestamp ESP32/encoder. Sau khi dừng lượt, mọi ACK còn treo được ghi `RUN_CLOSED` trước khi đóng CSV.
