@@ -55,14 +55,15 @@ class TelemetryCsvRecorder(threading.Thread):
         except queue.Full:
             self.dropped += 1
 
-    def submit_marker(self, kind, seq, t_ms, enc_l, enc_r):
+    def submit_marker(self, kind, seq, t_ms, enc_l, enc_r, segment_id=None, status="ACK"):
         if not self.recording or self.stop_event.is_set() or self.error:
             return False
         iso = datetime.datetime.now().astimezone().isoformat(timespec="milliseconds")
         row = [""] * self.header_len
         row[0], row[1] = iso, t_ms
-        row[50], row[51] = enc_l, enc_r
-        row[-2], row[-1] = kind, seq
+        row[50], row[51] = ("" if enc_l is None else enc_l), ("" if enc_r is None else enc_r)
+        row[1] = "" if t_ms is None else t_ms
+        row[-4:] = [kind, seq, "" if segment_id is None else segment_id, status]
         try:
             self.queue.put_nowait(("marker", row))
             return True
@@ -102,7 +103,7 @@ class TelemetryCsvRecorder(threading.Thread):
                         logic = [int(value >= 400) for value in calibrated]
                         logic_word = "".join(str(bit) for bit in logic)
                     row = ([received_at, sample[0], *raw, *calibrated, *logic,
-                            *sample[17:27], logic_word, "", ""])
+                            *sample[17:27], logic_word, "", "", "", ""])
                     with self.file_lock:
                         self.writer.writerow(row)
                         self.written += 1
