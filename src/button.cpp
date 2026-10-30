@@ -14,7 +14,7 @@ struct Key {
   bool lastRaw=false;
   uint32_t changedAt=0;
 };
-Key keys[2]={{PIN_CALIB_BUTTON},{PIN_START_BUTTON}};
+Key keys[2]={{PIN_CALIB_BUTTON,false,false,0},{PIN_START_BUTTON,false,false,0}};
 uint8_t ledTransitions=0;
 bool ledOn=false;
 uint32_t ledAt=0;
