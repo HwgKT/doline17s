@@ -46,7 +46,7 @@ CSV_HEADER = (["host_iso", "t_ms"] +
               [f"adc{i}" for i in range(16)] +
               [f"cal{i}" for i in range(16)] +
               [f"logic{i}" for i in range(16)] +
-              ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode", "logic16"])
+              ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode", "logic16", "event_type", "event_id"])
 BG, PANEL, FG, MUTED = "#0f1420", "#161d31", "#e2e8f0", "#94a3b8"
 GREEN, GREY, AMBER, CYAN, ROSE = "#10b981", "#475569", "#f59e0b", "#22d3ee", "#f43f5e"
 
@@ -155,6 +155,10 @@ class App(tk.Tk):
         self.controls_q = queue.SimpleQueue()  # priority text replies / E-STOP ACK
         self.reader = None
         self.run_csv = RunCsvLifecycle(self.controls_q)
+        self.marker_seq = 0
+        self.marker_pending = {}
+        self.marker_open = False
+        self.marker_status = tk.StringVar(value="Mốc: chưa có")
         self.stop_ack_deadline = None
         self.start_confirmed = False
         self.csv_status = tk.StringVar(value="CSV: chờ START")
@@ -203,6 +207,8 @@ class App(tk.Tk):
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind_all("<Escape>", lambda _event: self.stop_line())
+        self.bind_all("<KeyPress-1>", lambda e: self.mark_segment("START") if e.widget.winfo_class() not in ("Entry","TEntry","Text","TCombobox") else None)
+        self.bind_all("<KeyPress-0>", lambda e: self.mark_segment("END") if e.widget.winfo_class() not in ("Entry","TEntry","Text","TCombobox") else None)
         self.after(30, self.tick)
 
     def label(self, parent, text="", fg=FG, bg=None, **kw):
@@ -274,6 +280,11 @@ class App(tk.Tk):
                                   bg=ROSE, fg="#ffffff", activebackground="#be123c",
                                   relief="flat", height=1, pady=1)
         self.stop_btn.pack(side="left", fill="x", expand=True)
+        mark_bar = tk.Frame(panel, bg=PANEL)
+        mark_bar.pack(fill="x", pady=(2, 2))
+        ttk.Button(mark_bar, text="MỐC START [1]", command=lambda: self.mark_segment("START")).pack(side="left", expand=True, fill="x")
+        ttk.Button(mark_bar, text="MỐC END [0]", command=lambda: self.mark_segment("END")).pack(side="left", expand=True, fill="x")
+        self.label(panel, textvariable=self.marker_status, fg=CYAN, bg=PANEL).pack(anchor="w")
         run_timer = tk.Frame(panel, bg=PANEL)
         run_timer.pack(fill="x", pady=(1, 2))
         self.label(run_timer, "Thời gian xe chạy", bg=PANEL, fg=MUTED,
@@ -733,6 +744,8 @@ class App(tk.Tk):
             f"{hours:02d}:{minutes:02d}:{seconds:02d}.{ticks:02d}")
 
     def finish_run_csv(self, reason):
+        self.marker_pending.clear()
+        self.marker_open = False
         recorder = self.run_csv.finish(self.reader, reason)
         if recorder is None:
             return
@@ -742,6 +755,8 @@ class App(tk.Tk):
         self.log(f"CSV đang chốt ({reason}): {recorder.path}")
 
     def start_line(self):
+        self.marker_pending.clear()
+        self.marker_open = False
         if self.estop_latched is not False or self.auto_running or self.start_pending:
             self.log("Chưa thể START: AUTO đang chạy hoặc firmware bị khóa.")
             return
@@ -782,6 +797,37 @@ class App(tk.Tk):
             self.update_control_buttons()
         else:
             self.finish_run_csv("STOP KHÔNG GỬI ĐƯỢC / CHƯA XÁC NHẬN DỪNG")
+
+    def mark_segment(self, kind):
+        if self.run_csv.active is None or self.reader is None or not self.reader.running:
+            self.log("MARK: cần kết nối và lượt CSV đang ghi")
+            return
+        if self.marker_pending or (kind == "START") == self.marker_open:
+            self.log("MARK: cần thứ tự START / END, chờ xác nhận mốc trước")
+            return
+        self.marker_seq += 1
+        seq = self.marker_seq
+        if self.send_command(f"MARK_{kind}:{seq}"):
+            self.marker_pending[seq] = kind
+            self.marker_status.set(f"{kind} #{seq}: chờ ACK")
+
+    def on_marker_ack(self, message):
+        match = re.fullmatch(r"MARK_ACK:(START|END):(\d+):(\d+):(-?\d+):(-?\d+)", message)
+        if not match:
+            return False
+        kind, seq, t_ms, enc_l, enc_r = match.groups()
+        seq = int(seq)
+        if self.marker_pending.get(seq) != kind:
+            self.log("MARK: xác nhận không khớp hoặc quá trễ")
+            return True
+        del self.marker_pending[seq]
+        recorder = self.run_csv.active
+        if recorder is None or not recorder.submit_marker(kind, seq, int(t_ms), int(enc_l), int(enc_r)):
+            self.log("MARK: chưa ghi được CSV")
+            return True
+        self.marker_open = kind == "START"
+        self.marker_status.set(f"Đã ghi {kind} #{seq} tại {t_ms}ms")
+        return True
 
     def start_calibration(self):
         if self.send_command("CAL_WHITE"):
@@ -833,6 +879,8 @@ class App(tk.Tk):
         self.prev = (t, left, right)
 
     def on_text(self, message):
+        if self.on_marker_ack(message):
+            return
         self.log(f"RX < {message}")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
             self.estop_latched = True
