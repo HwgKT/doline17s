@@ -20,7 +20,7 @@ Failed calibration prints `CAL_FAILED: RETRY_WHITE`; the full WHITE-then-BLACK c
 For safety, an SPP E-STOP blocks physical START until `RESET_ESTOP`. A physical stop does NOT clear a latched E-STOP.
 
 ## Escape from the all-black starting box
-The old PID stopped after just 3 consecutive full-black frames. That behavior is suppressed **only if the FIRST post-START sensor frame has 16 black channels**:
+The old PID stopped after just 3 consecutive full-black frames. That behavior is suppressed **only if the FIRST post-START sensor frame has at least 14/16 black channels** (tolerates two noisy eyes):
 
 - Start moving straight with equal, limited PWM to both motors. Startup PWM cap is **90/255**, also capped by the configured base speed.
 - Continue through the initial black area and a potential short all-white gap without interpreting either as a new line.
