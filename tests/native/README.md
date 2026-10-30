@@ -12,6 +12,17 @@ g++ -std=c++17 -Wall -Wextra -Itests/native -Iinclude \
 
 Requires a desktop C++17 compiler (GCC/Clang); no board or PlatformIO required.
 
+Button debounce and LED acknowledgement smoke test:
+
+~~~bash
+g++ -std=c++17 -Wall -Wextra -Iinclude \
+  tests/native/input_logic_smoke.cpp -o input_logic_smoke
+./input_logic_smoke
+~~~
+
+This checks independent active-low button edges, 30 ms debounce, bounce/hold
+behavior, and the three nonblocking 200 ms LED flashes including restart policy.
+
 Test coverage:
 - Raw calibration threshold TH_i=1400 is respected, CAL=350 is not a black line.
 - No startup movement without 10 ms stable black detection.

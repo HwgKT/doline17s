@@ -49,6 +49,7 @@ CSV_HEADER = (["host_iso", "t_ms"] +
               ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode", "logic16"])
 BG, PANEL, FG, MUTED = "#0f1420", "#161d31", "#e2e8f0", "#94a3b8"
 GREEN, GREY, AMBER, CYAN, ROSE = "#10b981", "#475569", "#f59e0b", "#22d3ee", "#f43f5e"
+RUN_STOP_DEBOUNCE_SECONDS = 0.25
 
 
 def xor_sum(data):
@@ -196,6 +197,9 @@ class App(tk.Tk):
         self.auto_running = False
         self.run_elapsed_seconds = 0.0
         self.run_started_at = None
+        self.run_timer_running = False
+        self.run_timer_stationary_since = None
+        self.run_timer_stop_latched = False
         self.run_timer_var = tk.StringVar(value="00:00:00")
         self._build()
         self.refresh_ports()
@@ -696,22 +700,49 @@ class App(tk.Tk):
     def set_auto_running(self, running):
         now = time.monotonic()
         if running and not self.auto_running:
-            self.run_started_at = now
+            self.run_timer_stationary_since = None
+            self.run_timer_stop_latched = False
         elif not running and self.auto_running:
-            if self.run_started_at is not None:
-                self.run_elapsed_seconds += now - self.run_started_at
-            self.run_started_at = None
+            stop_at = self.run_timer_stationary_since
+            self.stop_run_timer(now if stop_at is None else stop_at)
         self.auto_running = running
         self.update_run_timer_display(now)
 
+    def update_run_timer_from_telemetry(self, sample, now=None):
+        if not self.auto_running or sample[26] != 1 or self.run_timer_stop_latched:
+            return
+        now = time.monotonic() if now is None else now
+        if sample[19] != 0 or sample[20] != 0:
+            self.run_timer_stationary_since = None
+            if not self.run_timer_running:
+                self.run_started_at = now
+                self.run_timer_running = True
+            return
+        if not self.run_timer_running:
+            return
+        if self.run_timer_stationary_since is None:
+            self.run_timer_stationary_since = now
+        elif now - self.run_timer_stationary_since >= RUN_STOP_DEBOUNCE_SECONDS:
+            self.stop_run_timer(self.run_timer_stationary_since)
+            self.run_timer_stop_latched = True
+
+    def stop_run_timer(self, now=None):
+        if self.run_timer_running and self.run_started_at is not None:
+            stop_at = time.monotonic() if now is None else now
+            self.run_elapsed_seconds += max(0.0, stop_at - self.run_started_at)
+        self.run_started_at = None
+        self.run_timer_running = False
+        self.run_timer_stationary_since = None
+
     def reset_run_timer(self):
         self.run_elapsed_seconds = 0.0
-        self.run_started_at = time.monotonic() if self.auto_running else None
+        self.run_started_at = time.monotonic() if self.run_timer_running else None
+        self.run_timer_stationary_since = None
         self.update_run_timer_display()
 
     def update_run_timer_display(self, now=None):
         elapsed = self.run_elapsed_seconds
-        if self.auto_running and self.run_started_at is not None:
+        if self.run_timer_running and self.run_started_at is not None:
             elapsed += (time.monotonic() if now is None else now) - self.run_started_at
         total_ticks = max(0, int(elapsed * 100))
         total_seconds, ticks = divmod(total_ticks, 100)
@@ -792,6 +823,7 @@ class App(tk.Tk):
     def on_sample(self, s):
         self.hist.append(s)
         self.frames += 1
+        self.update_run_timer_from_telemetry(s)
         row = self.sample_csv_row(s)
         self.recent_rows.append(row)
         # Independent CSV worker handles all received frames, even if UI drops.

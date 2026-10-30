@@ -31,8 +31,7 @@ uint32_t sums[N_SENSORS] = {};
 uint64_t squares[N_SENSORS] = {};
 uint16_t whiteStage[N_SENSORS] = {}, whiteNoise[N_SENSORS] = {};
 uint32_t frames = 0;
-int lastButtonRead = LOW, buttonState = LOW;
-unsigned long lastButtonChange = 0;
+bool whiteStageReady = false;
 
 // Fastest of nine hardware-tested modes: IDF_GPIO/1. Keep the original
 // 6-us MUX settling, discarded ADC read and 3-us post-sample wait.
@@ -129,8 +128,24 @@ void finish() {
   stats(mean, sd);
   isCalibrating = false;
   if (state == CAL_WHITE_RUNNING) {
+    bool ok = true;
+    for (int i = 0; i < N_SENSORS; ++i) {
+      if (sd[i] > CAL_MAX_STDDEV) {
+        ok = false;
+        sppLogPrintf("[CAL] WHITE eye=%02d stddev=%u exceeds %u\n",
+                     i, sd[i], CAL_MAX_STDDEV);
+      }
+    }
+    if (!ok) {
+      whiteStageReady = false;
+      state = CAL_FAILED;
+      pending = CAL_ERROR;
+      sppLogLine("[CAL] WHITE rejected: sensor noise too high");
+      return;
+    }
     memcpy(whiteStage, mean, sizeof(whiteStage));
     memcpy(whiteNoise, sd, sizeof(whiteNoise));
+    whiteStageReady = true;
     state = CAL_WHITE_READY;
     pending = CAL_WHITE_DONE;
     sppLogLine("[CAL] WHITE captured: 16 channels.");
@@ -153,6 +168,7 @@ void finish() {
   if (ok && persist(p)) {
     apply(p);
     lastCalibrationOK = true;
+    whiteStageReady = false;
     state = CAL_READY; pending = CAL_SAVED;
     sppLogLine("[CAL] CAL_OK_SAVED: NVS committed");
   } else {
@@ -221,19 +237,27 @@ const char *sensor_adc_mode(void) { return "IDF_GPIO_1"; }
 uint32_t sensor_adc_error_count(void) { return fastAdcErrors; }
 bool sensor_capture_white(void) {
   if (!fastAdcReady || isCalibrating) return false;
+  whiteStageReady = false;
   lastCalibrationOK = false;
   resetAccum(); isCalibrating = true; state = CAL_WHITE_RUNNING; pending = CAL_WHITE_STARTED;
   sppLogLine("[CAL] WHITE: hold all 16 sensors stationary on uniform WHITE");
   return true;
 }
 bool sensor_capture_black(void) {
-  if (!fastAdcReady || isCalibrating || state != CAL_WHITE_READY) return false;
+  if (!fastAdcReady || isCalibrating || !whiteStageReady) return false;
   resetAccum(); isCalibrating = true; state = CAL_BLACK_RUNNING; pending = CAL_BLACK_STARTED;
   sppLogLine("[CAL] BLACK: hold all 16 sensors stationary on uniform BLACK");
   return true;
 }
 void sensor_update_calibration_loop(void) {
   if (!isCalibrating) return;
+  if (!fastAdcReady) {
+    isCalibrating = false;
+    state = CAL_FAILED;
+    pending = CAL_ERROR;
+    sppLogLine("[CAL] FAILED: ADC unavailable during sampling");
+    return;
+  }
   sensor_read_all();
   for (int i = 0; i < N_SENSORS; ++i) {
     uint32_t v = sensorRaw[i];
@@ -255,19 +279,9 @@ void sensor_print_calibration(void) {
     sppLogPrintf("[CAL] eye=%02d W=%u B=%u TH=%u\n",
       i, minValues[i], maxValues[i], thresholds[i]);
 }
-bool sensor_is_button_pressed(void) {
-  const int read = digitalRead(PIN_CALIB_BUTTON);
-  if (read != lastButtonRead) lastButtonChange = millis();
-  bool pressed = false;
-  if (millis() - lastButtonChange > BUTTON_DEBOUNCE_MS && read != buttonState) {
-    buttonState = read; pressed = buttonState == HIGH;
-  }
-  lastButtonRead = read;
-  return pressed;
-}
 void sensor_handle_calibration_step(void) {
   if (isCalibrating) return;
-  if (state == CAL_WHITE_READY) sensor_capture_black();
+  if (whiteStageReady) sensor_capture_black();
   else sensor_capture_white();
 }
 uint16_t sensor_get_calibrated(uint8_t index) {

@@ -15,7 +15,6 @@ extern "C" {
 // This is a normalized detection threshold, NOT a shared raw ADC threshold.
 // Each eye's raw threshold is computed separately from its own white/black ADC.
 #define SENSOR_BLACK_THRESHOLD_CAL 400
-#define BUTTON_DEBOUNCE_MS 50
 #define CAL_FRAMES 128
 #define CAL_MAX_STDDEV 90
 extern uint16_t sensorRaw[N_SENSORS];
@@ -41,7 +40,6 @@ bool sensor_get_last_calibration_result(void);
 CalState sensor_calibration_state(void);
 CalEvent sensor_take_calibration_event(void);
 void sensor_print_calibration(void);
-bool sensor_is_button_pressed(void);
 void sensor_handle_calibration_step(void);
 uint16_t sensor_get_calibrated(uint8_t index);
 bool sensor_is_black(uint8_t index);
