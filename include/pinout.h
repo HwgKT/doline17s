@@ -8,7 +8,9 @@
 #define PIN_MUX_S2         19
 #define PIN_MUX_S3         23
 #define PIN_CALIB_BUTTON   34
-#define PIN_START_BUTTON   35  // Reserved; the current firmware does not use it yet.
+#define PIN_START_BUTTON   35
+#define PIN_BUTTON_LED     16
+#define BUTTON_LED_ACTIVE_HIGH 1
 
 // Quadrature channels A/B per wheel, inherited from mainv2.
 #define PIN_ENCODER_L1     21
