@@ -280,6 +280,7 @@ void setup() {
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
   lastBlink=millis();
+  button_led_blink(2); // Self-test begins after initialization, no Bluetooth needed.
 }
 void loop() {
   const uint32_t loopStartUs=micros();
