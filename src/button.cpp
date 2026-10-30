@@ -42,7 +42,6 @@ void button_init(){
   }
   pinMode(PIN_BUTTON_LED,OUTPUT);
   ledWrite(false);
-  button_led_blink(2); // Power-on LED self-test, no Bluetooth required.
 }
 ButtonEvent button_poll(uint32_t now){
   const bool calib=pressed(keys[0],now);
