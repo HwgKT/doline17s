@@ -278,7 +278,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     // All sixteen black is expected at the START, not an immediate finish.
     if (startBoxCheckPending) {
         startBoxCheckPending = false;
-        if (mask == 0xFFFFU) {
+        if (bitCount16(mask) >= 14) { // tolerate up to two noisy eyes on the black box
             startBoxEscaping = true;
             startBoxStartedMs = now;
             startBoxLineFrames = 0;
