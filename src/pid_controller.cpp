@@ -27,6 +27,11 @@ constexpr uint32_t LINE_ACQUIRE_MS = 10;
 constexpr uint32_t LINE_LOSS_MS = 40;           // was 25 — longer coast before declaring lost
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
+// First AUTO frame on a completely black start box: forward-only escape.
+// Stops rather than drives indefinitely if no narrow line is found.
+constexpr uint32_t START_BOX_TIMEOUT_MS = 2500;
+constexpr int16_t START_BOX_PWM = 90;
+constexpr uint8_t START_BOX_LINE_FRAMES = 3;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
 constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -74,6 +79,11 @@ uint8_t derivativeWarmupFrames = 0;
 uint8_t reacquireSpeedFrames = 0;
 bool turnMissing = false;
 bool startupLossActive = false;
+bool startBoxCheckPending = false;
+bool startBoxEscaping = false;
+bool startBoxTimedOut = false;
+uint32_t startBoxStartedMs = 0;
+uint8_t startBoxLineFrames = 0;
 bool fullLineCandidate = false;
 bool finishLineLatched = false;
 uint8_t fullLineFrames = 0;
@@ -154,6 +164,11 @@ static void resetLineTracking() {
     reacquireSpeedFrames = 0;
     turnMissing = false;
     startupLossActive = false;
+    startBoxCheckPending = false;
+    startBoxEscaping = false;
+    startBoxTimedOut = false;
+    startBoxStartedMs = 0;
+    startBoxLineFrames = 0;
     fullLineCandidate = false;
     finishLineLatched = false;
     fullLineFrames = 0;
@@ -225,7 +240,8 @@ void pid_set_auto_mode(bool enabled) {
     clearPidState();
     lastComputeTimeUs = micros();
     autoStartedMs = millis();
-    motor_stop(); // Never start blind; wait for stable black-line detection.
+    startBoxCheckPending = enabled; // Inspect the first post-START sensor sample.
+    motor_stop(); // Motor command issued only from the next sampled PID frame.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
 
@@ -258,6 +274,43 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     if (finishLineLatched) return LINE_CASE_STOPPED;
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
+
+    // All sixteen black is expected at the START, not an immediate finish.
+    if (startBoxCheckPending) {
+        startBoxCheckPending = false;
+        if (mask == 0xFFFFU) {
+            startBoxEscaping = true;
+            startBoxStartedMs = now;
+            startBoxLineFrames = 0;
+        }
+    }
+    if (startBoxEscaping) {
+        if ((uint32_t)(now - startBoxStartedMs) >= START_BOX_TIMEOUT_MS) {
+            startBoxEscaping = false;
+            startBoxTimedOut = true;
+            return LINE_CASE_STOPPED;
+        }
+        // Do not infer a position from a fully black box. Wait until
+        // a narrow contiguous band appears (stable over three frames).
+        const bool narrowLine =
+            blackCount >= 2 && blackCount <= 8 && hasAdjacentLineSensors(mask);
+        if (narrowLine) {
+            if (++startBoxLineFrames >= START_BOX_LINE_FRAMES) {
+                startBoxEscaping = false;
+                startBoxLineFrames = 0;
+                lineLocked = previouslyLocked = true;
+                acquiring = missing = false;
+                derivativeHistoryValid = false;
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                return LINE_CASE_NORMAL_PID;
+            }
+        } else {
+            startBoxLineFrames = 0;
+        }
+        // Includes 16-black and temporary all-white while leaving the box.
+        return LINE_CASE_STARTUP_COAST;
+    }
+    if (startBoxTimedOut) return LINE_CASE_STOPPED;
 
     if (mask == 0xFFFFU) {
         fullLineCandidate = true;
@@ -442,6 +495,11 @@ void pid_line_follow_step(void) {
     const bool dtValid = measuredDt > 0 && measuredDt <= 0.1f;
     const float dt = dtValid ? measuredDt : 0.01f;
     lastComputeTimeUs = nowUs;
+    if (startBoxTimedOut) {
+        motor_stop();
+        autoMode = false; // A new GPIO34 press can explicitly attempt START again.
+        return;
+    }
     if (prev != LINE_CASE_NORMAL_PID || currentCase != LINE_CASE_NORMAL_PID)
         derivativeHistoryValid = false;
 
@@ -555,8 +613,9 @@ void pid_line_follow_step(void) {
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {
-        const int16_t speed = pidConfig.baseSpeed < DROPOUT_FORWARD_PWM
-            ? pidConfig.baseSpeed : DROPOUT_FORWARD_PWM;
+        const int16_t maxCoast = startBoxEscaping ? START_BOX_PWM : DROPOUT_FORWARD_PWM;
+        const int16_t speed = pidConfig.baseSpeed < maxCoast
+            ? pidConfig.baseSpeed : maxCoast;
         motor_set_speeds(speed, speed);
     } else {
         clearPidState();
