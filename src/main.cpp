@@ -12,7 +12,7 @@
 #include "perf_monitor.h"
 #include "adc_bench.h"
 #include "spp_debug.h"
-#include "input_logic.h"
+#include "button.h"
 
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
@@ -33,11 +33,7 @@ struct PidProfile {
 static_assert(sizeof(PidProfile)==28,"PID NVS profile layout changed");
 static_assert(offsetof(PidProfile,crc)==24,"PID NVS CRC offset changed");
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
-bool actionLedOutput=false;
-bool physicalCalibPending=false, physicalCalibBlackPending=false;
 bool pidProfilePersistent=false;
-ButtonPressDebouncer calibButton,startButton;
-AckLedBlink actionLed;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
 uint16_t streamHz=300;
@@ -93,19 +89,6 @@ bool savePidProfile() {
 void ledWrite(bool on) {
   ledOn=on;
   digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
-}
-void actionLedWrite(bool on) {
-  if(actionLedOutput==on)return;
-  actionLedOutput=on;
-  digitalWrite(PIN_ACTION_LED,on==(ACTION_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
-}
-void actionLedBlinkSuccess() {
-  actionLed.request(millis());
-  actionLedWrite(actionLed.isOn());
-}
-void actionLedUpdate(uint32_t now) {
-  actionLed.update(now);
-  actionLedWrite(actionLed.isOn());
 }
 const char *startAuto() {
   if(pid_is_auto_mode())return "ALREADY_RUNNING";
@@ -361,12 +344,8 @@ void sendFrame(){
 void setup() {
   // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
-  pinMode(PIN_ACTION_LED,OUTPUT);digitalWrite(PIN_ACTION_LED,LOW);actionLedOutput=false;
-  pinMode(PIN_START_BUTTON,INPUT);
   sensor_init();motor_init();
-  const uint32_t buttonInitTime=millis();
-  calibButton.begin(digitalRead(PIN_CALIB_BUTTON)==HIGH,buttonInitTime);
-  startButton.begin(digitalRead(PIN_START_BUTTON)==HIGH,buttonInitTime);
+  button_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
   pid_init(DEFAULT_KP,DEFAULT_KI,DEFAULT_KD,DEFAULT_BASE_SPEED);
   pidProfilePersistent=loadPidProfile();
@@ -379,38 +358,13 @@ void loop() {
   const uint32_t loopStartUs=micros();
   perfLoopBegin(loopStartUs);
   uint32_t now=millis();++loopCount;
-  actionLedUpdate(now);
+  button_update_led(now);
   uint32_t stageStartUs=micros();
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  const bool calibPressed=calibButton.update(digitalRead(PIN_CALIB_BUTTON)==HIGH,now);
-  const bool startPressed=startButton.update(digitalRead(PIN_START_BUTTON)==HIGH,now);
-  if(calibPressed) sppLogLine("[BUTTON] GPIO34 PRESSED");
-  if(startPressed) sppLogLine("[BUTTON] GPIO35 PRESSED");
-  if(!adcBenchActive() && calibPressed && !sensor_is_calibrating()){
-    safeStop();
-    sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
-    if(sensor_is_calibrating()){
-      physicalCalibPending=true;
-      physicalCalibBlackPending=sensor_calibration_state()==CAL_BLACK_RUNNING;
-      sppLogLine(!physicalCalibBlackPending?
-                 "[CALIB] WHITE START":"[CALIB] BLACK START");
-    } else {
-      sppLogLine("[CALIB] REJECTED: ADC unavailable or calibration state invalid");
-    }
-  }
-  if(startPressed){
-    const char *error=startAuto();
-    if(!error){
-      actionLedBlinkSuccess();
-      sppLogLine("[AUTO] START SUCCESS");
-      sppLogLine("[LED] ACK 3 BLINKS");
-      reply("MODE: AUTO PID");
-    } else {
-      sppLogPrintf("[AUTO] START REJECTED: %s\n",error);
-    }
-  }
+  const ButtonCallbacks buttonCallbacks{startAuto,safeStop};
+  button_poll(now,buttonCallbacks);
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
   if(adcBenchActive())adcBenchStep();
@@ -421,33 +375,14 @@ void loop() {
     safeStop();
     reply("ERR: ADC_READ_FAULT_MOTORS_STOPPED");
   }
-  switch(sensor_take_calibration_event()){
+  const CalEvent calEvent=sensor_take_calibration_event();
+  button_on_calibration_event(calEvent);
+  switch(calEvent){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
-    case CAL_WHITE_DONE:
-      reply("CAL_WHITE_DONE");
-      if(physicalCalibPending){
-        physicalCalibPending=false;
-        sppLogLine("[CALIB] WHITE SUCCESS");
-        actionLedBlinkSuccess();sppLogLine("[LED] ACK 3 BLINKS");
-      }
-      break;
+    case CAL_WHITE_DONE: reply("CAL_WHITE_DONE"); break;
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
-    case CAL_SAVED:
-      reply("CAL_OK_SAVED");showCalib();
-      if(physicalCalibPending){
-        physicalCalibPending=false;
-        sppLogLine("[CALIB] BLACK SUCCESS");
-        sppLogLine("[CALIB] SAVED TO NVS");
-        actionLedBlinkSuccess();sppLogLine("[LED] ACK 3 BLINKS");
-      }
-      break;
-    case CAL_ERROR:
-      reply("CAL_FAILED");showCalib();
-      if(physicalCalibPending){physicalCalibPending=false;
-        sppLogLine(physicalCalibBlackPending?
-                   "[CALIB] BLACK FAILED; RETRY BLACK":
-                   "[CALIB] WHITE FAILED; RETRY WHITE");}
-      break;
+    case CAL_SAVED: reply("CAL_OK_SAVED");showCalib(); break;
+    case CAL_ERROR: reply("CAL_FAILED");showCalib(); break;
     default: break;
   }
   if(pid_is_auto_mode()&&!sensor_is_calibrating()){
