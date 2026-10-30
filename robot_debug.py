@@ -194,6 +194,8 @@ class App(tk.Tk):
         self.estop_pending = False
         self.start_pending = False
         self.auto_running = False
+        self.vehicle_stopped = False
+        self.all_black_frames = 0
         self.run_elapsed_seconds = 0.0
         self.run_started_at = None
         self.run_timer_var = tk.StringVar(value="00:00:00")
@@ -695,23 +697,33 @@ class App(tk.Tk):
 
     def set_auto_running(self, running):
         now = time.monotonic()
-        if running and not self.auto_running:
-            self.run_started_at = now
-        elif not running and self.auto_running:
-            if self.run_started_at is not None:
-                self.run_elapsed_seconds += now - self.run_started_at
-            self.run_started_at = None
         self.auto_running = running
+        self.sync_run_timer(now)
+
+    def set_vehicle_stopped(self, stopped):
+        now = time.monotonic()
+        self.vehicle_stopped = stopped
+        self.sync_run_timer(now)
+
+    def sync_run_timer(self, now):
+        timer_active = self.auto_running and not self.vehicle_stopped
+        if timer_active and self.run_started_at is None:
+            self.run_started_at = now
+        elif not timer_active and self.run_started_at is not None:
+            self.run_elapsed_seconds += now - self.run_started_at
+            self.run_started_at = None
         self.update_run_timer_display(now)
 
     def reset_run_timer(self):
         self.run_elapsed_seconds = 0.0
-        self.run_started_at = time.monotonic() if self.auto_running else None
+        self.run_started_at = (time.monotonic()
+                               if self.auto_running and not self.vehicle_stopped
+                               else None)
         self.update_run_timer_display()
 
     def update_run_timer_display(self, now=None):
         elapsed = self.run_elapsed_seconds
-        if self.auto_running and self.run_started_at is not None:
+        if self.run_started_at is not None:
             elapsed += (time.monotonic() if now is None else now) - self.run_started_at
         total_ticks = max(0, int(elapsed * 100))
         total_seconds, ticks = divmod(total_ticks, 100)
@@ -761,6 +773,7 @@ class App(tk.Tk):
 
     def stop_line(self):
         # STOP is the single visible stop action. CSV closes after firmware ACK.
+        self.set_auto_running(False)
         if self.send_command("STOP"):
             if self.run_csv.active is not None:
                 self.stop_ack_deadline = time.monotonic() + 2.0
@@ -796,6 +809,11 @@ class App(tk.Tk):
         self.recent_rows.append(row)
         # Independent CSV worker handles all received frames, even if UI drops.
         self.last_adc = list(s[1:17])
+        all_black = (self.calibration_ok and all(
+            normalize_adc(s[i + 1], self.cal_min[i], self.cal_max[i])
+            >= BLACK_THRESHOLD_CAL for i in range(16)))
+        self.all_black_frames = self.all_black_frames + 1 if all_black else 0
+        self.set_vehicle_stopped(self.all_black_frames >= 5)
         t, left, right = s[0], s[17], s[18]
         if self.preview_pid_log.get() and s[26] == 1:
             if self.last_preview_ms is None or (t - self.last_preview_ms) % (2**32) >= 200:
@@ -836,6 +854,8 @@ class App(tk.Tk):
         elif message == "MODE: AUTO PID":
             self.start_pending = False
             self.start_confirmed = True
+            self.all_black_frames = 0
+            self.set_vehicle_stopped(False)
             self.set_auto_running(True)
             self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
             self.control_state_label.configure(fg=GREEN)
@@ -858,6 +878,9 @@ class App(tk.Tk):
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
             sent = re.search(r"\bsent=(\d+(?:\.\d+)?)Hz\b", message)
             dropped = re.search(r"\bdrop=(\d+)\b", message)
+            auto = re.search(r"\bauto=(\d)\b", message)
+            if auto:
+                self.set_auto_running(auto.group(1) == "1")
             if loop and pid and sent:
                 self.last_diag_rx = time.monotonic()
                 warning = f"    TX drop: {dropped.group(1)}" if dropped else ""
