@@ -13,8 +13,9 @@ struct Key {
   bool stable=false;
   bool lastRaw=false;
   uint32_t changedAt=0;
+  explicit Key(uint8_t gpio) : pin(gpio) {}
 };
-Key keys[2]={{PIN_CALIB_BUTTON,false,false,0},{PIN_START_BUTTON,false,false,0}};
+Key keys[2]={Key(PIN_CALIB_BUTTON),Key(PIN_START_BUTTON)};
 uint8_t ledTransitions=0;
 bool ledOn=false;
 uint32_t ledAt=0;
