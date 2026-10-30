@@ -36,6 +36,7 @@ bool sensor_capture_white(void);
 bool sensor_capture_black(void);
 void sensor_update_calibration_loop(void);
 bool sensor_is_calibrating(void);
+bool sensor_is_waiting_for_black(void);
 bool sensor_get_last_calibration_result(void);
 CalState sensor_calibration_state(void);
 CalEvent sensor_take_calibration_event(void);

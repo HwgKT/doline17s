@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stddef.h>
+#include <Preferences.h>
 #include "pinout.h"
 #include "sensor.h"
 #include "motor.h"
@@ -16,9 +18,24 @@ namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
+constexpr float DEFAULT_KP=2.0f, DEFAULT_KI=0.0f, DEFAULT_KD=0.0f;
+constexpr int16_t DEFAULT_BASE_SPEED=100;
+constexpr uint32_t PID_PROFILE_MAGIC=0x50494431UL; // "PID1"
+constexpr uint16_t PID_PROFILE_VERSION=1;
+struct PidProfile {
+  uint32_t magic;
+  uint16_t version, size;
+  float kp,ki,kd;
+  int16_t baseSpeed;
+  uint16_t reserved;
+  uint32_t crc;
+};
+static_assert(sizeof(PidProfile)==28,"PID NVS profile layout changed");
+static_assert(offsetof(PidProfile,crc)==24,"PID NVS CRC offset changed");
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool actionLedOutput=false;
 bool physicalCalibPending=false, physicalCalibBlackPending=false;
+bool pidProfilePersistent=false;
 ButtonPressDebouncer calibButton,startButton;
 AckLedBlink actionLed;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
@@ -28,6 +45,50 @@ uint32_t streamPeriodUs=1000000UL/300;
 uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 BtTxStats lastTxStats{};
+
+uint32_t pidProfileCrc(const uint8_t *data,size_t length) {
+  uint32_t crc=0xFFFFFFFFUL;
+  for(size_t i=0;i<length;++i){
+    crc^=data[i];
+    for(uint8_t bit=0;bit<8;++bit)
+      crc=(crc&1U)?(crc>>1)^0xEDB88320UL:crc>>1;
+  }
+  return crc^0xFFFFFFFFUL;
+}
+bool validPidProfile(const PidProfile &p) {
+  return p.magic==PID_PROFILE_MAGIC && p.version==PID_PROFILE_VERSION &&
+    p.size==sizeof(PidProfile) && isfinite(p.kp) && isfinite(p.ki) &&
+    isfinite(p.kd) && p.kp>=0.0f && p.kp<=50.0f &&
+    p.ki>=0.0f && p.ki<=50.0f && p.kd>=0.0f && p.kd<=50.0f &&
+    p.baseSpeed>=0 && p.baseSpeed<=255 && p.reserved==0 &&
+    p.crc==pidProfileCrc(reinterpret_cast<const uint8_t *>(&p),
+                         offsetof(PidProfile,crc));
+}
+bool loadPidProfile() {
+  Preferences pref;
+  if(!pref.begin("line16pid",true))return false;
+  PidProfile p{};
+  const bool readOk=pref.getBytesLength("config")==sizeof(p) &&
+    pref.getBytes("config",&p,sizeof(p))==sizeof(p);
+  pref.end();
+  if(!readOk || !validPidProfile(p))return false;
+  pid_init(p.kp,p.ki,p.kd,p.baseSpeed);
+  return true;
+}
+bool savePidProfile() {
+  PidProfile p{};
+  p.magic=PID_PROFILE_MAGIC;p.version=PID_PROFILE_VERSION;
+  p.size=sizeof(PidProfile);
+  p.kp=pid_get_kp();p.ki=pid_get_ki();p.kd=pid_get_kd();
+  p.baseSpeed=pid_get_base_speed();p.reserved=0;
+  p.crc=pidProfileCrc(reinterpret_cast<const uint8_t *>(&p),
+                      offsetof(PidProfile,crc));
+  Preferences pref;
+  if(!pref.begin("line16pid",false))return false;
+  const bool ok=pref.putBytes("config",&p,sizeof(p))==sizeof(p);
+  pref.end();
+  return ok;
+}
 
 void ledWrite(bool on) {
   ledOn=on;
@@ -52,7 +113,7 @@ const char *startAuto() {
   if(estopLatched)return "ESTOP_LATCHED";
   if(!sensor_adc_ready())return "ADC_NOT_READY";
   if(sensor_is_calibrating()||!calibrationReady||
-     sensor_calibration_state()==CAL_WHITE_READY)return "CALIB_REQUIRED_OR_PENDING";
+     sensor_is_waiting_for_black())return "CALIB_REQUIRED_OR_PENDING";
   manualActive=false;
   pid_set_auto_mode(true);
   return nullptr;
@@ -100,7 +161,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID PID_SAVE TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -154,6 +215,12 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  if(s=="PID_SAVE"){
+    if(pid_is_auto_mode()||manualActive){reply("ERR: PID_SAVE_REQUIRES_MOTORS_STOPPED");return;}
+    if(!savePidProfile()){reply("ERR: PID_SAVE_FAILED");return;}
+    pidProfilePersistent=true;
+    reply("PID_PROFILE: SAVED_TO_NVS");showPid();return;
+  }
   if(s=="PWM"){
     char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
       motor_get_left_speed(),motor_get_right_speed(),
@@ -259,8 +326,13 @@ void connectionState(uint32_t now) {
     if(connected){
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
+      reply(pidProfilePersistent?"PID_PROFILE: NVS_PROFILE_ACTIVE":
+                               "PID_PROFILE: DEFAULTS_IN_USE (SEND PID_SAVE TO STORE)");
     }else{
-      safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
+      // Bluetooth loss stops only Bluetooth-driven manual motion. Physical AUTO
+      // remains independent of SPP; ESTOP and ADC fault paths still stop motors.
+      if(manualActive)safeStop();
+      adcBenchCancel();ledWrite(false);lastBlink=now;
       btDropPendingTelemetry(); // no replay after reconnect
     }
     btPrevious=connected;
@@ -296,7 +368,8 @@ void setup() {
   calibButton.begin(digitalRead(PIN_CALIB_BUTTON)==HIGH,buttonInitTime);
   startButton.begin(digitalRead(PIN_START_BUTTON)==HIGH,buttonInitTime);
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
-  pid_init(2.0f,0.0f,0.0f,100); // conservative baseline while validating sharp-turn behavior
+  pid_init(DEFAULT_KP,DEFAULT_KI,DEFAULT_KD,DEFAULT_BASE_SPEED);
+  pidProfilePersistent=loadPidProfile();
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();

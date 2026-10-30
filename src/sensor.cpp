@@ -267,6 +267,7 @@ void sensor_update_calibration_loop(void) {
   if (++frames >= CAL_FRAMES) finish();
 }
 bool sensor_is_calibrating(void) { return isCalibrating; }
+bool sensor_is_waiting_for_black(void) { return whiteStageReady; }
 bool sensor_get_last_calibration_result(void) { return lastCalibrationOK; }
 CalState sensor_calibration_state(void) { return state; }
 CalEvent sensor_take_calibration_event(void) {

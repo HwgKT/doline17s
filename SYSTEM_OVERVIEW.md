@@ -118,9 +118,15 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 - **Phần cứng nút:** GPIO34 (CALIB) và GPIO35 (START) active LOW. Mỗi chân cần điện trở kéo lên ngoài 10 kΩ tới 3.3 V; nút nối chân xuống GND. GPIO34/35 không có điện trở kéo nội.
 - **Debounce:** Mỗi nút được lấy mẫu độc lập, debounce 30 ms; chỉ phát sự kiện ở cạnh nhấn HIGH → LOW. Giữ nút không lặp sự kiện; cần thả rồi nhấn lại.
 - **CALIB:** bắt đầu ở WAIT_WHITE. Nhấn lần một gọi calibration WHITE hiện có, tích lũy 128 khung không chặn và kiểm tra noise từng mắt; chỉ khi có sự kiện `CAL_WHITE_DONE` mới xác nhận LED và chuyển logic sang WAIT_BLACK. Nhấn lần hai gọi calibration BLACK, kiểm tra contrast/noise và lưu NVS; chỉ `CAL_SAVED` mới xác nhận thành công, rồi quay về WAIT_WHITE. Nếu WHITE lỗi thì thử lại WHITE; nếu BLACK lỗi thì giữ mẫu WHITE trong RAM để thử lại BLACK. Profile NVS cũ vẫn được giữ.
-- **START:** dùng cùng hàm chuyển AUTO với lệnh SPP `AUTO`/`START`. Từ chối khi đang AUTO, E-STOP, ADC bench/lỗi ADC, đang calib hoặc calibration chưa hợp lệ. Không reset PID/encoder và không thay đổi gain/tốc độ.
+- **START:** dùng cùng hàm chuyển AUTO với lệnh SPP `AUTO`/`START`. Từ chối khi đang AUTO, E-STOP, ADC bench/lỗi ADC, đang calib, đang chờ BLACK hoặc calibration chưa hợp lệ. Không reset encoder và dùng bộ PID hiện hành.
 - **LED:** GPIO16 (RX2), active HIGH, mặc định LOW/tắt. Sau mỗi hành động nút thành công, chạy đúng ba chu kỳ HIGH 200 ms / LOW 200 ms. State machine `millis()` không dùng `delay()`; yêu cầu mới khi đang nháy khởi động lại một mẫu duy nhất, không xếp hàng.
 - **Luồng:** `GPIO → debounce → sự kiện nút → handler calibration/AUTO hiện có → kết quả thành công → LED ACK`. Các log chẩn đoán đi qua `sppLogLine` và không thay đổi frame telemetry 72 byte. Logic debounce/LED thuần C++ nằm trong `include/input_logic.h`, có smoke test host tại `tests/native/input_logic_smoke.cpp`.
+
+### 3.2.2. Chạy độc lập Bluetooth và lưu cấu hình PID
+- Bluetooth Classic SPP là tùy chọn. `loop()` luôn quét ADC và chạy PID khi AUTO được bật vật lý, bất kể `btBegin()` thành công hoặc đang có client SPP hay không.
+- Khi SPP mất kết nối, firmware chỉ dừng chuyển động manual đang điều khiển qua Bluetooth (`manualActive`). AUTO vật lý không bị dừng; E-STOP, ADC fault và các điều kiện an toàn khác vẫn có hiệu lực.
+- Calibration cảm biến nằm độc lập trong NVS namespace `line16cal`. Cấu hình PID nằm trong namespace `line16pid`, key `config`, có magic/version/size/CRC và kiểm tra Kp/Ki/Kd trong 0–50, Base PWM trong 0–255. Boot khôi phục profile hợp lệ; nếu không có profile hợp lệ thì dùng mặc định hiện hành `Kp=2.0, Ki=0.0, Kd=0.0, Base=100`.
+- Thay đổi PID qua `KP:`, `KI:`, `KD:` hoặc `BASE:` chỉ cập nhật RAM. Gửi `PID_SAVE` khi motor đã dừng để ghi NVS một lần có chủ đích; không ghi NVS trong vòng PID. `maxSpeed=255` là giới hạn firmware không có API tuning nên không nằm trong profile người dùng.
 
 ### 3.3. Phân hệ Động cơ & Driver LEDC PWM ([motor.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/motor.cpp) & [motor.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/motor.h))
 - **Cấu hình phần cứng:**

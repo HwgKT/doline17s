@@ -133,6 +133,7 @@
  C:/Users/Admin/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_hw_support/include/soc/esp32/spiram.h \
  C:/Users/Admin/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  C:/Users/Admin/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
+ C:/Users/Admin/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
  include/pinout.h include/sensor.h include/pinout.h include/motor.h \
  include/encoder.h include/pid_controller.h include/bt_telemetry.h \
  include/perf_monitor.h include/adc_bench.h include/spp_debug.h \
