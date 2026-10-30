@@ -3,62 +3,29 @@
 #include "pinout.h"
 
 namespace {
-constexpr uint32_t DEBOUNCE_MS=35;
-constexpr uint32_t LED_STEP_MS=100;
-// Board schematic: 10k pull-up to 3.3V and normally-open switch to GND.
-// Released = HIGH; pressed = LOW, on BOTH GPIO34 and GPIO35.
-constexpr int PRESSED_LEVEL=LOW;
-struct Key {
-  uint8_t pin;
-  bool stable=false;
-  bool lastRaw=false;
-  uint32_t changedAt=0;
-  explicit Key(uint8_t gpio) : pin(gpio) {}
-};
-Key keys[2]={Key(PIN_CALIB_BUTTON),Key(PIN_START_BUTTON)};
-uint8_t ledTransitions=0;
-bool ledOn=false;
-uint32_t ledAt=0;
-void ledWrite(bool state) {
-  ledOn=state;
-  digitalWrite(PIN_BUTTON_LED, state == (BUTTON_LED_ACTIVE_HIGH!=0) ? HIGH : LOW);
+constexpr uint32_t DEBOUNCE_MS = 35;
+// External 10k pull-up to 3.3 V; button shorts GPIO34 to GND.
+bool stablePressed = false;
+bool lastRawPressed = false;
+uint32_t changedAtMs = 0;
 }
-bool pressed(Key &key,uint32_t now) {
-  const bool raw=digitalRead(key.pin)==PRESSED_LEVEL;
-  if(raw!=key.lastRaw){key.lastRaw=raw;key.changedAt=now;}
-  if(raw!=key.stable && (uint32_t)(now-key.changedAt)>=DEBOUNCE_MS){
-    key.stable=raw;
-    return raw;
+
+void button_init() {
+  pinMode(PIN_CALIB_BUTTON, INPUT); // GPIO34 cannot use internal pull-up.
+  stablePressed = lastRawPressed = (digitalRead(PIN_CALIB_BUTTON) == LOW);
+  changedAtMs = millis();
+}
+
+bool button_pressed(uint32_t now_ms) {
+  const bool rawPressed = (digitalRead(PIN_CALIB_BUTTON) == LOW);
+  if (rawPressed != lastRawPressed) {
+    lastRawPressed = rawPressed;
+    changedAtMs = now_ms;
+  }
+  if (rawPressed != stablePressed &&
+      (uint32_t)(now_ms - changedAtMs) >= DEBOUNCE_MS) {
+    stablePressed = rawPressed;
+    return stablePressed; // Only one event per full press/release cycle.
   }
   return false;
-}
-}
-void button_init(){
-  const uint32_t now=millis();
-  for(auto &key:keys){
-    pinMode(key.pin,INPUT); // GPIO34 and GPIO35 have no internal pulls.
-    key.lastRaw=key.stable=(digitalRead(key.pin)==PRESSED_LEVEL);
-    key.changedAt=now;
-  }
-  pinMode(PIN_BUTTON_LED,OUTPUT);
-  ledWrite(false);
-}
-ButtonEvent button_poll(uint32_t now){
-  const bool calib=pressed(keys[0],now);
-  const bool start=pressed(keys[1],now);
-  if(calib)return BUTTON_CALIB;
-  if(start)return BUTTON_START_STOP;
-  return BUTTON_NONE;
-}
-void button_led_blink(uint8_t count){
-  if(count==0){ledTransitions=0;ledWrite(false);return;}
-  ledTransitions=(uint8_t)(2*count-1);
-  ledAt=millis();
-  ledWrite(true);
-}
-void button_led_update(uint32_t now){
-  if(!ledTransitions || (uint32_t)(now-ledAt)<LED_STEP_MS)return;
-  ledAt=now;
-  ledWrite(!ledOn);
-  --ledTransitions;
 }
