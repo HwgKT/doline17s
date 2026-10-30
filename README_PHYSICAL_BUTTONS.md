@@ -1,36 +1,47 @@
-# Physical buttons and feedback LED — mainv4
+# GPIO34 one-button WHITE -> BLACK -> START/STOP (mainv4)
 
-## Pin mapping
-- GPIO34: CALIB (external 10 kOhm pull-up, pressed = LOW).
-- GPIO35: START/STOP (external 10 kOhm pull-up, pressed = LOW).
-- GPIO16: feedback LED (active-high, assumed).
-- GPIO2: Bluetooth SPP status LED, unchanged.
+## Hardware
+- **GPIO34**: the only physical control button, active LOW (external 10-kOhm pull-up to 3.3 V). Release=HIGH, press=LOW; 35-ms software debounce.
+- GPIO35: no longer used for control (existing test in `tests/button_hw` may still read it).
+- GPIO16: damaged external LED; firmware does not use it for feedback.
+- GPIO2: remains the Bluetooth SPP status LED.
+- USB Serial Monitor at 115200 displays sparse physical-button and calibration events. Bluetooth is NOT required to operate GPIO34.
 
-GPIO34 and GPIO35 are input-only and have no internal pull resistors. The supplied schematic shows 10 kOhm to 3.3 V and a 100 nF capacitor to GND for both input signals; the switch shorts the signal to GND when pressed. Therefore release = HIGH and press = LOW. GPIO16 LED polarity remains assumed active-HIGH pending its schematic.
+## Operating sequence
+All steps must be performed **after each boot**, even if calibration data has previously been restored from NVS.
 
-## Sequence
-1. Boot: restore NVS profile if valid. GPIO16 LED executes two short test blinks automatically (without Bluetooth), then remains OFF.
-2. GPIO34 first click: stop motors, capture WHITE (128 frames). After CAL_WHITE_DONE, LED blinks once.
-3. GPIO34 second click: capture BLACK, validate/store NVS. After CAL_OK_SAVED, LED blinks three times. If capture fails, no success blink.
-4. GPIO35 click: if ADC + calibration valid and no E-STOP, enable AUTO PID, blink LED three times.
-5. GPIO35 next click: stop PID and motor, blink LED twice.
-6. Repeat start/stop. To recalibrate, press GPIO34 while stopped; a completed WHITE must precede BLACK.
+1. Place all **16 sensors on white** and click GPIO34 once. Allow 128 ADC frames to finish, until the USB log prints `CAL_WHITE_DONE: NEXT_PRESS_BLACK`.
+2. Place all **16 sensors on black** and click GPIO34 a second time. Allow the BLACK capture/validation and NVS commit to finish; look for `CAL_OK_SAVED: NEXT_PRESS_START`.
+3. Position the robot in the **all-black starting box** facing the intended direction. Click GPIO34 a third time. `BUTTON34: AUTO_STARTED` enables the line follower; no Bluetooth connection is required.
+4. Click GPIO34 while the robot is running to **STOP immediately**. Subsequent clicks restart AUTO without recalibration. Restarting ESP32 resets the physical sequence to WHITE.
 
-The button driver uses 35-ms debounce, events on stable press only, and LED 100-ms ON/OFF pulses via millis() with no blocking delay(). It is independent of the CSV local START/END markers in robot_debug.py (keyboard 1/0). Button START itself does not automatically open the Python CSV; only app START begins a CSV recording session.
+Failed calibration prints `CAL_FAILED: RETRY_WHITE`; the full WHITE-then-BLACK capture must be repeated. While calibration is running, extra clicks are ignored, not counted as a stage transition.
 
-Bluetooth disconnection stops manual timed driving, but does not interrupt an AUTO run started physically. Use GPIO35 to stop autonomous motion if SPP is absent. The Bluetooth ESTOP latch prevents physical START until RESET_ESTOP.
+For safety, an SPP E-STOP blocks physical START until `RESET_ESTOP`. A physical stop does NOT clear a latched E-STOP.
 
-## Install
-On Windows in project directory:
+## Escape from the all-black starting box
+The old PID stopped after just 3 consecutive full-black frames. That behavior is suppressed **only if the FIRST post-START sensor frame has 16 black channels**:
+
+- Start moving straight with equal, limited PWM to both motors. Startup PWM cap is **90/255**, also capped by the configured base speed.
+- Continue through the initial black area and a potential short all-white gap without interpreting either as a new line.
+- Switch to normal PID when **2–8 adjacent black sensor channels** are detected for **3 consecutive frames**.
+- If no suitable line is acquired within **2500 ms** after start, stop both motors and disable AUTO; USB reports `AUTO: START_BOX_TIMEOUT_MOTORS_STOPPED`.
+- Once the start box has been exited, normal black-crossing and all-black finish detection remain in effect (the latter stops after 3 full-black frames).
+
+These parameters are initial engineering estimates, not validated measurements. Tune the PWM/time cap for the real track only after testing with the wheels elevated and a clear emergency stop route. A black square alone does not indicate the direction of the outgoing line; **align the vehicle toward the exit before pressing START**.
+
+## Install / monitor on Windows
+Open PowerShell in the repository root. If `pio` is not on PATH, use the full installed executable:
 
 ```powershell
 git switch mainv4
 git pull --ff-only origin mainv4
-python -m platformio run -e esp32dev -t upload
+& "C:\Users\KIEUTUANHUNG\.platformio\penv\Scripts\platformio.exe" run -e esp32dev -t upload
+& "C:\Users\KIEUTUANHUNG\.platformio\penv\Scripts\platformio.exe" device monitor -p COM4 -b 115200
 ```
 
-Verify the LED polarity and button levels before enabling drive motors. First test with motors disconnected or wheels raised. Firmware compile and hardware validation are not yet confirmed.
+Replace COM4 with the correct USB serial port; close the monitor before re-uploading. Uploading the normal firmware is essential if the standalone `tests/button_hw` sketch is currently flashed.
 
-## Diagnosing button and LED
+The app's CSV recorder still opens when starting from the Python dashboard, **not automatically** on physical GPIO34 START. Local segment markers in the Python app are unchanged.
 
-On boot, GPIO16 flashes twice independently of SPP. If this never happens after updating the firmware, inspect GPIO16 LED wiring, polarity, current limiting, and whether the board was flashed successfully. For the two switches, measure about 3.3 V when released and 0 V when pressed. The LED patterns for CALIB are emitted on successful calibration *completion*, not immediately on button press. Test with wheels lifted and motors disconnected as practical.
+**Verification**: This change has been code-reviewed but full PlatformIO build and hardware testing remain to be performed by the user.
