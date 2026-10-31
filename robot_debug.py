@@ -727,8 +727,63 @@ class App(tk.Tk):
     def preview_pwm(self, *_args):
         self.pwm_text.set(f"{round(self.pwm_var.get())} / 255")
 
+    def _hs_base_limit(self):
+        """Use the app's requested BASE for early validation; ESP32 rechecks."""
+        try:
+            return int(self.pid_vars["Base"].get().strip())
+        except (ValueError, AttributeError):
+            return 0
+
+    def preview_hs_peak(self, *_args):
+        value = max(100, min(255, round(self.hs_peak_var.get())))
+        self.hs_peak_dirty = True
+        self.hs_peak_value_text.set(f"{value} (chưa áp dụng)")
+
+    def preset_hs_peak(self, value):
+        if not self._can_edit_hs_peak():
+            return
+        self.hs_peak_var.set(value)
+        self.preview_hs_peak()
+
+    def _can_edit_hs_peak(self):
+        return (self.reader is not None and self.reader.is_alive()
+                and self.estop_latched is False and not self.estop_pending
+                and not self.auto_running and not self.start_pending
+                and self.stop_ack_deadline is None
+                and self.run_csv.active is None)
+
+    def read_hs_peak(self):
+        if self.hs_peak_pending is not None:
+            self.log("Chờ ESP32 xác nhận HS_PEAK trước khi đọc lại.")
+            return False
+        return self.send_command("HS_PEAK")
+
+    def apply_hs_peak(self):
+        if not self._can_edit_hs_peak() or self.hs_peak_pending is not None:
+            self.log("HS_PEAK chỉ chỉnh được khi đã kết nối và xe đã dừng.")
+            return False
+        peak = max(100, min(255, round(self.hs_peak_var.get())))
+        base = self._hs_base_limit()
+        if peak < base:
+            self.hs_peak_feedback.set(f"Không hợp lệ: HS_PEAK {peak} < BASE {base}")
+            self.log(f"Không áp dụng HS_PEAK={peak}: thấp hơn BASE={base}.")
+            return False
+        self.hs_peak_pending = peak
+        self.hs_peak_pending_at = time.monotonic()
+        self.hs_peak_feedback.set(f"Đang chờ ESP32 xác nhận PWM {peak}...")
+        self.update_control_buttons()
+        if not self.send_command(f"HS_PEAK:{peak}"):
+            self.hs_peak_pending = None
+            self.hs_peak_pending_at = None
+            self.update_control_buttons()
+            return False
+        return True
+
     def apply_pwm(self):
         pwm = max(0, min(255, round(self.pwm_var.get())))
+        if self.hs_peak_confirmed is not None and pwm > self.hs_peak_confirmed:
+            self.log(f"BASE {pwm} vượt HS_PEAK {self.hs_peak_confirmed}; tăng HS_PEAK trước.")
+            return
         if self.send_command(f"V:{pwm}"):
             self.pid_vars["Base"].set(str(pwm))
 
@@ -746,6 +801,9 @@ class App(tk.Tk):
                 raise ValueError("Kp, Ki, Kd phải là số hữu hạn từ 0 đến 50")
             if str(base) != base_s or not 0 <= base <= 255:
                 raise ValueError("Base phải là số nguyên từ 0 đến 255")
+            if self.hs_peak_confirmed is not None and base > self.hs_peak_confirmed:
+                raise ValueError(
+                    f"BASE={base} vượt HS_PEAK={self.hs_peak_confirmed}; tăng HS trước")
         except ValueError as exc:
             self.log(f"Thông số PID không hợp lệ: {exc}")
             return False
@@ -788,6 +846,15 @@ class App(tk.Tk):
                   or self.start_pending or self.stop_ack_deadline is not None)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        if hasattr(self, "hs_peak_widgets"):
+            editable = self._can_edit_hs_peak() and self.hs_peak_pending is None
+            for widget in self.hs_peak_widgets:
+                widget.configure(state="normal" if editable else "disabled")
+            self.hs_peak_apply_btn.configure(
+                state="normal" if editable else "disabled")
+            self.hs_peak_read_btn.configure(
+                state="normal" if connected and self.hs_peak_pending is None
+                else "disabled")
 
     def set_auto_running(self, running):
         now = time.monotonic()
