@@ -305,12 +305,13 @@ class App(tk.Tk):
         right = tk.Frame(body, bg=PANEL)
         right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(0, weight=1, uniform="right_half", minsize=220)
-        right.grid_rowconfigure(1, weight=1, uniform="right_half", minsize=220)
+        # Give compact controls enough space, without clipping at 720p/HiDPI.
+        right.grid_rowconfigure(0, weight=56, minsize=275)
+        right.grid_rowconfigure(1, weight=44, minsize=170)
 
         # Upper-right quarter: compact fixed controls, no scrolling.
         # Lower-right quarter remains a full-height SPP terminal.
-        panel = tk.Frame(right, bg=PANEL, padx=8, pady=5)
+        panel = tk.Frame(right, bg=PANEL, padx=6, pady=3)
         panel.grid(row=0, column=0, sticky="nsew")
 
         terminal_panel = tk.Frame(right, bg=PANEL, padx=8, pady=5)
@@ -321,7 +322,7 @@ class App(tk.Tk):
         self.start_btn = tk.Button(control, text="BẮT ĐẦU DÒ LINE",
                                    command=self.start_line, font=("Segoe UI", 9, "bold"),
                                    bg=GREEN, fg="#ffffff", activebackground="#059669",
-                                   relief="flat", height=1, pady=1)
+                                   relief="flat", height=1, pady=0)
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.stop_btn = tk.Button(control, text="DỪNG",
                                   command=self.stop_line, font=("Segoe UI", 9, "bold"),
@@ -333,18 +334,18 @@ class App(tk.Tk):
         self.label(run_timer, "Thời gian xe chạy", bg=PANEL, fg=MUTED,
                    font=("Segoe UI", 9)).pack(side="left")
         self.label(run_timer, textvariable=self.run_timer_var, bg=PANEL, fg=CYAN,
-                   font=("Consolas", 12, "bold")).pack(side="left", padx=8)
-        ttk.Button(run_timer, text="Reset thời gian",
+                   font=("Consolas", 10, "bold")).pack(side="left", padx=5)
+        ttk.Button(run_timer, text="Reset giờ", width=9,
                    command=self.reset_run_timer).pack(side="right")
         self.control_state = tk.StringVar(value="Chưa kết nối / chưa xác định trạng thái")
         self.control_state_label = self.label(panel, textvariable=self.control_state,
                                               bg=PANEL, fg=AMBER, wraplength=430,
                                               font=("Segoe UI", 9),
                                               anchor="w", justify="left")
-        self.control_state_label.pack(fill="x", pady=(0, 1))
+        self.control_state_label.pack(fill="x", pady=0)
         self.adc_status = tk.StringVar(value="ADC: chờ STATUS")
         self.label(panel, textvariable=self.adc_status, bg=PANEL, fg=CYAN,
-                   font=("Consolas", 8)).pack(anchor="w", pady=(0, 2))
+                   font=("Consolas", 8)).pack(anchor="w", pady=(0, 1))
         self.update_control_buttons()
 
         sensor_head = tk.Frame(left, bg=BG)
@@ -384,76 +385,79 @@ class App(tk.Tk):
         self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
                    fg=MUTED).pack(anchor="w")
 
-        # Compact PWM controls: one header with numeric feedback and short rows.
-        pwm_title = tk.Frame(panel, bg=PANEL)
-        pwm_title.pack(fill="x", pady=(2, 0))
-        self.label(pwm_title, "PWM (0–255)", bg=PANEL,
-                   font=("Segoe UI", 9, "bold")).pack(side="left")
+        # Compact one-line PWM and PID controls keep HS buttons visible.
+        pwm_row = tk.Frame(panel, bg=PANEL)
+        pwm_row.pack(fill="x", pady=(1, 0))
+        self.label(pwm_row, "PWM", bg=PANEL,
+                   font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.pwm_var = tk.DoubleVar(value=120)
         self.pwm_text = tk.StringVar(value="120 / 255")
-        self.label(pwm_title, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
-                   font=("Consolas", 9)).pack(side="right")
-        self.pwm_slider = ttk.Scale(panel, from_=0, to=255, variable=self.pwm_var,
-                                    command=self.preview_pwm)
-        self.pwm_slider.pack(fill="x", pady=(0, 1))
+        self.label(pwm_row, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
+                   font=("Consolas", 9), width=9, anchor="e").pack(side="right")
+        self.pwm_slider = ttk.Scale(
+            pwm_row, from_=0, to=255, variable=self.pwm_var,
+            command=self.preview_pwm)
+        self.pwm_slider.pack(side="left", fill="x", expand=True, padx=(4, 6))
         self.pwm_slider.bind("<ButtonRelease-1>", lambda _e: self.apply_pwm())
         self.pwm_slider.bind("<KeyRelease>", lambda _e: self.apply_pwm())
         speed_buttons = tk.Frame(panel, bg=PANEL)
-        speed_buttons.pack(fill="x", pady=(0, 2))
+        speed_buttons.pack(fill="x", pady=(0, 1))
+        self.label(speed_buttons, "Mức PWM:", bg=PANEL, fg=MUTED,
+                   font=("Segoe UI", 8)).pack(side="left", padx=(0, 4))
         for val in (60, 120, 180, 255):
-            ttk.Button(speed_buttons, text=str(val), width=5,
+            ttk.Button(speed_buttons, text=str(val), width=4,
                        command=lambda v=val: self.preset_pwm(v)).pack(
                            side="left", expand=True, padx=1)
 
-        self.label(panel, "Kp / Ki / Kd / Base", bg=PANEL,
-                   font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(1, 1))
-        pid = tk.Frame(panel, bg=PANEL)
-        pid.pack(fill="x")
+        pid_row = tk.Frame(panel, bg=PANEL)
+        pid_row.pack(fill="x", pady=(1, 2))
+        self.label(pid_row, "PID", bg=PANEL,
+                   font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
         self.pid_vars = {}
-        for idx, (key, initial) in enumerate((("Kp", "2.2"), ("Ki", "0"),
-                                             ("Kd", "0"), ("Base", "120"))):
-            self.label(pid, key, bg=PANEL, fg=MUTED,
-                       font=("Segoe UI", 8)).grid(row=0, column=idx, sticky="w")
+        ttk.Button(pid_row, text="Đọc", width=5,
+                   command=lambda: self.send_command("PID")).pack(
+                       side="right", padx=(2, 0))
+        ttk.Button(pid_row, text="Áp dụng", width=7,
+                   command=self.apply_pid).pack(side="right", padx=(2, 0))
+        for key, initial in (("Kp", "2.2"), ("Ki", "0"),
+                             ("Kd", "0"), ("Base", "120")):
+            field = tk.Frame(pid_row, bg=PANEL)
+            field.pack(side="left", padx=(0, 4))
+            self.label(field, key, bg=PANEL, fg=MUTED,
+                       font=("Segoe UI", 8)).pack(side="left", padx=(0, 1))
             var = tk.StringVar(value=initial)
             self.pid_vars[key] = var
-            ttk.Entry(pid, textvariable=var, width=6).grid(
-                row=1, column=idx, padx=(0, 2), sticky="ew")
-            pid.grid_columnconfigure(idx, weight=1)
-        pid_actions = tk.Frame(panel, bg=PANEL)
-        pid_actions.pack(fill="x", pady=(2, 1))
-        ttk.Button(pid_actions, text="Áp dụng PID", command=self.apply_pid).pack(
-            side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(pid_actions, text="Đọc PID", command=lambda: self.send_command("PID")).pack(
-            side="left", fill="x", expand=True)
+            ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # HS_PEAK only changes the first-straight trapezoid; it is not BASE PWM.
-        hs_title = tk.Frame(panel, bg=PANEL)
-        hs_title.pack(fill="x", pady=(2, 0))
-        self.label(hs_title, "HS_PEAK — PWM đỉnh (100–255)", bg=PANEL,
-                   font=("Segoe UI", 9, "bold")).pack(side="left")
-        self.label(hs_title, textvariable=self.hs_peak_value_text,
-                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(side="right")
+        # HS_PEAK changes the first straight only, independently of Base.
+        hs_row = tk.Frame(panel, bg=PANEL)
+        hs_row.pack(fill="x", pady=(1, 0))
+        self.label(hs_row, "HS_PEAK", bg=PANEL,
+                   font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
+        self.label(hs_row, textvariable=self.hs_peak_value_text,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9),
+                   anchor="e").pack(side="right")
         self.hs_peak_slider = ttk.Scale(
-            panel, from_=100, to=255, variable=self.hs_peak_var,
+            hs_row, from_=100, to=255, variable=self.hs_peak_var,
             command=self.preview_hs_peak)
-        self.hs_peak_slider.pack(fill="x", pady=(0, 1))
+        self.hs_peak_slider.pack(side="left", fill="x", expand=True, padx=(4, 6))
         hs_actions = tk.Frame(panel, bg=PANEL)
         hs_actions.pack(fill="x", pady=(0, 1))
         self.hs_peak_widgets = [self.hs_peak_slider]
         for val in (180, 220, 255):
-            button = ttk.Button(hs_actions, text=str(val), width=5,
+            button = ttk.Button(hs_actions, text=str(val), width=4,
                                 command=lambda v=val: self.preset_hs_peak(v))
             button.pack(side="left", expand=True, padx=1)
             self.hs_peak_widgets.append(button)
         self.hs_peak_apply_btn = ttk.Button(
-            hs_actions, text="Áp dụng HS", command=self.apply_hs_peak)
-        self.hs_peak_apply_btn.pack(side="left", expand=True, padx=2)
+            hs_actions, text="Áp dụng HS", width=10, command=self.apply_hs_peak)
+        self.hs_peak_apply_btn.pack(side="left", expand=True, padx=1)
         self.hs_peak_read_btn = ttk.Button(
-            hs_actions, text="Đọc HS", command=self.read_hs_peak)
+            hs_actions, text="Đọc HS", width=7, command=self.read_hs_peak)
         self.hs_peak_read_btn.pack(side="left", expand=True, padx=1)
         self.label(panel, textvariable=self.hs_peak_feedback,
-                   bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(
-                       anchor="w", pady=(0, 1))
+                   bg=PANEL, fg=MUTED, font=("Segoe UI", 8),
+                   anchor="w").pack(fill="x", pady=(0, 1))
 
         terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
