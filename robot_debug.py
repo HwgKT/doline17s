@@ -214,6 +214,7 @@ class App(tk.Tk):
         self.run_started_at = None
         self.run_timer_var = tk.StringVar(value="00:00:00")
         self._build()
+        self.update_control_buttons()  # Includes HS widgets created after START/STOP.
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind_all("<Escape>", lambda _event: self.stop_line())
@@ -642,6 +643,12 @@ class App(tk.Tk):
             self.log(str(exc))
             return
         self.reader.start()
+        self.hs_peak_confirmed = None
+        self.hs_peak_pending = None
+        self.hs_peak_pending_at = None
+        self.hs_peak_dirty = False
+        self.hs_peak_value_text.set("— / 255")
+        self.hs_peak_feedback.set("Đang đọc HS_PEAK từ ESP32...")
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
@@ -670,6 +677,8 @@ class App(tk.Tk):
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
+        self.send_command("HS_PEAK")
+        self.send_command("PID")
         self.send_command("STREAM:" + self.stream_rate.get())
 
     def request_diagnostics(self):
@@ -684,6 +693,10 @@ class App(tk.Tk):
             if self.run_csv.active is not None:
                 self.finish_run_csv("MẤT KẾT NỐI; CHƯA XÁC NHẬN DỪNG")
             self.reader = None
+        self.hs_peak_confirmed = None
+        self.hs_peak_pending = None
+        self.hs_peak_pending_at = None
+        self.hs_peak_feedback.set("Chưa kết nối ESP32 — HS chưa xác nhận")
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
         self.estop_latched = None
@@ -756,6 +769,13 @@ class App(tk.Tk):
         if self.hs_peak_pending is not None:
             self.log("Chờ ESP32 xác nhận HS_PEAK trước khi đọc lại.")
             return False
+        if self.reader is None or not self.reader.is_alive():
+            self.log("Chưa kết nối ESP32 để đọc HS_PEAK.")
+            return False
+        self.hs_peak_dirty = False
+        self.hs_peak_confirmed = None
+        self.hs_peak_feedback.set("Đang đọc lại HS_PEAK từ firmware...")
+        self.update_control_buttons()
         return self.send_command("HS_PEAK")
 
     def apply_hs_peak(self):
@@ -838,6 +858,9 @@ class App(tk.Tk):
         can_start = (connected and self.estop_latched is False
                      and not self.estop_pending and not self.start_pending
                      and not self.auto_running and self.run_csv.active is None
+                     and self.hs_peak_pending is None
+                     and self.hs_peak_confirmed is not None
+                     and not self.hs_peak_dirty
                      and self.calibration_ok and self.selected_map is not None
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
@@ -901,6 +924,10 @@ class App(tk.Tk):
     def start_line(self):
         if self.selected_map is None:
             self.log("Hãy chọn MAP 1, MAP 2 hoặc MAP 3 trước khi START.")
+            return
+        if (self.hs_peak_confirmed is None or self.hs_peak_pending is not None
+                or self.hs_peak_dirty):
+            self.log("Chưa xác nhận HS_PEAK: chọn Áp dụng HS hoặc Đọc HS trước START.")
             return
         if self.estop_latched is not False or self.auto_running or self.start_pending:
             self.log("Chưa thể START: AUTO đang chạy hoặc firmware bị khóa.")
