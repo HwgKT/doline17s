@@ -751,9 +751,12 @@ class App(tk.Tk):
         value = max(100, min(255, round(self.hs_peak_var.get())))
         self.hs_peak_dirty = True
         self.hs_peak_value_text.set(f"{value} (chưa áp dụng)")
+        self.hs_peak_feedback.set("Nhấn Áp dụng HS để gửi ESP32, hoặc Đọc HS để hủy chọn.")
+        if hasattr(self, "hs_peak_widgets"):
+            self.update_control_buttons()
 
     def preset_hs_peak(self, value):
-        if not self._can_edit_hs_peak():
+        if not self._can_edit_hs_peak() or self.hs_peak_pending is not None:
             return
         self.hs_peak_var.set(value)
         self.preview_hs_peak()
