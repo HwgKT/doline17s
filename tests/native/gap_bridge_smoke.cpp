@@ -91,6 +91,9 @@ int main(void) {
         thresholds[i] = 1400;
     }
     pid_init(1.6f, 0.0f, 0.8f, 120);
+    assert(pid_get_kp() == 1.6f);
+    assert(pid_get_ki() == 0.0f);
+    assert(pid_get_kd() == 0.8f);
     assert(!pid_select_map(0));
     assert(!pid_select_map(4));
 
@@ -263,6 +266,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: 3 MAP GAP windows, common 300/1800/2300 PWM brake to 110, stable right-corner HOLD release, adjustable peak");
+    puts("PASS: 3 MAP GAP windows, common 300/1800/2300 PWM brake to 110, immediate encoder+center HOLD release, adjustable peak");
     return 0;
 }
