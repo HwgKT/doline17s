@@ -10,8 +10,9 @@ An experimental **PWM command envelope**, not a physical speed controller. The s
 | --- | --- |
 | 0 | current `BASE` |
 | 0–300 | linear ramp `BASE → HS_PEAK` |
-| 300–1800 | hold `HS_PEAK` |
-| 1800–2300 | linear brake `HS_PEAK → min(110, BASE)` |
+| 300–BRAKE_START | hold `HS_PEAK` |
+| **1600–2300 when HS_PEAK=230–255** | linear early brake `HS_PEAK → min(110, BASE)` |
+| **1800–2300 when HS_PEAK=100–229** | standard brake `HS_PEAK → min(110, BASE)` |
 | >=2300 | `HOLD`: maintain forward target `min(110, BASE)` through first right turn |
 | current encoder >=3100 **and** valid line position within ±15 of center | `COMPLETE`: return to original PID speed governor with `BASE` |
 
@@ -21,7 +22,7 @@ Default gains on firmware and in the app: `Kp=1.6`, `Ki=0.0`, `Kd=0.8`. The PID'
 
 `runEnc = ((encL-encL0)+(encR-encR0))/2`, with origin taken at `AUTO`. No global encoder reset. An internal monotonic progress high-water mark prevents the acceleration ramp from restarting if wheels temporarily reverse. After an unexpected SEARCH before the brake end, the high-speed profile is marked `ABORTED` for the remainder of that AUTO run.
 
-**The 1800/2300/3100 ticks and hold PWM 110 is an experimental setting.** Their braking performance has NOT been validated on hardware. Test with wheels lifted and physical clearance; use `HS_PEAK:180` first, then 220, then 255 only after successful runs. The finish line still requires all 16 sensors black for three consecutive controller samples.
+**The 1600 (for peaks >=230), 1800 (for peaks <230), 2300, and 3100 encoder ticks and HOLD PWM 110 are experimental settings.** Their braking performance has NOT been validated on hardware. Test with wheels lifted and physical clearance; use `HS_PEAK:180` first, then 220, then 255 only after successful runs. The finish line still requires all 16 sensors black for three consecutive controller samples.
 
 ## 2. Three track-specific dashed-line modes
 
@@ -31,7 +32,7 @@ Default gains on firmware and in the app: `Kp=1.6`, `Ki=0.0`, `Kd=0.8`. The PID'
 | 2 | 1050–1750 | 100ms |
 | 3 | 1000–1700 | 100ms |
 
-All three MAP modes share the same ramp, brake at 1800–2300, and corner HOLD at PWM 110. MAP only changes the GAP detection window and log destination. Any timeout at 100ms still white enters existing `SEARCH` at ±85 PWM. Outside GAP windows, original 30ms DASHED_LINE / startup-coast / SEARCH logic applies.
+All three MAP modes share the same peak-dependent brake: 1600–2300 for HS_PEAK >=230 and 1800–2300 for HS_PEAK <230; both hold at PWM 110 after 2300. MAP only changes the GAP detection window and log destination. Any timeout at 100ms still white enters existing `SEARCH` at ±85 PWM. Outside GAP windows, original 30ms DASHED_LINE / startup-coast / SEARCH logic applies.
 
 ## 3. Python app — selecting map, testing and saving logs
 
@@ -40,7 +41,7 @@ Environment: Windows; ESP32 Classic SPP connected through the outgoing COM port,
 1. From a checkout of `mainHighSpeed`, start `python robot_debug.py`.
 2. Scan/select Bluetooth Classic SPP's **outgoing COM** port, press **Kết nối**; verify status and CAL profile (`CAL_DUMP` contains 16 valid eye thresholds). Calibrate WHITE then BLACK if required.
 3. Before START, set Base PWM to 120 (optional) in the PID controls and press **Áp dụng PID**, or send `BASE:120` in Terminal and then `PID` to read back settings. Keep Kp/Ki/Kd unchanged unless conducting a separate controlled experiment.
-4. Use the new **HS_PEAK — PWM đỉnh (100–255)** slider next to the PID controls. Select the desired value directly or click preset **180**, **220**, **255**; then click **Áp dụng HS**. The app sends `HS_PEAK:n` once and waits for the firmware readback, e.g. `HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100`. **Đọc HS** sends `HS_PEAK` and refreshes the slider from the firmware. The app auto-reads this value when connecting; the START button stays disabled until HS has been read and any unsaved slider changes have been applied or discarded with **Đọc HS**. Changing HS is disabled while AUTO is running and while a STOP acknowledgement is pending. Terminal commands `HS_PEAK:180`, `HS_PEAK:220`, `HS_PEAK:255` remain available for diagnostic use. The firmware rejects a HS peak lower than the current BASE and rejects BASE settings above HS peak (`ERR: BASE_GT_HS_PEAK`).
+4. Use the new **HS_PEAK — PWM đỉnh (100–255)** slider next to the PID controls. Select the desired value directly or click preset **180**, **220**, **255**; then click **Áp dụng HS**. The app sends `HS_PEAK:n` once and waits for the firmware readback, e.g. `HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100`. **Đọc HS** sends `HS_PEAK` and refreshes the slider from the firmware. The app auto-reads this value when connecting; the START button stays disabled until HS has been read and any unsaved slider changes have been applied or discarded with **Đọc HS**. Changing HS is disabled while AUTO is running and while a STOP acknowledgement is pending. Terminal commands `HS_PEAK:180`, `HS_PEAK:220`, `HS_PEAK:255` remain available for diagnostic use. The firmware reports the actual `BRAKE_START` for every readback and `brake=` in every HS_STAGE event, rather than showing a fixed 1800. It rejects a HS peak lower than the current BASE and rejects BASE settings above HS peak (`ERR: BASE_GT_HS_PEAK`).
 5. Click exactly one of the three **MAP 1**, **MAP 2**, **MAP 3** buttons. MAP changes are disabled during a run; START requires MAP selection.
 6. Put the robot in the same START position for each attempt. Click **BẮT ĐẦU DÒ LINE**. The app creates a CSV+TXT in the selected map folder **before** transmitting `AUTO:1`, `AUTO:2`, or `AUTO:3` to ESP32.
 7. Observe `HS: RAMP/CRUISE/BRAKE/HOLD/COMPLETE/ABORTED`, the relative encoder from periodic DIAG, wheel PWM, black/white line signals and SPP receive frequency. Stop manually via **DỪNG** if needed. Do not treat absence of STOP acknowledgment as proof the motors are off; use E-STOP / physical safety procedure.
@@ -85,3 +86,6 @@ These commands are provided for independent validation; no successful build or h
 Keep the same MAP, surface, battery state, calibration and PID parameters across tests. Collect at least three runs per peak setting. Start with `HS_PEAK:180`, then 220, then 255.
 
 Review encoder speed near runEnc=2300/2550/2600, time to `HS_STAGE HOLD` and `COMPLETE`, duration spent in GAP, confirmed right-corner re-acquisition, unexpected SEARCH, negative PWM/reverse steering, maximum line error, and physical 90-degree corner success. Reject any peak that repeatedly overshoots the first turn; `HS_STAGE HOLD` is not physical proof of deceleration. The earliest large-error region in historical logs is around 2530–2580 ticks; a SEARCH pivot usually begins around 2600–2640 ticks.
+
+**MAP 1 caveat:** its GAP window (1500–2100) overlaps the early BRAKE. While `GAP_BRIDGE` is active, the firmware holds the last forward PWM; the requested linear ramp resumes after line reacquisition. Starting BRAKE earlier does not guarantee immediate mechanical deceleration during white gaps.
+
