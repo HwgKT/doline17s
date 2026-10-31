@@ -1074,12 +1074,41 @@ class App(tk.Tk):
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
                 self.update_control_buttons()
         elif message.startswith("HS_PEAK: PWM="):
-            peak = re.search(r"\bPWM=(\d+)\b", message)
-            if peak:
-                self.high_speed_peak = int(peak.group(1))
-                self.high_speed_status.set(
-                    f"HS: READY | PEAK={self.high_speed_peak} | BRAKE=2050 -> 2450"
-                )
+            peak_match = re.search(r"\bPWM=(\d+)\b", message)
+            if peak_match:
+                confirmed = int(peak_match.group(1))
+                if 100 <= confirmed <= 255:
+                    self.high_speed_peak = confirmed
+                    self.hs_peak_confirmed = confirmed
+                    expected = self.hs_peak_pending
+                    if expected is None or expected == confirmed:
+                        self.hs_peak_pending = None
+                        self.hs_peak_pending_at = None
+                        # Explicit firmware readbacks supersede local edits
+                        # only when the user clicked Read or Apply.
+                        if expected is not None or not self.hs_peak_dirty:
+                            self.hs_peak_var.set(confirmed)
+                            self.hs_peak_dirty = False
+                            self.hs_peak_value_text.set(f"{confirmed} / 255")
+                        self.hs_peak_feedback.set(
+                            f"ESP32 xác nhận HS_PEAK = {confirmed} PWM")
+                    else:
+                        self.hs_peak_feedback.set(
+                            f"ESP32 báo {confirmed}; chờ xác nhận PWM {expected}")
+                    self.high_speed_status.set(
+                        f"HS: READY | PEAK={confirmed} | BRAKE=2050 -> 2450")
+                    self.update_control_buttons()
+        elif message.startswith("ERR: HS_PEAK_"):
+            if self.hs_peak_pending is not None:
+                self.hs_peak_pending = None
+                self.hs_peak_pending_at = None
+                self.hs_peak_feedback.set(f"ESP32 từ chối: {message}")
+                self.update_control_buttons()
+                self.send_command("HS_PEAK")
+        elif message == "ERR: BASE_GT_HS_PEAK":
+            self.hs_peak_feedback.set(
+                "BASE vượt HS_PEAK; tăng HS_PEAK trước khi đổi BASE")
+            self.send_command("PID")
         elif message.startswith("HS_STAGE "):
             peak = re.search(r"\bpeak=(\d+)\b", message)
             if peak:
@@ -1094,7 +1123,15 @@ class App(tk.Tk):
         elif message.startswith("DIAG:"):
             peak = re.search(r"\bpeak=(\d+)\b", message)
             if peak:
-                self.high_speed_peak = int(peak.group(1))
+                value = int(peak.group(1))
+                if 100 <= value <= 255:
+                    self.high_speed_peak = value
+                    # DIAG is telemetry, not an ACK for a pending HS write.
+                    if self.hs_peak_pending is None:
+                        self.hs_peak_confirmed = value
+                        if not self.hs_peak_dirty:
+                            self.hs_peak_var.set(value)
+                            self.hs_peak_value_text.set(f"{value} / 255")
             hs = re.search(r"\bhs=(\d+)\b", message)
             tick = re.search(r"\brunEnc=(-?\d+)\b", message)
             if hs:
