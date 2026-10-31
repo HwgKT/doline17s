@@ -767,6 +767,7 @@ void pid_line_follow_step(void) {
 
 LineCase_t pid_get_current_case(void) { return currentCase; }
 bool pid_line_is_confirmed(void) { return lineLocked; }
+bool pid_finish_line_latched(void) { return finishLineLatched; }
 uint32_t pid_get_confirmed_line_loss_count(void) { return confirmedLosses; }
 uint32_t pid_get_line_reacquisition_count(void) { return reacquisitions; }
 
