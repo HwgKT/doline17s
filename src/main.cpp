@@ -200,7 +200,10 @@ void command(const String &raw) {
     command("MAP");return;
   }
   if(s=="S"||s=="STOP"||s=="M"||s=="MANUAL"){
-    safeStop();adcBenchCancel();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
+    safeStop();adcBenchCancel();
+    // Prioritize the stop acknowledgment over stale 100-Hz telemetry.
+    btDropPendingTelemetry();
+    reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
   }
   if(s=="A"||s=="AUTO"||s=="START"||s.startsWith("AUTO:")){
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
@@ -395,6 +398,8 @@ void loop() {
       const uint8_t stopMap=pid_get_selected_map();
       const int32_t stopEnc=pid_get_run_encoder_progress();
       safeStop();
+      // Drop queued pre-stop telemetry before announcing terminal state.
+      btDropPendingTelemetry();
       char stopEvent[128];
       snprintf(stopEvent,sizeof(stopEvent),
         "%s map=%u runEnc=%ld t_ms=%lu",
