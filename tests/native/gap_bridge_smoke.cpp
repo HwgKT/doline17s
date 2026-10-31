@@ -68,7 +68,7 @@ static void setWhite(void) {
 }
 static void beginMap(uint8_t map, int32_t origin) {
     pid_set_auto_mode(false);
-    pid_init(2.0f, 0.0f, 0.0f, 120);
+    pid_init(1.6f, 0.0f, 0.8f, 120);
     simLeft = origin;
     simRight = origin + 700;
     assert(pid_select_map(map));
@@ -90,7 +90,7 @@ int main(void) {
         maxValues[i] = 2000;
         thresholds[i] = 1400;
     }
-    pid_init(2.0f, 0.0f, 0.0f, 120);
+    pid_init(1.6f, 0.0f, 0.8f, 120);
     assert(!pid_select_map(0));
     assert(!pid_select_map(4));
 
@@ -150,7 +150,7 @@ int main(void) {
     setLine(); stepMs(2);
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
 
-    // All MAPs share first-straight brake 1800->2300, then HOLD PWM 90.
+    // All MAPs share first-straight brake 1800->2300, then HOLD PWM 110.
     // Finishing the ramp must NOT return to BASE at encoder 2300.
     for (uint8_t map = 1; map <= 3; ++map) {
         const int32_t origin = 210000 + int32_t(map) * 10000;
@@ -169,52 +169,44 @@ int main(void) {
         assert(pwmL == 220 && pwmR == 220);
         advanceTo(2050, origin);
         stepMs(2);
-        assert(pwmL == 155 && pwmL == pwmR);
+        assert(pwmL == 165 && pwmL == pwmR);
         advanceTo(2250, origin);
         stepMs(2);
-        assert(pwmL == 103 && pwmL == pwmR);
+        assert(pwmL == 121 && pwmL == pwmR);
         advanceTo(2300, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6); // HOLD
-        assert(pwmL == 90 && pwmR == 90);
+        assert(pwmL == 110 && pwmR == 110);
         advanceTo(2500, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6);
-        assert(pwmL == 90 && pwmR == 90);
-        advanceTo(3100, origin);
-        stepMs(100);
-        assert(pid_get_high_speed_stage() == 6); // never release without corner
-        assert(pwmL == 90 && pwmR == 90);
-        // Encoder high-water mark must prevent a ramp restart.
-        advanceTo(1900, origin);
-        stepMs(2);
-        assert(pid_get_high_speed_stage() == 6);
-        assert(pwmL == 90 && pwmR == 90);
+        assert(pwmL == 110 && pwmR == 110);
 
-        // Real right-hand edge, then stable centered line after the turn.
-        advanceTo(2600, origin);
-        setWhite();
-        sensorRaw[15] = 2000;
-        stepMs(2);
-        assert(pid_get_high_speed_stage() == 6);
-        // The moment the sensor recenters, TURN_RIGHT still persists for
-        // two controller frames. Forward target must remain at 90, not BASE.
+        // Encoder threshold alone must not release when no line is visible.
+        advanceTo(3099, origin);
         setLine();
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6);
-        assert(pwmL == 90 && pwmR == 90);
-        stepMs(100); // centered too early at 2600: HOLD must remain
-        assert(pid_get_high_speed_stage() == 6);
         advanceTo(3100, origin);
-        stepMs(20);
+        setWhite();
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 6); // position defaults to zero, but no valid line
+        assert(pwmL == 110 && pwmR == 110);
+
+        // A visible off-center line is insufficient; a centered line releases
+        // on the very first PID sample (no 30-frame dwell / corner flag).
+        for (int i = 0; i < N_SENSORS; ++i) sensorRaw[i] = 1000;
+        sensorRaw[10] = 2000;
+        stepMs(2);
         assert(pid_get_high_speed_stage() == 6);
-        stepMs(60);
-        assert(pid_get_high_speed_stage() == 4); // COMPLETE after 30 frames
-        assert(pwmL == 120 && pwmR == 120);
-        advanceTo(1900, origin);
+        setLine();
         stepMs(2);
         assert(pid_get_high_speed_stage() == 4);
         assert(pwmL == 120 && pwmR == 120);
+        // Completion is sticky; encoder reversal cannot restart the profile.
+        advanceTo(1900, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 4);
     }
 
     // MAP 1 has a later dashed segment (~1985-2058) inside BRAKE.
@@ -224,7 +216,7 @@ int main(void) {
     stepMs(2);
     assert(pid_get_high_speed_stage() == 3); // BRAKE
     const int16_t gapBrakePwm = pwmL;
-    assert(gapBrakePwm > 90 && gapBrakePwm < 220);
+    assert(gapBrakePwm > 110 && gapBrakePwm < 220);
     setWhite();
     stepMs(60);
     assert(pid_get_current_case() == LINE_CASE_GAP_BRIDGE);
@@ -235,7 +227,7 @@ int main(void) {
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
     assert(pid_get_high_speed_stage() == 3);
 
-    // Peak is configurable only while stopped. Low peaks still brake to 90.
+    // Peak is configurable only while stopped. Low peaks still brake to 110.
     pid_set_auto_mode(false);
     assert(pid_set_high_speed_peak(180));
     assert(pid_get_high_speed_peak() == 180);
@@ -255,11 +247,11 @@ int main(void) {
     assert(pwmL==180 && pwmR==180);
     simLeft+=250; simRight+=250; // 2050
     stepMs(2);
-    assert(pwmL==135 && pwmR==135);
+    assert(pwmL==145 && pwmR==145);
     simLeft+=250; simRight+=250; // 2300
     stepMs(2);
     assert(pid_get_high_speed_stage()==6);
-    assert(pwmL==90 && pwmR==90);
+    assert(pwmL==110 && pwmR==110);
 
     // Out of the MAP 1 window: preserve the existing 30ms + startup coast.
     beginMap(1, 150000);
@@ -271,6 +263,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: 3 MAP GAP windows, common 300/1800/2300 PWM brake to 90, stable right-corner HOLD release, adjustable peak");
+    puts("PASS: 3 MAP GAP windows, common 300/1800/2300 PWM brake to 110, stable right-corner HOLD release, adjustable peak");
     return 0;
 }
