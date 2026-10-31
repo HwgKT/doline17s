@@ -11,7 +11,8 @@ An experimental **PWM command envelope**, not a physical speed controller. The s
 | 0 | current `BASE` |
 | 0–300 | linear ramp `BASE → HS_PEAK` |
 | 300–BRAKE_START | hold `HS_PEAK` |
-| **1600–2300 when HS_PEAK=230–255** | linear early brake `HS_PEAK → min(110, HS_PEAK)` |
+| **1400–2300 when HS_PEAK=240–255** | linear very-early brake `HS_PEAK → min(110, HS_PEAK)` |
+| **1600–2300 when HS_PEAK=230–239** | linear early brake `HS_PEAK → min(110, HS_PEAK)` |
 | **1800–2300 when HS_PEAK=100–229** | standard brake `HS_PEAK → min(110, HS_PEAK)` |
 | >=2300 | `HOLD`: maintain forward target `min(110, HS_PEAK)` through first right turn |
 | current encoder >=3100 **and** valid line position within ±15 of center | `COMPLETE`: return to original PID speed governor with `BASE` |
@@ -24,7 +25,7 @@ Default gains on firmware and in the app: `Kp=1.6`, `Ki=0.0`, `Kd=0.8`. The PID'
 
 `runEnc = ((encL-encL0)+(encR-encR0))/2`, with origin taken at `AUTO`. No global encoder reset. An internal monotonic progress high-water mark prevents the acceleration ramp from restarting if wheels temporarily reverse. After an unexpected SEARCH before the brake end, the high-speed profile is marked `ABORTED` for the remainder of that AUTO run.
 
-**The 1600 (for peaks >=230), 1800 (for peaks <230), 2300, and 3100 encoder ticks and HOLD PWM 110 are experimental settings.** Their braking performance has NOT been validated on hardware. Test with wheels lifted and physical clearance; use `HS_PEAK:180` first, then 220, then 255 only after successful runs. The finish line still requires all 16 sensors black for three consecutive controller samples.
+**The 1400 (peaks 240–255), 1600 (peaks 230–239), 1800 (peaks 100–229), 2300, and 3100 encoder ticks and HOLD PWM 110 are experimental settings.** Their braking performance has NOT been validated on hardware. Test with wheels lifted and physical clearance; use `HS_PEAK:180` first, then 220, then 255 only after successful runs. The finish line still requires all 16 sensors black for three consecutive controller samples.
 
 ## 2. Three track-specific dashed-line modes
 
@@ -34,7 +35,7 @@ Default gains on firmware and in the app: `Kp=1.6`, `Ki=0.0`, `Kd=0.8`. The PID'
 | 2 | 1050–1750 | 100ms |
 | 3 | 1000–1700 | 100ms |
 
-All three MAP modes share the same peak-dependent brake: 1600–2300 for HS_PEAK >=230 and 1800–2300 for HS_PEAK <230; both hold at PWM 110 after 2300. MAP only changes the GAP detection window and log destination. Any timeout at 100ms still white enters existing `SEARCH` at ±85 PWM. Outside GAP windows, original 30ms DASHED_LINE / startup-coast / SEARCH logic applies.
+All three MAP modes share the same peak-dependent brake: 1400–2300 for HS_PEAK 240–255, 1600–2300 for 230–239, and 1800–2300 for 100–229; all hold at PWM 110 after 2300. MAP only changes the GAP detection window and log destination. Any timeout at 100ms still white enters existing `SEARCH` at ±85 PWM. Outside GAP windows, original 30ms DASHED_LINE / startup-coast / SEARCH logic applies.
 
 ## 3. Python app — selecting map, testing and saving logs
 
@@ -96,6 +97,6 @@ Review encoder speed near runEnc=2300/2550/2600, time to `HS_STAGE HOLD` and `CO
 
 On this branch GPIO34 is the sole physical START button (not CALIB). GPIO35 is unused. ESP32 GPIO34 is input-only and **has no internal pull-up or pull-down**: use a 10-kΩ external pullup from GPIO34 to 3.3 V and a momentary button from GPIO34 to GND (active LOW). Never apply 5 V. Debounce is 50 ms with one falling-edge event per press; holding the button or bouncing it does not retrigger AUTO. A button already held during power-up must be released and pressed again.
 
-The button calls the same firmware AUTO handler as SPP, so calibration, E-STOP, ADC, and running-state guards remain in force. The firmware defaults to MAP 1 after boot for standalone operation. For MAP 2/3, connect the Python app and select MAP 2/3 **before** pressing GPIO34; selection sends MAP:2 / MAP:3 to the ESP32. The physical button does **not** recalibrate the sensors. Calibration remains available through CAL_WHITE and CAL_BLACK commands in the app.
+GPIO34 START allows line placement on **any of the six central sensors S5–S10 (zero-based)**: one or two black sensors in this region are sufficient, and all six are not required. A full 16/16 black reading is refused at button START because it would instantly trigger finish detection; recheck CAL_DUMP/white-black calibration if this happens. This central-window check applies to the physical GPIO34 button only, not the normal PID line-following logic or the SPP AUTO command. The button calls the same firmware AUTO handler as SPP after the position check, so calibration, E-STOP, ADC, and running-state guards remain in force. The firmware defaults to MAP 1 after boot for standalone operation. For MAP 2/3, connect the Python app and select MAP 2/3 **before** pressing GPIO34; selection sends MAP:2 / MAP:3 to the ESP32. The physical button does **not** recalibrate the sensors. Calibration remains available through CAL_WHITE and CAL_BLACK commands in the app.
 
 While connected, the app sees the button's MODE: AUTO PID and RUN_ORIGIN map=N responses and opens map-specific CSV/TXT automatically if no run log was already created by the app. A physical START without SPP can still run with NVS calibration but cannot produce PC-side CSV/TXT; a connected app should first finish reading CAL_DUMP so it has all 16 calibrated thresholds for the log. A run started from the physical button cannot be started twice while AUTO is active; STOP remains an independent app/SPP command.
