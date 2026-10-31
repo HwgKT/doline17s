@@ -1,7 +1,7 @@
 #ifndef PINOUT_H
 #define PINOUT_H
 
-// Line sensor CD74HC4067 and physical START button (current wiring).
+// Line sensor CD74HC4067 and GPIO34 WHITE/BLACK/START button.
 #define PIN_LINE_SIG       36
 #define PIN_MUX_S0         17
 #define PIN_MUX_S1         18
