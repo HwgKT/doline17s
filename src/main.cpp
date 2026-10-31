@@ -337,8 +337,27 @@ void loop() {
   }
   if(pid_is_auto_mode()&&!sensor_is_calibrating()){
     stageStartUs=micros();
+    const LineCase_t oldCase=pid_get_current_case();
     pid_line_follow_step();++pidCount;
     perfRecord(PERF_PID, micros()-stageStartUs);
+    const LineCase_t newCase=pid_get_current_case();
+    // Only log transitions, never print from the high-frequency PID controller.
+    // The Python app already mirrors text replies into the MAP-specific TXT.
+    if(oldCase!=newCase &&
+       (oldCase==LINE_CASE_GAP_BRIDGE || newCase==LINE_CASE_GAP_BRIDGE)){
+      const bool entered=newCase==LINE_CASE_GAP_BRIDGE;
+      const char* event=entered ? "GAP_START" :
+        (newCase==LINE_CASE_SHARP_LEFT || newCase==LINE_CASE_SHARP_RIGHT
+            ? "GAP_TIMEOUT_SEARCH" : "GAP_RECOVERED");
+      char b[150];
+      snprintf(b,sizeof(b),
+        "%s map=%u runEnc=%ld pwmL=%d pwmR=%d t_ms=%lu",
+        event,(unsigned)pid_get_selected_map(),
+        (long)pid_get_run_encoder_progress(),
+        motor_get_left_speed(),motor_get_right_speed(),
+        (unsigned long)millis());
+      reply(b);
+    }
   }
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
