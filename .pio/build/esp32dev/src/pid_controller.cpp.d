@@ -1,6 +1,6 @@
 .pio/build/esp32dev/src/pid_controller.cpp.o: src/pid_controller.cpp \
- include/pid_controller.h include/sensor.h include/pinout.h \
- include/motor.h \
+ include/pid_controller.h include/encoder.h include/sensor.h \
+ include/pinout.h include/motor.h \
  C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/cores/esp32/Arduino.h \
  C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/cores/esp32/esp_arduino_version.h \
  C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/tools/sdk/esp32/include/freertos/include/freertos/FreeRTOS.h \
