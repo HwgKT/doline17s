@@ -69,7 +69,7 @@ g++ -std=c++17 -Wall -Wextra -Itests/native -Iinclude src/pid_controller.cpp tes
 
 Headless Python command/response tests (requires pyserial):
 ```sh
-python -m unittest tests.test_hs_peak_app
+python -m unittest discover -s tests -p test_hs_peak_app.py
 ```
 
 ESP32 build:
