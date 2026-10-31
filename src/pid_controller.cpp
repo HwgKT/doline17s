@@ -55,8 +55,20 @@ constexpr float TURN_CURVE_END_POSITION = 75.0f;
 constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
 constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
-constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
+// Ported from ECcodedoline with a sharper-corner safety envelope.
+constexpr float EC_CORNER_DRAG_PER_ERROR = 0.55f;
+constexpr float EC_HARD_CORNER_START_ERROR = 10.0f;
+constexpr float EC_HARD_CORNER_FULL_ERROR = 35.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
+constexpr float EC_STRAIGHT_CENTER_ERROR = 6.0f;
+constexpr uint32_t EC_STRAIGHT_STABLE_MS = 140;
+constexpr uint32_t EC_STRAIGHT_BOOST_RAMP_MS = 120;
+constexpr float EC_STRAIGHT_BOOST_PWM = 20.0f;
+constexpr float EC_STRAIGHT_BOOST_LIMIT = 215.0f;
+constexpr float EC_P_GAIN_ERROR_SLOPE = 0.012f;
+constexpr float EC_D_FILTER_ALPHA = 0.20f;
+constexpr float EC_D_MAX_BASE_FRACTION = 0.55f;
+constexpr float EC_D_MAX_ABSOLUTE = 120.0f;
 constexpr float PID_CORRECTION_BASE_MULTIPLIER = 2.0f;
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
@@ -95,6 +107,7 @@ bool acquiring = false, missing = false;
 uint32_t acquireSinceMs = 0, missingSinceMs = 0;
 uint32_t confirmedLosses = 0, reacquisitions = 0;
 float governedForwardSpeed = 0.0f;
+uint32_t ecCenteredSinceMs = 0;
 
 static int16_t clampPwm(float value) {
     if (value <= 0.0f) return 0;
@@ -153,16 +166,41 @@ static void limitMotorCommandPeak(float& left, float& right, float limit) {
         right *= scale;
     }
 }
-static float updateForwardSpeed(float absErr) {
-    const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-    float targetSpeed = (float)pidConfig.baseSpeed *
-        (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
-    const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-        ? pidConfig.baseSpeed : 45);
-    if (targetSpeed < minimumSpeed) targetSpeed = minimumSpeed;
-    if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
-    governedForwardSpeed = targetSpeed;
-    return governedForwardSpeed;
+static float updateForwardSpeed(float absErr, uint16_t mask, bool settling) {
+    const uint32_t now = millis();
+    const uint8_t black = bitCount16(mask);
+    const bool centered = !settling && absErr <= EC_STRAIGHT_CENTER_ERROR &&
+        black > 0 && black <= 4 && (mask & TURN_CENTER_SENSOR_MASK) != 0 &&
+        isSingleContiguousRun(mask) && turnState == TURN_NONE &&
+        !recoverySessionActive;
+    if (!centered) ecCenteredSinceMs = 0;
+    else if (ecCenteredSinceMs == 0) ecCenteredSinceMs = now;
+
+    float nominal = (float)pidConfig.baseSpeed;
+    if (centered && (uint32_t)(now - ecCenteredSinceMs) >= EC_STRAIGHT_STABLE_MS) {
+        const float elapsed = (float)((uint32_t)(now - ecCenteredSinceMs) -
+            EC_STRAIGHT_STABLE_MS);
+        const float progress = fminf(elapsed / EC_STRAIGHT_BOOST_RAMP_MS, 1.0f);
+        const float ceiling = fminf((float)pidConfig.maxSpeed,
+            fmaxf(nominal, EC_STRAIGHT_BOOST_LIMIT));
+        nominal += (fminf(ceiling, nominal + EC_STRAIGHT_BOOST_PWM) -
+                    nominal) * progress;
+    }
+
+    // ECcodedoline's proportional corner drag.
+    const float sampleCornerSpeed = nominal - EC_CORNER_DRAG_PER_ERROR * absErr;
+    // Protect high-error turns; do not use the sample's aggressive speed blindly.
+    const float severeRatio = fminf(fmaxf(
+        (absErr - EC_HARD_CORNER_START_ERROR) /
+        (EC_HARD_CORNER_FULL_ERROR - EC_HARD_CORNER_START_ERROR), 0.0f), 1.0f);
+    const float guardedCornerSpeed =
+        nominal * (1.0f - SPEED_GOVERNOR_REDUCTION * severeRatio);
+    float speed = fminf(sampleCornerSpeed, guardedCornerSpeed);
+    const float minimum = fminf(nominal, 45.0f);
+    if (speed < minimum) speed = minimum;
+    if (speed > pidConfig.maxSpeed) speed = pidConfig.maxSpeed;
+    governedForwardSpeed = speed;
+    return speed;
 }
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
@@ -196,6 +234,7 @@ static void resetLineTracking() {
     fullLineFrames = 0;
     lastDashedCorrection = 0;
     governedForwardSpeed = 0.0f;
+    ecCenteredSinceMs = 0;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -538,8 +577,10 @@ void pid_line_follow_step(void) {
     const bool dtValid = measuredDt > 0 && measuredDt <= 0.1f;
     const float dt = dtValid ? measuredDt : 0.01f;
     lastComputeTimeUs = nowUs;
-    if (prev != LINE_CASE_NORMAL_PID || currentCase != LINE_CASE_NORMAL_PID)
+    if (prev != LINE_CASE_NORMAL_PID || currentCase != LINE_CASE_NORMAL_PID) {
         derivativeHistoryValid = false;
+        ecCenteredSinceMs = 0;
+    }
 
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
@@ -570,7 +611,7 @@ void pid_line_follow_step(void) {
 
         // Non-linear P gain: ramps up quadratically as error increases.
         // This makes the robot react gently near center but aggressively near edges.
-        const float p = pidConfig.Kp * (1.0f + 0.018f * absErr) * err;
+        const float p = pidConfig.Kp * (1.0f + EC_P_GAIN_ERROR_SLOPE * absErr) * err;
 
         // Integral with anti-windup: tighter clamp + decay when error crosses zero
         if ((integralError > 0 && err < 0) || (integralError < 0 && err > 0))
@@ -586,8 +627,12 @@ void pid_line_follow_step(void) {
             --derivativeWarmupFrames;
         } else if (pidConfig.Kd != 0 && derivativeHistoryValid && dtValid) {
             const float rawD = pidConfig.Kd * (err - lastError) / measuredDt;
-            // First-order low-pass: alpha=0.6 balances responsiveness vs noise
-            d = 0.6f * rawD + 0.4f * lastDTerm;
+            // Stronger filtered damping; preserve existing time-based SPP KD units.
+            d = EC_D_FILTER_ALPHA * rawD +
+                (1.0f - EC_D_FILTER_ALPHA) * lastDTerm;
+            const float maxD = fminf(EC_D_MAX_ABSOLUTE,
+                (float)pidConfig.baseSpeed * EC_D_MAX_BASE_FRACTION);
+            d = fmaxf(-maxD, fminf(d, maxD));
         }
         lastError = err;
         derivativeHistoryValid = true;
@@ -596,8 +641,9 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        float base = updateForwardSpeed(absErr);
         const uint16_t sensorMask = sensor_get_line_bits();
+        const bool settling = currentCase == LINE_CASE_REACQUIRE_SETTLE;
+        float base = updateForwardSpeed(absErr, sensorMask, settling);
         const float edgeSeverity = outerSensorSeverity(sensorMask);
         if (edgeSeverity > 0.0f) {
             const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
@@ -609,7 +655,6 @@ void pid_line_follow_step(void) {
             if (edgeSpeed < base) base = edgeSpeed;
             governedForwardSpeed = base;
         }
-        const bool settling = currentCase == LINE_CASE_REACQUIRE_SETTLE;
         if (settling) {
             const float elapsedRatio = fminf(
                 (float)(millis() - settleStartedMs) / (float)REACQUIRE_SETTLE_MS,
