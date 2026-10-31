@@ -1284,6 +1284,17 @@ class App(tk.Tk):
             self.update_view(last)
         now = time.monotonic()
         self.update_run_timer_display(now)
+        if (self.hs_peak_pending is not None and self.hs_peak_pending_at is not None
+                and now - self.hs_peak_pending_at >= 3.0):
+            expected = self.hs_peak_pending
+            self.hs_peak_pending = None
+            self.hs_peak_pending_at = None
+            self.hs_peak_confirmed = None
+            self.hs_peak_feedback.set(
+                f"Chưa nhận ACK cho HS_PEAK={expected}; đang đọc lại ESP32.")
+            self.log(f"HS_PEAK={expected}: timeout xác nhận, chưa coi là đã áp dụng.")
+            self.update_control_buttons()
+            self.send_command("HS_PEAK")
         if now - self.rate_time >= 1:
             interval = now - self.rate_time
             total = self.reader.frames_rx if self.reader else self.last_rx_total
