@@ -24,7 +24,8 @@ typedef enum
   LINE_CASE_T_RIGHT = 7,    // Case 7: Ngã 3 chữ T bên phải
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
   LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
-  LINE_CASE_STARTUP_COAST = 10 // Case 10: Khởi động mất line, chạy thẳng có giới hạn
+  LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
+  LINE_CASE_REACQUIRE_SETTLE = 11 // Case 11: Xác nhận lại line và phục hồi tốc độ
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
