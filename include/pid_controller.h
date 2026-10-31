@@ -70,6 +70,9 @@ uint8_t pid_get_selected_map(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
  // 4 complete, 5 aborted after losing line.
 uint8_t pid_get_high_speed_stage(void);
+// Adjustable peak PWM before START (100-255), must not be below BASE.
+bool pid_set_high_speed_peak(int16_t pwm);
+int16_t pid_get_high_speed_peak(void);
 // Signed average encoder progress since AUTO, without resetting global counts.
 int32_t pid_get_run_encoder_progress(void);
 void pid_get_gap_window(int32_t* begin, int32_t* end);
