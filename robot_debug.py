@@ -874,6 +874,13 @@ class App(tk.Tk):
                 or self.stop_verify_pending):
             self.log("Không thể đổi MAP khi xe đang chạy hoặc chưa xác nhận STOP.")
             return
+        # A physical GPIO34 START uses the firmware's stored MAP.
+        # Update the ESP32 as soon as the user selects a map, not only
+        # when the Python START button sends AUTO:map_id.
+        if self.reader is not None and self.reader.is_alive():
+            if not self.send_command(f"MAP:{map_id}"):
+                self.log("Chưa đồng bộ MAP với ESP32; kiểm tra kết nối.")
+                return
         self.selected_map = map_id
         self.map_status.set(f"Đã chọn {map_id}")
         for number, button in self.map_buttons.items():
@@ -1004,6 +1011,54 @@ class App(tk.Tk):
         else:
             self.finish_run_csv("KHÔNG GỬI ĐƯỢC AUTO")
 
+    def begin_external_run(self, origin_message):
+        """Start MAP-specific CSV/TXT when GPIO34 starts AUTO on the ESP32.
+
+        GUI START already opens its recorder before sending AUTO; in that
+        case the existing run owns the log and must not be replaced.
+        """
+        if self.run_csv.active is not None:
+            return
+        match = re.search(r"\bmap=([123])\b", origin_message)
+        if match is None:
+            self.log("GPIO34 START: RUN_ORIGIN không có MAP hợp lệ, không tạo CSV.")
+            return
+        map_id = int(match.group(1))
+        self.selected_map = map_id  # Actual firmware MAP always wins for labels.
+        self.map_status.set(f"Đã chọn {map_id} (GPIO34)")
+        for number, button in self.map_buttons.items():
+            button.configure(bg=CYAN if number == map_id else GREY,
+                             fg=BG if number == map_id else FG)
+        if self.reader is None or not self.reader.is_alive():
+            self.log("GPIO34 START: không có kết nối SPP, không thể ghi CSV.")
+            return
+        if not self.calibration_ok or any(v is None for v in self.cal_thresholds):
+            self.log("GPIO34 START: chưa tải CAL_DUMP, không thể tạo CSV đủ ngưỡng.")
+            self.send_command("CAL_DUMP")
+            return
+        try:
+            recorder = self.run_csv.begin(
+                self.reader, CSV_HEADER, (self.cal_min, self.cal_max),
+                list(self.cal_thresholds), map_id)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.log(f"GPIO34 START: không thể mở CSV: {exc}")
+            return
+        try:
+            self.run_txt_path = recorder.path.with_suffix(".txt")
+            self.run_txt_file = self.run_txt_path.open(
+                "w", encoding="utf-8", buffering=1)
+        except OSError as exc:
+            self.run_txt_file = None
+            self.run_csv.finish(self.reader, "GPIO34 START: TXT OPEN FAILED")
+            self.log(f"GPIO34 START: lỗi mở TXT: {exc}")
+            return
+        self.last_csv_total = 0
+        self.stop_ack_deadline = None
+        self.start_confirmed = True
+        self.csv_status.set(f"CSV GHI: {recorder.path.name}")
+        self.log(f"GPIO34 START: lưu dữ liệu MAP {map_id} tại {recorder.path}")
+        self.update_control_buttons()
+
     def stop_line(self):
         # Require an ESP32 ACK even if the current CSV has already closed.
         if self.send_command("STOP"):
@@ -1091,6 +1146,10 @@ class App(tk.Tk):
         self.prev = (t, left, right)
 
     def on_text(self, message):
+        # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
+        # Do this before mirroring RUN_ORIGIN to TXT.
+        if message.startswith("RUN_ORIGIN "):
+            self.begin_external_run(message)
         self.log(f"RX < {message}")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
             self.stop_ack_deadline = None
