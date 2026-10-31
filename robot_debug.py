@@ -187,7 +187,14 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 255
+        self.high_speed_peak = 255  # Last confirmed firmware value; 255 until first read.
+        self.hs_peak_confirmed = None
+        self.hs_peak_pending = None
+        self.hs_peak_pending_at = None
+        self.hs_peak_dirty = False
+        self.hs_peak_var = tk.DoubleVar(value=255)
+        self.hs_peak_value_text = tk.StringVar(value="255 (chưa xác nhận)")
+        self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
             value="HS: -- | RAMP 0-300 | CRUISE 300-2050 | BRAKE 2050-2450")
         self.values = {}
@@ -393,6 +400,35 @@ class App(tk.Tk):
             side="left", fill="x", expand=True, padx=(0, 2))
         ttk.Button(pid_actions, text="Đọc PID", command=lambda: self.send_command("PID")).pack(
             side="left", fill="x", expand=True)
+
+        # HS_PEAK only changes the first-straight trapezoid; it is not BASE PWM.
+        hs_title = tk.Frame(panel, bg=PANEL)
+        hs_title.pack(fill="x", pady=(2, 0))
+        self.label(hs_title, "HS_PEAK — PWM đỉnh (100–255)", bg=PANEL,
+                   font=("Segoe UI", 9, "bold")).pack(side="left")
+        self.label(hs_title, textvariable=self.hs_peak_value_text,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(side="right")
+        self.hs_peak_slider = ttk.Scale(
+            panel, from_=100, to=255, variable=self.hs_peak_var,
+            command=self.preview_hs_peak)
+        self.hs_peak_slider.pack(fill="x", pady=(0, 1))
+        hs_actions = tk.Frame(panel, bg=PANEL)
+        hs_actions.pack(fill="x", pady=(0, 1))
+        self.hs_peak_widgets = [self.hs_peak_slider]
+        for val in (180, 220, 255):
+            button = ttk.Button(hs_actions, text=str(val), width=5,
+                                command=lambda v=val: self.preset_hs_peak(v))
+            button.pack(side="left", expand=True, padx=1)
+            self.hs_peak_widgets.append(button)
+        self.hs_peak_apply_btn = ttk.Button(
+            hs_actions, text="Áp dụng HS", command=self.apply_hs_peak)
+        self.hs_peak_apply_btn.pack(side="left", expand=True, padx=2)
+        self.hs_peak_read_btn = ttk.Button(
+            hs_actions, text="Đọc HS", command=self.read_hs_peak)
+        self.hs_peak_read_btn.pack(side="left", expand=True, padx=1)
+        self.label(panel, textvariable=self.hs_peak_feedback,
+                   bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(
+                       anchor="w", pady=(0, 1))
 
         self.label(panel, "Calibration — 16 mắt / NVS", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(2, 1))
