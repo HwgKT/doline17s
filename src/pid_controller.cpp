@@ -686,11 +686,16 @@ void pid_line_follow_step(void) {
         // Replace only the forward-speed target on the first straight. Keep
         // existing PID steering, error governor, outer-eye limits, and SEARCH.
         // For BASE:120, command envelope is 120 -> 255 -> 120.
-        if (highSpeedStage == HS_ACCEL ||
-            highSpeedStage == HS_CRUISE ||
+        const bool highSpeedStraight =
+            (highSpeedStage == HS_ACCEL || highSpeedStage == HS_CRUISE) &&
+            turnState == TURN_NONE;
+        const bool highSpeedDecelOrHold =
             highSpeedStage == HS_BRAKE ||
-            highSpeedStage == HS_CORNER_HOLD) {
-            if (turnState == TURN_NONE) {
+            highSpeedStage == HS_CORNER_HOLD;
+        // Do not drop the low-speed target merely because TURN_RIGHT was
+        // detected: NORMAL_PID can continue steering through the corner.
+        // Dedicated sharp-turn/search cases retain their pivot commands.
+        if (highSpeedStraight || highSpeedDecelOrHold) {
                 const float profile = highSpeedForwardTarget(
                     highSpeedMaxProgress, (float)pidConfig.baseSpeed);
                 const float errorRatio = fminf(
@@ -701,7 +706,6 @@ void pid_line_follow_step(void) {
                     profile * (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio));
                 if (base > pidConfig.maxSpeed) base = pidConfig.maxSpeed;
                 governedForwardSpeed = base;
-            }
         }
         const uint16_t sensorMask = sensor_get_line_bits();
         const float edgeSeverity = outerSensorSeverity(sensorMask);
