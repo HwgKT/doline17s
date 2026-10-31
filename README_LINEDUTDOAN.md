@@ -22,6 +22,7 @@ Manual SPP commands: `MAP` to read selection and window, `MAP:1` (or 2/3) while 
 - When line returns, resume existing PID immediately, suppressing stale D derivative for four frames.
 - If still all white at 100 ms, enter the existing SEARCH_LEFT / SEARCH_RIGHT pivot at +/-85 (not the five-second startup grace). A timed-out GAP cannot restart while SEARCH is active.
 - Window membership is checked on GAP entry only. Crossing the window boundary during the 100 ms does not prematurely abort this single GAP.
+- One-shot SPP text events `GAP_START`, `GAP_RECOVERED`, `GAP_TIMEOUT_SEARCH` include map, runEnc, PWM L/R, and timestamp; the existing Python app captures these in the MAP-specific TXT. The binary telemetry format is unchanged.
 - Outside the window, preserve the original 30ms DASHED_LINE (max forward 95), startup-coast and SEARCH behaviors.
 - Full-black three-sample finish, STOP and ESTOP continue to stop motor output. No change to log packet structure.
 
