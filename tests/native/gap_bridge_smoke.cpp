@@ -100,6 +100,26 @@ int main(void) {
     assert(pid_get_kd() == 0.8f);
     assert(!pid_select_map(0));
     assert(!pid_select_map(4));
+    // Boot defaults must work without an app for physical GPIO34 START.
+    assert(pid_select_map(1));
+    assert(pid_get_base_speed() == 130);
+    assert(pid_get_high_speed_peak() == 240);
+    assert(pid_select_map(2));
+    assert(pid_get_base_speed() == 160);
+    assert(pid_get_high_speed_peak() == 240);
+    assert(pid_select_map(3));
+    assert(pid_get_base_speed() == 150);
+    assert(pid_get_high_speed_peak() == 240);
+    // Re-selecting the SAME map preserves user changes from the app.
+    pid_set_base_speed(145);
+    assert(pid_set_high_speed_peak(245));
+    assert(pid_select_map(3));
+    assert(pid_get_base_speed() == 145);
+    assert(pid_get_high_speed_peak() == 245);
+    // Changing map restores that map's independent defaults.
+    assert(pid_select_map(1));
+    assert(pid_get_base_speed() == 130);
+    assert(pid_get_high_speed_peak() == 240);
 
     beginMap(1, 50000);
     int32_t from = 0, to = 0;
