@@ -118,9 +118,11 @@ class PeakUiTest(unittest.TestCase):
         self.assertEqual(ui.hs_peak_confirmed, 220)
         self.assertEqual(ui.hs_peak_var.get(), 220)
 
-    def test_dynamic_brake_start_on_229_230_boundary(self):
+    def test_dynamic_brake_start_on_229_230_and_239_240_boundaries(self):
         ui = FakeApp()
-        for peak, expected_start in ((229, 1800), (230, 1600), (255, 1600)):
+        for peak, expected_start in (
+            (229, 1800), (230, 1600), (239, 1600), (240, 1400), (255, 1400)
+        ):
             App.on_text(
                 ui,
                 f"HS_PEAK: PWM={peak} BASE=120 RAMP_END=300 "
@@ -136,11 +138,11 @@ class PeakUiTest(unittest.TestCase):
         ui = FakeApp()
         App.on_text(
             ui,
-            "HS_STAGE BRAKE map=3 runEnc=1600 base=120 peak=255 "
-            "brake=1600 end=2300 hold=110 minEnd=3100 t_ms=123456",
+            "HS_STAGE BRAKE map=3 runEnc=1400 base=120 peak=255 "
+            "brake=1400 end=2300 hold=110 minEnd=3100 t_ms=123456",
         )
-        self.assertEqual(ui.hs_brake_start, 1600)
-        self.assertIn("BRAKE=1600-2300", ui.high_speed_status.get())
+        self.assertEqual(ui.hs_brake_start, 1400)
+        self.assertIn("BRAKE=1400-2300", ui.high_speed_status.get())
 
     def test_hold_and_complete_stage_messages(self):
         ui = FakeApp()
