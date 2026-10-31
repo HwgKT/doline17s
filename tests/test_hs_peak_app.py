@@ -33,6 +33,7 @@ class FakeApp:
         self.auto_running = False
         self.start_pending = False
         self.stop_ack_deadline = None
+        self.stop_verify_pending = False
         self.run_csv = SimpleNamespace(active=None)
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
@@ -42,6 +43,7 @@ class FakeApp:
         self.hs_peak_feedback = Var()
         self.hs_peak_value_text = Var()
         self.high_speed_peak = 255
+        self.hs_brake_start = 1800
         self.high_speed_status = Var()
         self.pid_vars = {"Base": Var(str(base))}
         self.messages = []
@@ -115,6 +117,30 @@ class PeakUiTest(unittest.TestCase):
         App.on_text(ui, "HS_PEAK: PWM=220 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 220)
         self.assertEqual(ui.hs_peak_var.get(), 220)
+
+    def test_dynamic_brake_start_on_229_230_boundary(self):
+        ui = FakeApp()
+        for peak, expected_start in ((229, 1800), (230, 1600), (255, 1600)):
+            App.on_text(
+                ui,
+                f"HS_PEAK: PWM={peak} BASE=120 RAMP_END=300 "
+                f"BRAKE_START={expected_start} BRAKE_END=2300 "
+                "HOLD_PWM=110 HOLD_MIN_END=3100",
+            )
+            self.assertEqual(ui.hs_brake_start, expected_start)
+            self.assertIn(
+                f"BRAKE={expected_start}-2300", ui.high_speed_status.get()
+            )
+
+    def test_stage_event_reflects_actual_early_brake(self):
+        ui = FakeApp()
+        App.on_text(
+            ui,
+            "HS_STAGE BRAKE map=3 runEnc=1600 base=120 peak=255 "
+            "brake=1600 end=2300 hold=110 minEnd=3100 t_ms=123456",
+        )
+        self.assertEqual(ui.hs_brake_start, 1600)
+        self.assertIn("BRAKE=1600-2300", ui.high_speed_status.get())
 
     def test_hold_and_complete_stage_messages(self):
         ui = FakeApp()
