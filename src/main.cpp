@@ -363,7 +363,7 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  // Active-HIGH GPIO34: one fresh debounced press starts AUTO exactly once.
+  // Active-LOW GPIO34: one fresh debounced press starts AUTO exactly once.
   // Reuse command() to enforce ADC, CAL and E-STOP guards and send RUN_ORIGIN.
   if(sensor_start_button_pressed()){
     if(!pid_is_auto_mode() && !manualActive) {
