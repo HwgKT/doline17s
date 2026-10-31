@@ -22,3 +22,12 @@ jobs:
             -o /tmp/mainv9_pid_smoke
       - name: Run native PID smoke
         run: /tmp/mainv9_pid_smoke
+
+  esp32-firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PlatformIO
+        run: python3 -m pip install --user platformio
+      - name: Compile ESP32 Classic SPP firmware
+        run: python3 -m platformio run -e esp32dev
