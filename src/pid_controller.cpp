@@ -27,7 +27,9 @@ constexpr uint32_t LINE_ACQUIRE_MS = 10;
 constexpr uint32_t LINE_LOSS_MS = 30;           // was 40 — faster loss detection reduces stutter duration
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
-constexpr uint8_t FULL_LINE_MIN_SENSORS = N_SENSORS - 1;
+// Finish requires ALL 16 sensors to see black on 3 consecutive PID samples.
+constexpr uint8_t FULL_LINE_MIN_SENSORS = N_SENSORS;
+constexpr uint8_t FINISH_CONFIRM_FRAMES = 3;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
 constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -258,9 +260,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
 
-    if (bitCount16(mask) >= FULL_LINE_MIN_SENSORS) {
-        if (fullLineFrames < 3) ++fullLineFrames;
-        if (fullLineFrames >= 3) {
+    if (bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
+        if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
+        if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {
             finishLineLatched = true;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;

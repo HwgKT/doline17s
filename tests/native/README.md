@@ -47,8 +47,10 @@ Test coverage:
   larger outer errors can use the stronger bounded steering envelope. The
   governor reaches its full reduction at error 30; the sharp-turn arc uses its
   own PWM profile. There is no timed post-reacquisition acceleration ramp.
-- A wide black intersection drives both motors forward; all 16 sensors must
-  remain black for 50 ms to latch the finish stop.
+- A wide black intersection (including 15/16 black sensors) drives both motors
+  forward. The finish stop is latched only after all 16 sensors detect black
+  for 3 consecutive PID samples; any intervening non-full sample resets the
+  counter to zero. This is sample-based, not a 50-ms timer.
 - Stopping AUTO stops both motors immediately.
 
 This **does not validate actual ESP32 pin wiring, motor polarity, timing under

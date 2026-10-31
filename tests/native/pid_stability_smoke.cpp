@@ -239,9 +239,28 @@ int main(void) {
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
     assert(leftPwm==84 && rightPwm==84);
 
-    // A finish marker stops after 3 frames even if one eye misses black.
+    // 15/16 black is a wide crossing, NOT a finish marker (even for >3 frames).
     setPattern("1111111111111110");
-    stepMs(6);
+    stepMs(10);
+    assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
+    assert(leftPwm==84 && rightPwm==84);
+
+    // One full-black sample cannot stop; any non-full sample resets the count.
+    setPattern("1111111111111111");
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
+    setPattern("1111111111111110");
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
+
+    // Two consecutive 16/16 black samples are not enough.
+    setPattern("1111111111111111");
+    stepMs(4);
+    assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
+    assert(leftPwm==84 && rightPwm==84);
+
+    // The third consecutive full-black PID sample latches the finish stop.
+    stepMs(2);
     assert(pid_get_current_case()==LINE_CASE_STOPPED);
     assert(leftPwm==0 && rightPwm==0);
     onlyEye(8,1700);
