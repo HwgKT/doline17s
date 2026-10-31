@@ -215,8 +215,9 @@ int main(void) {
 
     // High peaks (>=230) must enter BRAKE 200 ticks earlier on all three
     // MAPs. 229 stays on the original 1800 start; 230 and 255 use 1600.
+    constexpr int16_t testPeaks[] = {229, 230, 255};
     for (uint8_t map = 1; map <= 3; ++map) {
-        for (const int16_t peak : {int16_t(229), int16_t(230), int16_t(255)}) {
+        for (const int16_t peak : testPeaks) {
             const int32_t origin = 410000 + int32_t(map)*10000 + int32_t(peak)*100;
             beginMap(map, origin, peak);
             const bool early = peak >= 230;
