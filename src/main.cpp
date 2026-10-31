@@ -71,7 +71,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -98,7 +98,7 @@ void command(const String &raw) {
     snprintf(b,sizeof(b),
       "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
       "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
-      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u",
+      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u peak=%d",
       btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
       loopCount/sec,pidCount/sec,
       (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
@@ -110,7 +110,7 @@ void command(const String &raw) {
       (unsigned long)pid_get_confirmed_line_loss_count(),
       (unsigned long)pid_get_line_reacquisition_count(),
       (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
-      (unsigned)pid_get_high_speed_stage());
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak());
     lastDiagUs=t;loopCount=pidCount=txCount=0;
     lastTxStats=tx;skippedSlots=0;
     reply(b);return;
@@ -127,6 +127,25 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  if(s=="HS_PEAK"){
+    char b[100];
+    snprintf(b,sizeof(b),
+      "HS_PEAK: PWM=%d RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450",
+      pid_get_high_speed_peak());
+    reply(b);return;
+  }
+  if(s.startsWith("HS_PEAK:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: HS_PEAK_REQUIRES_STOPPED");return;
+    }
+    int value;
+    const String rawPwm=s.substring(8);
+    if(!parseSpeed(rawPwm,value)||value<100 ||
+       !pid_set_high_speed_peak((int16_t)value)){
+      reply("ERR: HS_PEAK_RANGE_100_TO_255_AND_GE_BASE");return;
+    }
+    command("HS_PEAK");return;
+  }
   if(s=="PWM"){
     char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
       motor_get_left_speed(),motor_get_right_speed(),
@@ -145,13 +164,13 @@ void command(const String &raw) {
     reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
-    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld hs=%u",
+    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld hs=%u peak=%d",
       btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
       calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
       motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
       sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count(),
       (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
-      (unsigned)pid_get_high_speed_stage());
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak());
     reply(b);return;
   }
   if(s=="P"||s=="SENSORS"){
@@ -352,10 +371,10 @@ void loop() {
       if(newHighSpeedStage<6U){
         char b[160];
         snprintf(b,sizeof(b),
-          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=255 brake=2050 end=2450 t_ms=%lu",
+          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=2050 end=2450 t_ms=%lu",
           labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
           (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
-          (unsigned long)millis());
+          pid_get_high_speed_peak(),(unsigned long)millis());
         reply(b);
       }
     }
