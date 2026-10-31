@@ -6,8 +6,18 @@ import queue
 import threading
 import time
 
+MAP_IDS = (1, 2, 3)
+
+
+def map_log_directory(map_id):
+    """Return the fixed output directory for one of the three track layouts."""
+    if type(map_id) is not int or map_id not in MAP_IDS:
+        raise ValueError("Choose Map 1, Map 2 or Map 3 before recording")
+    return Path(__file__).resolve().parent / "logs" / f"map_{map_id}"
+
+
 class TelemetryCsvRecorder(threading.Thread):
-    def __init__(self, header, thresholds):
+    def __init__(self, header, thresholds, map_id):
         super().__init__(name="spp-csv-writer", daemon=True)
         if len(thresholds) != 16 or any(
                 not isinstance(v, int) or not 0 <= v <= 4095
@@ -16,10 +26,11 @@ class TelemetryCsvRecorder(threading.Thread):
         if len(header) < 18 or header[:2] != ["host_iso", "t_ms"] or (
                 header[2:18] != [f"adc{i}" for i in range(16)]):
             raise ValueError("Unexpected CSV header alignment")
-        folder = Path(__file__).resolve().parent / "logs"
+        folder = map_log_directory(map_id)
         folder.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.path = folder / f"linerobot_{stamp}.csv"
+        self.map_id = map_id
+        self.path = folder / f"linerobot_map{map_id}_{stamp}.csv"
         self.output = self.path.open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.writer(self.output)
         self.writer.writerow(header)
