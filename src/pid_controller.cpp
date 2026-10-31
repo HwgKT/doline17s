@@ -52,7 +52,7 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
-constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
+constexpr float PID_CORRECTION_BASE_MULTIPLIER = 4.0f;
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
 
