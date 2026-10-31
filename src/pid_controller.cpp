@@ -44,7 +44,7 @@ constexpr uint32_t GAP_TIMEOUT_MS = 100;
 constexpr int32_t HS_RAMP_END_ENC = 300;
 constexpr int32_t HS_BRAKE_START_ENC = 2050;
 constexpr int32_t HS_BRAKE_END_ENC = 2450;
-constexpr int16_t HS_PEAK_PWM = 255;
+int16_t highSpeedPeakPwm = 255; // default; HS_PEAK:n can lower it for trials.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
     HS_FINISHED=4, HS_ABORTED=5
@@ -54,15 +54,16 @@ bool highSpeedAborted = false;
 int32_t highSpeedMaxProgress = 0;
 
 static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
+    const float peak = fmaxf(basePwm, (float)highSpeedPeakPwm);
     if (ticks <= 0) return basePwm;
     if (ticks < HS_RAMP_END_ENC) {
-        return basePwm + (float)(HS_PEAK_PWM - basePwm) *
+        return basePwm + (peak - basePwm) *
             ((float)ticks / (float)HS_RAMP_END_ENC);
     }
-    if (ticks < HS_BRAKE_START_ENC) return HS_PEAK_PWM;
+    if (ticks < HS_BRAKE_START_ENC) return peak;
     if (ticks < HS_BRAKE_END_ENC) {
-        return (float)HS_PEAK_PWM +
-            (basePwm - (float)HS_PEAK_PWM) *
+        return peak +
+            (basePwm - peak) *
             ((float)(ticks - HS_BRAKE_START_ENC) /
              (float)(HS_BRAKE_END_ENC - HS_BRAKE_START_ENC));
     }
@@ -263,6 +264,7 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.minSpeed = 0;
     autoMode = false;
     selectedMap = 0;
+    highSpeedPeakPwm = 255;
     currentCase = LINE_CASE_STOPPED;
     clearPidState();
     resetLineTracking();
@@ -299,6 +301,13 @@ bool pid_select_map(uint8_t mapId) {
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
 uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
+bool pid_set_high_speed_peak(int16_t pwm) {
+    if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
+        return false;
+    highSpeedPeakPwm = pwm;
+    return true;
+}
+int16_t pid_get_high_speed_peak(void) { return highSpeedPeakPwm; }
 int32_t pid_get_run_encoder_progress(void) { return runEncoderProgress(); }
 void pid_get_gap_window(int32_t* begin, int32_t* end) {
     const GapWindow w = selectedMap >= 1 && selectedMap <= 3
