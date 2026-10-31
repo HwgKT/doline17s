@@ -73,7 +73,8 @@ static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
             ((float)(ticks - HS_BRAKE_START_ENC) /
              (float)(HS_BRAKE_END_ENC - HS_BRAKE_START_ENC));
     }
-    // Keep low forward thrust until the first right turn is recovered.
+    // Keep low forward thrust until encoder progress and a valid centered
+    // line sample satisfy the HOLD release conditions in pid_detect_case().
     // HS_FINISHED bypasses this envelope and returns to normal BASE.
     return holdPwm;
 }
