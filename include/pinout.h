@@ -1,14 +1,16 @@
 #ifndef PINOUT_H
 #define PINOUT_H
 
-// Line sensor CD74HC4067 and buttons (current firmware wiring).
+// Line sensor CD74HC4067 and physical START button (current wiring).
 #define PIN_LINE_SIG       36
 #define PIN_MUX_S0         17
 #define PIN_MUX_S1         18
 #define PIN_MUX_S2         19
 #define PIN_MUX_S3         23
-#define PIN_CALIB_BUTTON   34
-#define PIN_START_BUTTON   35  // Reserved; the current firmware does not use it yet.
+// GPIO34 is input-only, with NO internal pull-up/down: install an external
+// pulldown to GND, button from GPIO34 to 3.3V (active HIGH).
+#define PIN_START_BUTTON   34
+#define PIN_UNUSED_BUTTON  35  // Not used by this firmware.
 
 // Quadrature channels A/B per wheel, inherited from mainv2.
 #define PIN_ENCODER_L1     21
