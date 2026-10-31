@@ -235,10 +235,12 @@ void command(const String &raw) {
        pid_get_base_speed(),pid_get_high_speed_peak(),
        (unsigned long)millis());
     reply(runInfo);
-    reply("HS_STAGE RAMP map="+String(pid_get_selected_map())+
-          " runEnc=0 base="+String(pid_get_base_speed())+
-          " peak="+String(pid_get_high_speed_peak())+
-          " brake=2050 end=2450");
+    char rampEvent[160];
+    snprintf(rampEvent,sizeof(rampEvent),
+      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=2050 end=2450 t_ms=%lu",
+      (unsigned)pid_get_selected_map(),pid_get_base_speed(),
+      pid_get_high_speed_peak(),(unsigned long)millis());
+    reply(rampEvent);
     return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
