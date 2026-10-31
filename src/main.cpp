@@ -223,7 +223,23 @@ void command(const String &raw) {
     if(pid_get_selected_map()==0){
       reply("ERR: MAP_NOT_SELECTED");return;
     }
-    manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
+    manualActive=false;
+    pid_set_auto_mode(true);
+    reply("MODE: AUTO PID");
+    int32_t runL=0,runR=0;
+    encoder_get_counts(&runL,&runR);
+    char runInfo[180];
+    snprintf(runInfo,sizeof(runInfo),
+       "RUN_ORIGIN map=%u encL0=%ld encR0=%ld base=%d peak=%d t_ms=%lu",
+       (unsigned)pid_get_selected_map(),(long)runL,(long)runR,
+       pid_get_base_speed(),pid_get_high_speed_peak(),
+       (unsigned long)millis());
+    reply(runInfo);
+    reply("HS_STAGE RAMP map="+String(pid_get_selected_map())+
+          " runEnc=0 base="+String(pid_get_base_speed())+
+          " peak="+String(pid_get_high_speed_peak())+
+          " brake=2050 end=2450");
+    return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
   if(s=="C"||s=="W"||s=="CALIB"||s=="CAL_WHITE"){
