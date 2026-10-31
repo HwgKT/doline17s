@@ -45,7 +45,8 @@ void motor_set_speeds(int16_t left,int16_t right) {
         const LineCase_t current=pid_get_current_case();
         assert(current==LINE_CASE_SHARP_LEFT || current==LINE_CASE_SHARP_RIGHT ||
                current==LINE_CASE_DASHED_LINE || current==LINE_CASE_NORMAL_PID ||
-               current==LINE_CASE_REACQUIRE_SETTLE);
+               current==LINE_CASE_REACQUIRE_SETTLE ||
+               current==LINE_CASE_T_LEFT || current==LINE_CASE_T_RIGHT);
         if(current==LINE_CASE_SHARP_LEFT) assert(left<0 && right>0);
         if(current==LINE_CASE_SHARP_RIGHT) assert(left>0 && right<0);
     }
@@ -308,6 +309,56 @@ int main(void) {
     // 6) Disabling AUTO immediately stops both motors.
     pid_set_auto_mode(false);
     assert(leftPwm==0 && rightPwm==0);
-    puts("PASS: 40ms search confirmation, narrow line, 150ms settle, 2B cap, cumulative timeout, speed governor and finish stop");
+    // mainv9 EC integration: stable centered tracking builds a gradual
+    // +20 PWM straight boost, but moving off-center cancels it immediately.
+    pid_set_auto_mode(false);
+    pid_init(0.0f, 0.0f, 0.0f, 120);
+    setPattern("0000000110000000");
+    pid_set_auto_mode(true);
+    stepMs(12);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(leftPwm==120 && rightPwm==120);
+    stepMs(280);
+    assert(leftPwm==140 && rightPwm==140);
+    onlyEye(10,1700);
+    stepMs(4);
+    assert(leftPwm<140 && rightPwm<140);
+
+    // EC sample: a T mask must be recognized ahead of the overlapping
+    // sharp-corner mask, only after a stable 20ms signature.
+    pid_set_auto_mode(false);
+    pid_init(0.0f, 0.0f, 0.0f, 120);
+    setPattern("1100000110000000");
+    pid_set_auto_mode(true);
+    stepMs(12);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    stepMs(24);
+    assert(pid_get_current_case()==LINE_CASE_T_LEFT);
+    assert(leftPwm<0 && rightPwm>0);
+
+    // EC sample: a truly outer-edge-qualified 90-degree corner enters
+    // a 22ms brake, then a bounded pivot; generic SEARCH remains 85/-85.
+    pid_set_auto_mode(false);
+    pid_init(2.2f, 0.0f, 0.0f, 120);
+    setPattern("1110000000000000");
+    pid_set_auto_mode(true);
+    stepMs(12);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    allWhite();
+    stepMs(44);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
+    assert(leftPwm==-110 && rightPwm==35);
+    stepMs(24);
+    assert(leftPwm==-105 && rightPwm==115);
+    setPattern("0000000110000000");
+    stepMs(46);
+    assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+    assert(leftPwm==45 && rightPwm==-45);
+    stepMs(22);
+    assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+    assert(leftPwm>0 && rightPwm>0);
+
+    pid_set_auto_mode(false);
+    puts("PASS: mainv7 recovery and mainv9 EC boost, T-junction and 3-phase corner");
     return 0;
 }
