@@ -44,8 +44,10 @@ constexpr uint32_t GAP_TIMEOUT_MS = 100;
 constexpr int32_t HS_RAMP_END_ENC = 300;
 // Shared first-straight corner profile for MAP 1/2/3.
 constexpr int32_t HS_BRAKE_START_ENC = 1800;        // Peak 100..229
-constexpr int32_t HS_EARLY_BRAKE_START_ENC = 1600;  // Peak 230..255
+constexpr int32_t HS_EARLY_BRAKE_START_ENC = 1600;  // Peak 230..239
 constexpr int16_t HS_EARLY_BRAKE_PEAK_THRESHOLD = 230;
+constexpr int32_t HS_VERY_EARLY_BRAKE_START_ENC = 1400; // Peak 240..255
+constexpr int16_t HS_VERY_EARLY_BRAKE_PEAK_THRESHOLD = 240;
 constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 110.0f;
@@ -62,6 +64,8 @@ int32_t highSpeedMaxProgress = 0;
 static int32_t highSpeedBrakeStart() {
     // Peak can only change when AUTO is disabled: the window remains fixed
     // throughout a run for all three map profiles.
+    if (highSpeedPeakPwm >= HS_VERY_EARLY_BRAKE_PEAK_THRESHOLD)
+        return HS_VERY_EARLY_BRAKE_START_ENC;
     return highSpeedPeakPwm >= HS_EARLY_BRAKE_PEAK_THRESHOLD
         ? HS_EARLY_BRAKE_START_ENC : HS_BRAKE_START_ENC;
 }
