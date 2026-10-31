@@ -187,13 +187,13 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 255  # Last confirmed firmware value; 255 until first read.
+        self.high_speed_peak = 220  # Expected startup default; read back from firmware.
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
-        self.hs_peak_var = tk.DoubleVar(value=255)
-        self.hs_peak_value_text = tk.StringVar(value="255 (chưa xác nhận)")
+        self.hs_peak_var = tk.DoubleVar(value=220)
+        self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
             value="HS: -- | RAMP 0-300 | CRUISE 300-1800 | BRAKE 1800-2300 | HOLD 90 qua cua")
