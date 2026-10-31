@@ -196,7 +196,7 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: -- | RAMP 0-300 | CRUISE 300-1800 | BRAKE 1800-2300 | HOLD 90 qua cua")
+            value="HS: -- | RAMP 0-300 | CRUISE 300-1800 | BRAKE 1800-2300 | HOLD 110 qua cua")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -419,8 +419,8 @@ class App(tk.Tk):
                        side="right", padx=(2, 0))
         ttk.Button(pid_row, text="Áp dụng", width=7,
                    command=self.apply_pid).pack(side="right", padx=(2, 0))
-        for key, initial in (("Kp", "2.2"), ("Ki", "0"),
-                             ("Kd", "0"), ("Base", "120")):
+        for key, initial in (("Kp", "1.6"), ("Ki", "0"),
+                             ("Kd", "0.8"), ("Base", "120")):
             field = tk.Frame(pid_row, bg=PANEL)
             field.pack(side="left", padx=(0, 4))
             self.label(field, key, bg=PANEL, fg=MUTED,
