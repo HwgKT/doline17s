@@ -153,10 +153,11 @@ int main(void) {
     stepMs(14);
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
     assert(leftPwm>0 && rightPwm<0);
-    assert(leftPwm==220 && rightPwm>=-220 && rightPwm<0);
-    // With 2B, one motor can still reverse but less strongly than at 4B.
-    assert(rightPwm<=-35 && rightPwm>=-85);
-    assert(leftPwm-rightPwm>=260);
+    // 2B cap: governed base is ~66, so the unmagnified 3B/-B output
+    // is ~198/-66 (no need to hit the hardware peak of 220).
+    assert(leftPwm>=190 && leftPwm<=205);
+    assert(rightPwm<=-55 && rightPwm>=-75);
+    assert(leftPwm-rightPwm>=245);
 
     // Keep the arc through a brief line gap; then pivot to search.
     allWhite();
