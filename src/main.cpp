@@ -227,7 +227,7 @@ void command(const String &raw) {
     pid_set_auto_mode(true);
     reply("MODE: AUTO PID");
     int32_t runL=0,runR=0;
-    encoder_get_counts(&runL,&runR);
+    pid_get_run_encoder_origins(&runL,&runR); // exactly the PID's AUTO origin
     char runInfo[180];
     snprintf(runInfo,sizeof(runInfo),
        "RUN_ORIGIN map=%u encL0=%ld encR0=%ld base=%d peak=%d t_ms=%lu",
