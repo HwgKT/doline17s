@@ -1,4 +1,4 @@
-"""Headless HS_PEAK UI protocol tests. Run: python -m unittest tests.test_hs_peak_app
+"""Headless HS_PEAK UI protocol tests. Run: python -m unittest discover -s tests -p test_hs_peak_app.py
 
 Requires pyserial, but deliberately does not construct a Tk window.
 """
@@ -105,6 +105,24 @@ class PeakUiTest(unittest.TestCase):
         App.on_text(ui, "ERR: BASE_GT_HS_PEAK")
         self.assertIn("BASE vượt HS_PEAK", ui.hs_peak_feedback.get())
         self.assertEqual(ui.messages[-1], "PID")
+
+    def test_read_refreshes_firmware_value(self):
+        ui = FakeApp()
+        self.assertTrue(App.read_hs_peak(ui))
+        self.assertIsNone(ui.hs_peak_confirmed)
+        self.assertFalse(ui.hs_peak_dirty)
+        self.assertEqual(ui.messages[-1], "HS_PEAK")
+        App.on_text(ui, "HS_PEAK: PWM=220 BASE=120 RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450")
+        self.assertEqual(ui.hs_peak_confirmed, 220)
+        self.assertEqual(ui.hs_peak_var.get(), 220)
+
+    def test_base_apply_rejects_larger_than_confirmed_peak(self):
+        ui = FakeApp()
+        ui.hs_peak_confirmed = 180
+        ui.pwm_var = Var(200)
+        App.apply_pwm(ui)
+        self.assertEqual(ui.messages, [])
+        self.assertIn("BASE 200 vượt HS_PEAK 180", ui.logs[-1])
 
 
 if __name__ == "__main__":
