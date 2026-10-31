@@ -19,6 +19,8 @@ uint16_t maxValues[N_SENSORS]={};
 uint16_t thresholds[N_SENSORS]={};
 bool calibrationReady=true;
 bool isCalibrating=false;
+// Linked PID controller now reads an encoder snapshot at each AUTO start.
+void encoder_get_counts(int32_t* l, int32_t* r) { if(l)*l=0; if(r)*r=0; }
 
 bool sensor_adc_ready(void) {return true;}
 bool sensor_is_black(uint8_t i) {
