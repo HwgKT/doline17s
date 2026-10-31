@@ -349,6 +349,7 @@ void setup() {
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
   pid_init(1.6f,0.0f,0.8f,100); // default PID gains for MAP 1/2/3
+  pid_select_map(1); // physical GPIO34 START works without a connected app
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
@@ -362,9 +363,13 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  if(!adcBenchActive() && sensor_is_button_pressed() && !sensor_is_calibrating()){
-    safeStop();
-    sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
+  // Active-HIGH GPIO34: one fresh debounced press starts AUTO exactly once.
+  // Reuse command() to enforce ADC, CAL and E-STOP guards and send RUN_ORIGIN.
+  if(sensor_start_button_pressed()){
+    if(!pid_is_auto_mode() && !manualActive) {
+      if(sppStarted && btConnected()) reply("BUTTON34: START_REQUEST");
+      command("AUTO");
+    }
   }
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
