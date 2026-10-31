@@ -8,7 +8,7 @@
 #define PIN_MUX_S2         19
 #define PIN_MUX_S3         23
 // GPIO34 is input-only, with NO internal pull-up/down: install an external
-// pulldown to GND, button from GPIO34 to 3.3V (active HIGH).
+// pullup to 3.3V, button from GPIO34 to GND (active LOW).
 #define PIN_START_BUTTON   34
 #define PIN_UNUSED_BUTTON  35  // Not used by this firmware.
 
