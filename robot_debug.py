@@ -187,6 +187,8 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
+        self.high_speed_status = tk.StringVar(
+            value="HS: -- | RAMP 0-300 | CRUISE 300-2050 | BRAKE 2050-2450")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -254,6 +256,8 @@ class App(tk.Tk):
                    font=("Consolas", 8)).pack(side="left", padx=(5, 0))
         self.label(diag_bar, textvariable=self.loop_debug, fg=CYAN, bg=PANEL,
                    font=("Consolas", 9, "bold")).pack(anchor="w", padx=8, pady=(1, 0))
+        self.label(diag_bar, textvariable=self.high_speed_status, fg=AMBER, bg=PANEL,
+                   font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
 
@@ -938,7 +942,25 @@ class App(tk.Tk):
                 self.set_auto_running(False)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
                 self.update_control_buttons()
+        elif message.startswith("HS_STAGE "):
+            stage = re.search(r"HS_STAGE (\w+)", message)
+            tick = re.search(r"\brunEnc=(-?\d+)", message)
+            if stage:
+                self.high_speed_status.set(
+                    f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
+                    "| PEAK=255 | BRAKE=2050 -> 2450"
+                )
         elif message.startswith("DIAG:"):
+            hs = re.search(r"\bhs=(\d+)\b", message)
+            tick = re.search(r"\brunEnc=(-?\d+)\b", message)
+            if hs:
+                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE", "ABORTED")
+                state = int(hs.group(1))
+                title = names[state] if 0 <= state < len(names) else "UNKNOWN"
+                self.high_speed_status.set(
+                    f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
+                    "| PEAK=255 | BRAKE=2050 -> 2450"
+                )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
             sent = re.search(r"\bsent=(\d+(?:\.\d+)?)Hz\b", message)
