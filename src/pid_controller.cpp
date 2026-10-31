@@ -43,7 +43,9 @@ constexpr uint32_t GAP_TIMEOUT_MS = 100;
 // An experimental open-loop PWM envelope, not closed-loop wheel velocity.
 constexpr int32_t HS_RAMP_END_ENC = 300;
 // Shared first-straight corner profile for MAP 1/2/3.
-constexpr int32_t HS_BRAKE_START_ENC = 1800;
+constexpr int32_t HS_BRAKE_START_ENC = 1800;        // Peak 100..229
+constexpr int32_t HS_EARLY_BRAKE_START_ENC = 1600;  // Peak 230..255
+constexpr int16_t HS_EARLY_BRAKE_PEAK_THRESHOLD = 230;
 constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 110.0f;
@@ -57,6 +59,13 @@ HighSpeedStage highSpeedStage = HS_DISABLED;
 bool highSpeedAborted = false;
 int32_t highSpeedMaxProgress = 0;
 
+static int32_t highSpeedBrakeStart() {
+    // Peak can only change when AUTO is disabled: the window remains fixed
+    // throughout a run for all three map profiles.
+    return highSpeedPeakPwm >= HS_EARLY_BRAKE_PEAK_THRESHOLD
+        ? HS_EARLY_BRAKE_START_ENC : HS_BRAKE_START_ENC;
+}
+
 static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     const float peak = fmaxf(basePwm, (float)highSpeedPeakPwm);
     // If BASE is below 110, never accelerate during a supposed brake hold.
@@ -66,12 +75,13 @@ static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
         return basePwm + (peak - basePwm) *
             ((float)ticks / (float)HS_RAMP_END_ENC);
     }
-    if (ticks < HS_BRAKE_START_ENC) return peak;
+    const int32_t brakeStart = highSpeedBrakeStart();
+    if (ticks < brakeStart) return peak;
     if (ticks < HS_BRAKE_END_ENC) {
         return peak +
             (holdPwm - peak) *
-            ((float)(ticks - HS_BRAKE_START_ENC) /
-             (float)(HS_BRAKE_END_ENC - HS_BRAKE_START_ENC));
+            ((float)(ticks - brakeStart) /
+             (float)(HS_BRAKE_END_ENC - brakeStart));
     }
     // Keep low forward thrust until encoder progress and a valid centered
     // line sample satisfy the HOLD release conditions in pid_detect_case().
@@ -317,6 +327,7 @@ bool pid_set_high_speed_peak(int16_t pwm) {
     return true;
 }
 int16_t pid_get_high_speed_peak(void) { return highSpeedPeakPwm; }
+int32_t pid_get_high_speed_brake_start(void) { return highSpeedBrakeStart(); }
 int32_t pid_get_run_encoder_progress(void) { return runEncoderProgress(); }
 void pid_get_run_encoder_origins(int32_t* left, int32_t* right) {
     if (left) *left = runEncoderOriginL;
@@ -380,7 +391,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             highSpeedStage =
                 (progress >= HS_HOLD_MIN_END_ENC && validCenteredLine)
                     ? HS_FINISHED : HS_CORNER_HOLD;
-        } else if (highSpeedMaxProgress >= HS_BRAKE_START_ENC) {
+        } else if (highSpeedMaxProgress >= highSpeedBrakeStart()) {
             highSpeedStage = HS_BRAKE;
         } else if (highSpeedMaxProgress >= HS_RAMP_END_ENC) {
             highSpeedStage = HS_CRUISE;
