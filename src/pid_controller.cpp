@@ -38,6 +38,10 @@ constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
+// Temporary experiment: skip the short post-reacquisition speed ramp.
+constexpr bool ENABLE_REACQUIRE_SPEED_RAMP = false;
+// Increase only NORMAL_PID forward reference by 10%; other modes unchanged.
+constexpr float NORMAL_PID_BASE_GAIN = 1.10f;
 constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
 
 // A sharp turn is entered only when the centroid reaches the outer region.
@@ -58,7 +62,7 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
-constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
+constexpr float PID_CORRECTION_BASE_MULTIPLIER = 2.0f;
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
 
@@ -135,12 +139,11 @@ static void limitMotorCommandPeak(float& left, float& right, float limit) {
         right *= scale;
     }
 }
-static float updateForwardSpeed(float absErr) {
+static float updateForwardSpeed(float absErr, float referenceSpeed) {
     const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-    float targetSpeed = (float)pidConfig.baseSpeed *
+    float targetSpeed = referenceSpeed *
         (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
-    const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-        ? pidConfig.baseSpeed : 45);
+    const float minimumSpeed = fminf(referenceSpeed, 45.0f);
     if (targetSpeed < minimumSpeed) targetSpeed = minimumSpeed;
     if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
     governedForwardSpeed = targetSpeed;
@@ -364,7 +367,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 turnMissing = false;
                 derivativeHistoryValid = false;
                 derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
-                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+                reacquireSpeedFrames = ENABLE_REACQUIRE_SPEED_RAMP
+                    ? REACQUIRE_SPEED_RAMP_FRAMES : 0;
                 lineLocked = true;
                 if (previouslyLocked) ++reacquisitions;
                 previouslyLocked = true;
@@ -561,20 +565,24 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        float base = updateForwardSpeed(absErr);
+        // Only NORMAL_PID gets a higher nominal forward PWM.
+        // Keep the original baseSpeed for start-box, search, sharp-turn and cross-line.
+        const float normalPidBase = fminf(
+            (float)pidConfig.maxSpeed,
+            (float)pidConfig.baseSpeed * NORMAL_PID_BASE_GAIN);
+        float base = updateForwardSpeed(absErr, normalPidBase);
         const uint16_t sensorMask = sensor_get_line_bits();
         const float edgeSeverity = outerSensorSeverity(sensorMask);
         if (edgeSeverity > 0.0f) {
-            const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-                ? pidConfig.baseSpeed : 45);
+            const float minimumSpeed = fminf(normalPidBase, 45.0f);
             const float edgeSpeed = fmaxf(
                 minimumSpeed,
-                (float)pidConfig.baseSpeed *
+                normalPidBase *
                     (1.0f - OUTER_SENSOR_SPEED_REDUCTION * edgeSeverity));
             if (edgeSpeed < base) base = edgeSpeed;
             governedForwardSpeed = base;
         }
-        if (reacquireSpeedFrames > 0) {
+        if (ENABLE_REACQUIRE_SPEED_RAMP && reacquireSpeedFrames > 0) {
             const float rampProgress =
                 (float)(REACQUIRE_SPEED_RAMP_FRAMES -
                         reacquireSpeedFrames) /
