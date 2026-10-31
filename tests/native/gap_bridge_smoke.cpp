@@ -69,10 +69,13 @@ static void setWhite(void) {
 static void beginMap(uint8_t map, int32_t origin, int16_t peak=220, int16_t base=120) {
     pid_set_auto_mode(false);
     pid_init(1.6f, 0.0f, 0.8f, base);
-    assert(pid_set_high_speed_peak(peak));
     simLeft = origin;
     simRight = origin + 700;
     assert(pid_select_map(map));
+    // MAP selection loads hardware defaults. Explicit test scenarios
+    // override them afterward to exercise older and newer PWM profiles.
+    pid_set_base_speed(base);
+    assert(pid_set_high_speed_peak(peak));
     setLine();
     pid_set_auto_mode(true);
     assert(pid_get_run_encoder_progress() == 0);
