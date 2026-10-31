@@ -262,7 +262,7 @@ bool sensor_start_button_pressed(void) {
   if (read != lastButtonRead) lastButtonChange = millis();
   bool pressed = false;
   if (millis() - lastButtonChange > BUTTON_DEBOUNCE_MS && read != buttonState) {
-    buttonState = read; pressed = buttonState == HIGH;
+    buttonState = read; pressed = buttonState == LOW;
   }
   lastButtonRead = read;
   return pressed;
