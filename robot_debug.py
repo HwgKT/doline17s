@@ -31,6 +31,7 @@ from tkinter import filedialog, ttk
 import serial
 from serial.tools import list_ports
 from run_csv_lifecycle import RunCsvLifecycle
+from spp_csv_recorder import MAP_IDS, map_log_directory
 
 HDR = b"\xAA\x55"
 FMT = "<I16H2i2h5fB"
@@ -155,6 +156,10 @@ class App(tk.Tk):
         self.controls_q = queue.SimpleQueue()  # priority text replies / E-STOP ACK
         self.reader = None
         self.run_csv = RunCsvLifecycle(self.controls_q)
+        self.selected_map = None  # Require explicit choice; never guess a track.
+        self.map_status = tk.StringVar(value="CHƯA CHỌN MAP — chọn trước khi chạy")
+        self.map_buttons = {}
+        self.map_terminal_files = {}  # Map-scoped TXT history; no cross-map exports.
         self.marker_seq = 0
         self.marker_open = False
         self.marker_segment = 0
@@ -245,6 +250,21 @@ class App(tk.Tk):
                    font=("Consolas", 9, "bold")).pack(anchor="w", padx=8, pady=(1, 0))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
+
+        map_bar = tk.Frame(self, bg=PANEL, pady=3)
+        map_bar.pack(fill="x", padx=8, pady=(0, 3))
+        self.label(map_bar, "CHỌN MAP LƯU LOG:", bg=PANEL, fg=FG,
+                   font=("Segoe UI", 9, "bold")).pack(side="left", padx=(8, 9))
+        for map_id in MAP_IDS:
+            btn = tk.Button(map_bar, text=f"MAP {map_id}",
+                            command=lambda n=map_id: self.select_map(n),
+                            bg=GREY, fg="#ffffff", activebackground=CYAN,
+                            relief="raised", width=9, pady=1,
+                            font=("Segoe UI", 9, "bold"))
+            btn.pack(side="left", padx=3)
+            self.map_buttons[map_id] = btn
+        self.label(map_bar, textvariable=self.map_status, bg=PANEL, fg=CYAN,
+                   font=("Consolas", 9)).pack(side="left", padx=12)
 
         # Balanced 50/50 columns; bottom-right quarter reserved for SPP console.
         body = tk.Frame(self, bg=BG)
@@ -437,6 +457,8 @@ class App(tk.Tk):
         line = f"[{datetime.datetime.now().astimezone().isoformat(timespec='milliseconds')}] {message}\n"
         self.log_lines.append(line)
         self.session_log_file.write(line)
+        if self.selected_map in self.map_terminal_files:
+            self.map_terminal_files[self.selected_map].write(line)
         self.console.configure(state="normal")
         self.console.insert("end", line)
         if int(self.console.index("end-1c").split(".")[0]) > 1200:
@@ -453,6 +475,10 @@ class App(tk.Tk):
         self.log_lines.clear()
         self.session_log_file.seek(0)
         self.session_log_file.truncate()
+        if self.selected_map in self.map_terminal_files:
+            current = self.map_terminal_files[self.selected_map]
+            current.seek(0)
+            current.truncate()
         for widget in (self.console, self.log_mirror):
             if widget is not None and widget.winfo_exists():
                 widget.configure(state="normal")
@@ -517,46 +543,51 @@ class App(tk.Tk):
                 self.sensor_table.item(str(i), values=(i, raw, "—", "—", "—", "—", "—"))
 
     def export_txt(self):
+        if self.selected_map not in MAP_IDS:
+            self.log("Chọn MAP 1/2/3 trước khi xuất TXT.")
+            return
+        folder = map_log_directory(self.selected_map)
+        folder.mkdir(parents=True, exist_ok=True)
         path = filedialog.asksaveasfilename(defaultextension=".txt",
-            initialfile=time.strftime("linerobot_terminal_%Y%m%d_%H%M%S.txt"),
+            initialdir=str(folder),
+            initialfile=time.strftime(f"linerobot_map{self.selected_map}_terminal_%Y%m%d_%H%M%S.txt"),
             filetypes=[("Text log", "*.txt")])
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                self.session_log_file.flush()
-                self.session_log_file.seek(0)
+            source = self.map_terminal_files[self.selected_map]
+            with open(path, "w", encoding="utf-8") as destination:
+                source.flush()
+                source.seek(0)
                 try:
-                    shutil.copyfileobj(self.session_log_file, f)
+                    shutil.copyfileobj(source, destination)
                 finally:
-                    self.session_log_file.seek(0, 2)
-            self.log(f"Đã xuất terminal TXT: {path}")
-        except OSError as exc:
+                    source.seek(0, 2)
+            self.log(f"Đã xuất TXT riêng Map {self.selected_map}: {path}")
+        except (OSError, KeyError) as exc:
             self.log(f"Không thể xuất TXT: {exc}")
 
     def export_csv(self):
+        selected = self.run_csv.last
+        if selected is None:
+            self.log("Chưa có lượt chạy CSV nào để xuất")
+            return
+        folder = map_log_directory(selected.map_id)
+        folder.mkdir(parents=True, exist_ok=True)
         path = filedialog.asksaveasfilename(defaultextension=".csv",
-            initialfile=time.strftime("linerobot_telemetry_%Y%m%d_%H%M%S.csv"),
+            initialdir=str(folder),
+            initialfile=time.strftime(f"linerobot_map{selected.map_id}_export_%Y%m%d_%H%M%S.csv"),
             filetypes=[("CSV", "*.csv")])
         if not path:
             return
-        try:
-            if self.run_csv.last is None:
-                self.log("Chưa có lượt chạy CSV nào để xuất")
-                return
-            selected = self.run_csv.last
-
-            def export_job():
-                try:
-                    count = selected.export_snapshot(path)
-                    message = f"Đã xuất CSV ({count} mẫu): {path}"
-                except (OSError, ValueError) as exc:
-                    message = f"Lỗi xuất CSV: {exc}"
-                self.controls_q.put(("csv_export", message))
-
-            threading.Thread(target=export_job, daemon=True).start()
-        except OSError as exc:
-            self.log(f"Không thể xuất CSV: {exc}")
+        def export_job():
+            try:
+                count = selected.export_snapshot(path)
+                message = f"Đã xuất CSV Map {selected.map_id} ({count} mẫu): {path}"
+            except (OSError, ValueError) as exc:
+                message = f"Lỗi xuất CSV: {exc}"
+            self.controls_q.put(("csv_export", message))
+        threading.Thread(target=export_job, daemon=True).start()
 
     def refresh_ports(self):
         ports = [p.device for p in list_ports.comports()]
@@ -696,15 +727,48 @@ class App(tk.Tk):
         self.log("Đã GỬI các lệnh PID, đang chờ firmware xác nhận.")
         return True
 
+    def select_map(self, map_id):
+        """Map selection is immutable for the duration of a recording run."""
+        if (self.run_csv.active is not None or self.auto_running or
+                self.start_pending or self.stop_ack_deadline is not None):
+            self.log("Không đổi MAP khi AUTO/CSV đang hoạt động. Hãy STOP trước.")
+            return
+        folder = map_log_directory(map_id)
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            if map_id not in self.map_terminal_files:
+                self.map_terminal_files[map_id] = tempfile.TemporaryFile(
+                    mode="w+t", encoding="utf-8")
+        except OSError as exc:
+            self.log(f"Không tạo được thư mục Map {map_id}: {exc}")
+            return
+        self.selected_map = map_id
+        self.map_status.set(f"MAP {map_id} | logs/map_{map_id}/")
+        self.update_control_buttons()
+        self.log(f"ĐÃ CHỌN MAP {map_id}: mọi CSV mới lưu vào {folder}")
+
+    def update_map_buttons(self):
+        locked = (self.run_csv.active is not None or self.auto_running or
+                  self.start_pending or self.stop_ack_deadline is not None)
+        for map_id, button in self.map_buttons.items():
+            selected = map_id == self.selected_map
+            button.configure(state="disabled" if locked else "normal",
+                             relief="sunken" if selected else "raised",
+                             bg=CYAN if selected else GREY,
+                             fg="#0f1420" if selected else "#ffffff",
+                             disabledforeground="#0f1420" if selected else "#d1d5db")
+
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
                      and not self.estop_pending and not self.start_pending
                      and not self.auto_running and self.run_csv.active is None
+                     and self.selected_map in MAP_IDS
                      and self.calibration_ok
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
+        self.update_map_buttons()
 
     def set_auto_running(self, running):
         now = time.monotonic()
@@ -752,6 +816,35 @@ class App(tk.Tk):
         self.start_confirmed = False
         self.csv_status.set(f"CSV ĐANG ĐÓNG: {recorder.path.name}")
         self.log(f"CSV đang chốt ({reason}): {recorder.path}")
+        self.update_control_buttons()
+
+    def open_run_csv(self, source):
+        """One map-tagged recorder per AUTO run, whether START came from GUI or GPIO34."""
+        if self.run_csv.active is not None:
+            return self.run_csv.active
+        if self.selected_map not in MAP_IDS:
+            self.log(f"KHÔNG GHI CSV [{source}]: chưa chọn MAP 1/2/3.")
+            return None
+        if self.reader is None or not self.reader.is_alive():
+            self.log(f"KHÔNG GHI CSV [{source}]: chưa kết nối SPP.")
+            return None
+        if not self.calibration_ok or any(v is None for v in self.cal_thresholds):
+            self.log(f"KHÔNG GHI CSV [{source}]: chưa nhận đủ CAL_DUMP 16 mắt.")
+            self.send_command("CAL_DUMP")
+            return None
+        try:
+            recorder = self.run_csv.begin(
+                self.reader, CSV_HEADER, (list(self.cal_min), list(self.cal_max)),
+                list(self.cal_thresholds), self.selected_map)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.log(f"Không tạo được CSV [{source}]: {exc}")
+            return None
+        self.last_csv_total = 0
+        self.stop_ack_deadline = None
+        self.csv_status.set(f"CSV MAP {recorder.map_id}: {recorder.path.name}")
+        self.log(f"CSV BẮT ĐẦU [{source}] Map {recorder.map_id}: {recorder.path}")
+        self.update_control_buttons()
+        return recorder
 
     def start_line(self):
         if self.run_csv.active is not None:
@@ -759,6 +852,9 @@ class App(tk.Tk):
             return
         self.marker_open = False
         self.marker_segment = 0
+        if self.selected_map not in MAP_IDS:
+            self.log("Chưa chọn MAP: bấm MAP 1, MAP 2 hoặc MAP 3 trước START.")
+            return
         if self.estop_latched is not False or self.auto_running or self.start_pending:
             self.log("Chưa thể START: AUTO đang chạy hoặc firmware bị khóa.")
             return
@@ -769,18 +865,10 @@ class App(tk.Tk):
             self.log("Chưa nhận đủ 16 ngưỡng TH từ ESP32; gửi lại CAL_DUMP.")
             self.send_command("CAL_DUMP")
             return
-        try:
-            calib = (self.cal_min, self.cal_max)
-            recorder = self.run_csv.begin(
-                self.reader, CSV_HEADER, calib, list(self.cal_thresholds))
-        except (OSError, RuntimeError, ValueError) as exc:
-            self.log(f"Không tạo được CSV, chưa gửi AUTO: {exc}")
-            return
-        self.last_csv_total = 0
-        self.stop_ack_deadline = None
+        recorder = self.open_run_csv("GUI START")
+        if recorder is None:
+            return  # Never start GUI AUTO unless CSV already opened successfully.
         self.start_confirmed = False
-        self.csv_status.set(f"CSV GHI: {recorder.path.name}")
-        self.log(f"CSV BẮT ĐẦU: {recorder.path}")
         if self.send_command("AUTO"):
             self.start_pending = True
             self.control_state.set("Đã gửi AUTO — chờ ESP32 xác nhận.")
@@ -887,7 +975,9 @@ class App(tk.Tk):
             self.control_state.set("Đã mở khóa E-STOP — động cơ vẫn dừng.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
-        elif message == "MODE: AUTO PID":
+        elif message in ("MODE: AUTO PID", "BUTTON34: AUTO_STARTED"):
+            if self.run_csv.active is None:
+                self.open_run_csv("GPIO34" if message.startswith("BUTTON34") else "SPP AUTO")
             self.start_pending = False
             self.start_confirmed = True
             self.all_black_frames = 0
@@ -916,7 +1006,14 @@ class App(tk.Tk):
             dropped = re.search(r"\bdrop=(\d+)\b", message)
             auto = re.search(r"\bauto=(\d)\b", message)
             if auto:
-                self.set_auto_running(auto.group(1) == "1")
+                running = auto.group(1) == "1"
+                if running and self.run_csv.active is None:
+                    self.open_run_csv("DIAG AUTO=1")
+                elif (not running and self.run_csv.active is not None and
+                      self.start_confirmed and self.stop_ack_deadline is None):
+                    self.finish_run_csv("DIAG: AUTO=0")
+                self.set_auto_running(running)
+                self.update_control_buttons()
             if loop and pid and sent:
                 self.last_diag_rx = time.monotonic()
                 warning = f"    TX drop: {dropped.group(1)}" if dropped else ""
@@ -936,7 +1033,10 @@ class App(tk.Tk):
                 self.estop_latched = estop.group(1) == "1"
                 self.estop_pending = False
                 self.start_pending = False
-                self.set_auto_running(bool(auto and auto.group(1) == "1"))
+                firmware_running = bool(auto and auto.group(1) == "1")
+                if firmware_running and self.run_csv.active is None and not self.estop_latched:
+                    self.open_run_csv("STATUS AUTO=1")
+                self.set_auto_running(firmware_running)
                 if self.estop_latched:
                     self.set_auto_running(False)
                     self.control_state.set("E-STOP đang khóa — gửi RESET_ESTOP trong terminal để mở khóa.")
@@ -953,7 +1053,8 @@ class App(tk.Tk):
                 self.update_control_buttons()
         elif message in ("MOTOR: STOP", "MODE: MANUAL",
                               "[SAFE] MANUAL DEADMAN: MOTOR STOP",
-                              "ERR: ADC_READ_FAULT_MOTORS_STOPPED"):
+                              "ERR: ADC_READ_FAULT_MOTORS_STOPPED",
+                              "BUTTON34: STOP", "AUTO: START_BOX_TIMEOUT_MOTORS_STOPPED"):
             self.set_auto_running(False)
             self.start_pending = False
             self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + message)
@@ -1174,6 +1275,8 @@ class App(tk.Tk):
         self.disconnect()
         self.run_csv.close_all()
         self.session_log_file.close()
+        for scoped_file in self.map_terminal_files.values():
+            scoped_file.close()
         self.destroy()
 
 
