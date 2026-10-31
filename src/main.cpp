@@ -387,12 +387,21 @@ void loop() {
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
-    // A full-black finish (3 confirmed sensor samples) stops the wheels in
-    // pid_line_follow_step(), but AUTO previously remained enabled forever.
-    // Finish the AUTO session too, so the PC can close its log and START again.
+    // A latched finish or PID stop must end AUTO, otherwise Python remains
+    // in AUTO while both PWM outputs are zero and START stays locked.
+    // Snapshot the stop reason BEFORE safeStop() clears PID state.
     if(newCase==LINE_CASE_STOPPED){
+      const bool fullBlackFinish=pid_finish_line_latched();
+      const uint8_t stopMap=pid_get_selected_map();
+      const int32_t stopEnc=pid_get_run_encoder_progress();
       safeStop();
-      reply("AUTO_FINISHED: STOPPED");
+      char stopEvent[128];
+      snprintf(stopEvent,sizeof(stopEvent),
+        "%s map=%u runEnc=%ld t_ms=%lu",
+        fullBlackFinish ? "AUTO_FINISHED: FULL_BLACK_3" :
+                          "AUTO_STOPPED: PID_STOPPED",
+        (unsigned)stopMap,(long)stopEnc,(unsigned long)millis());
+      reply(stopEvent);
     }
     if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
       static const char* const labels[]={
