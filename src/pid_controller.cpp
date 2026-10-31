@@ -124,16 +124,26 @@ static float outerSensorSeverity(uint16_t mask) {
     }
     return severity;
 }
-static bool hasAdjacentLineSensors(uint16_t mask) {
-    return (mask & (uint16_t)(mask >> 1)) != 0;
+// A real narrow line must form ONE contiguous black run. An isolated second
+// cluster elsewhere on the sensor array is junction/geometry ambiguity.
+static bool isSingleContiguousRun(uint16_t mask) {
+    bool sawBlack = false;
+    bool sawGapAfterBlack = false;
+    for (uint8_t i = 0; i < N_SENSORS; ++i) {
+        if ((mask & (uint16_t)(1U << i)) != 0) {
+            if (sawGapAfterBlack) return false;
+            sawBlack = true;
+        } else if (sawBlack) {
+            sawGapAfterBlack = true;
+        }
+    }
+    return sawBlack;
 }
-// A wide junction, two disjoint black regions, or an edge-only sighting is
-// not enough evidence to leave SEARCH.
 static bool isCenteredNarrowLine(uint16_t mask, float position, uint8_t blackCount) {
     return blackCount > 0 && blackCount <= 6 &&
            fabsf(position) <= TURN_CENTERED_POSITION &&
            (mask & TURN_CENTER_SENSOR_MASK) != 0 &&
-           (blackCount == 1 || hasAdjacentLineSensors(mask));
+           isSingleContiguousRun(mask);
 }
 static void limitMotorCommandPeak(float& left, float& right, float limit) {
     const float peak = fmaxf(fabsf(left), fabsf(right));
@@ -227,6 +237,7 @@ static void beginRecoverySearch(TurnState direction, uint32_t now) {
         recoveryStartedMs = now;
     }
     ++confirmedLosses;
+    lineLocked = false; // SEARCH does not count as a confirmed line lock.
     lastTurnDirection = direction;
     turnState = searchStateFor(direction);
     searchStartedMs = now;
