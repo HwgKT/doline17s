@@ -189,18 +189,18 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 | **Case 5** | `LINE_CASE_CROSS_LINE` | $\ge 11$ mắt cảm biến đều nhận diện vạch đen | Vạch ngang/ngã tư: Đi thẳng với $70\%$ BaseSpeed để vượt qua vạch |
 | **Case 6** | `LINE_CASE_T_LEFT` | Phân loại rẽ ngã 3 trái | Cơ chế rẽ trái |
 | **Case 7** | `LINE_CASE_T_RIGHT` | Phân loại rẽ ngã 3 phải | Cơ chế rẽ phải |
-| **Case 8** | `LINE_CASE_STOPPED` | Đang tắt AUTO, hoặc chốt đích khi cả 16 mắt đen liên tục $\ge 50$ ms | Dừng cả hai động cơ (`PWM = 0`); vạch ngang có 11–15 mắt đen chỉ chạy qua |
+| **Case 8** | `LINE_CASE_STOPPED` | Đang tắt AUTO, hoặc chốt đích khi cả 16 mắt đều đen trong 3 chu kỳ PID liên tiếp | Dừng cả hai động cơ (`PWM = 0`); vạch ngang có 11–15 mắt đen chỉ chạy qua |
 | **Case 9** | `LINE_CASE_DASHED_LINE` | Mất vạch đen $< 40$ ms | Duy trì quán tính góc lái cũ (coast với $70\%$ lực bẻ lái trước đó) |
 | **Case 10** | `LINE_CASE_STARTUP_COAST`| Mất line trong 5 giây đầu sau khi bật AUTO | Chạy thẳng với PWM tối đa $65$ để tìm lại line |
 | **Case 11** | `LINE_CASE_REACQUIRE_SETTLE` | SEARCH đã xác nhận line hẹp gần tâm liên tục 40 ms; đang xác nhận bám lại | Điều khiển PID với Base PWM tăng dần trong 150 ms; giới hạn correction 1B, không đảo chiều bánh do correction |
 
 - **Cơ chế Pivot Search khi mất line sau cua:**
   - Nếu mất vạch quá $40$ ms sau khi vừa vào cua: Xe quay tại chỗ (Pivot) với $PWM = \pm 85$ (tạo chênh lệch $170$ PWM giữa 2 bánh) về hướng cuối cùng nhìn thấy line.
-  - **SEARCH xác nhận lại line:** phải thấy line hẹp (1–6 mắt đen), gần tâm (|error| ≤ 22), có ít nhất một mắt ở vùng tâm 6–9, liên tục **40 ms**. Vạch ngang rộng / các mắt ngoài đơn lẻ không làm thoát SEARCH; khi có ứng viên hợp lệ, xe tạm dừng PWM để kiểm tra.
+  - **SEARCH xác nhận lại line:** phải thấy line hẹp (1–6 mắt đen liền kề, không có cụm rời), gần tâm (|error| ≤ 22), có ít nhất một mắt ở vùng tâm 6–9, liên tục **40 ms**. Vạch ngang rộng / các mắt ngoài đơn lẻ không làm thoát SEARCH; khi có ứng viên hợp lệ, xe tạm dừng PWM để kiểm tra.
   - **REACQUIRE_SETTLE (Case 11):** chạy theo PID tốc độ thấp, Base phục hồi từ tối đa 65 theo thời gian **150 ms** và theo bộ giảm tốc do sai số. Giới hạn correction tạm thời **1B** (NORMAL_PID vẫn **2B**). Nếu tín hiệu không đáng tin liên tục **40 ms**, quay lại SEARCH; không chạy thẳng qua vạch rộng trong giai đoạn phục hồi.
   - **Timeout an toàn:** mỗi đợt SEARCH tối đa **2000 ms**; toàn bộ phiên phục hồi (kể cả SEARCH → SETTLE → SEARCH lặp) tối đa **2500 ms**. Timeout chốt dừng động cơ cho đến khi người dùng STOP rồi START/AUTO lại.
   - **Giới hạn:** bản này chưa tăng PWM SEARCH (vẫn ±85), chưa can thiệp bộ điều khiển tốc độ kín encoder và chưa thay định dạng khung telemetry SPP 72 byte; dùng lệnh `STATUS` để xem `case=11` khi phục hồi.
-- **Chốt đích toàn đen:** Chỉ mask cảm biến `0xFFFF` mới bắt đầu xác nhận đích. Bất kỳ mắt nào đọc trắng đều xóa bộ đếm thời gian; đủ 50 ms liên tục thì chốt `finishLineLatched`, dừng động cơ và kết thúc AUTO. Vạch giao cắt rộng với 11–15 mắt đen vẫn được xử lý như `LINE_CASE_CROSS_LINE`.
+- **Chốt đích toàn đen:** Chỉ mask cảm biến `0xFFFF` mới bắt đầu xác nhận đích. Bất kỳ mắt nào đọc trắng đều xóa bộ đếm thời gian; đủ 3 chu kỳ PID liên tiếp thì chốt `finishLineLatched`, dừng động cơ và kết thúc AUTO. Vạch giao cắt rộng với 11–15 mắt đen vẫn được xử lý như `LINE_CASE_CROSS_LINE`.
 
 ### 3.6. Phân hệ Truyền thông Bluetooth Classic SPP & Định dạng Telemetry ([bt_telemetry.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/bt_telemetry.cpp) & [bt_telemetry.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/bt_telemetry.h))
 - **Giao thức:** Bluetooth Serial Port Profile (SPP) tiêu chuẩn, tên thiết bị phát sóng `"LineRobot"`.
