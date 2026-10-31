@@ -24,10 +24,11 @@ static float lastDashedCorrection = 0;   // remembered PID output for dashed-lin
 
 namespace {
 constexpr uint32_t LINE_ACQUIRE_MS = 10;
-constexpr uint32_t LINE_LOSS_MS = 40;           // was 25 — longer coast before declaring lost
+constexpr uint32_t LINE_LOSS_MS = 30;           // was 40 — faster loss detection reduces stutter duration
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
-constexpr int16_t DROPOUT_FORWARD_PWM = 65;
+constexpr uint8_t FULL_LINE_MIN_SENSORS = N_SENSORS - 1;
+constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
 constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
@@ -74,7 +75,6 @@ uint8_t derivativeWarmupFrames = 0;
 uint8_t reacquireSpeedFrames = 0;
 bool turnMissing = false;
 bool startupLossActive = false;
-bool fullLineCandidate = false;
 bool finishLineLatched = false;
 uint8_t fullLineFrames = 0;
 
@@ -154,7 +154,6 @@ static void resetLineTracking() {
     reacquireSpeedFrames = 0;
     turnMissing = false;
     startupLossActive = false;
-    fullLineCandidate = false;
     finishLineLatched = false;
     fullLineFrames = 0;
     lastDashedCorrection = 0;
@@ -259,8 +258,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
 
-    if (mask == 0xFFFFU) {
-        fullLineCandidate = true;
+    if (bitCount16(mask) >= FULL_LINE_MIN_SENSORS) {
         if (fullLineFrames < 3) ++fullLineFrames;
         if (fullLineFrames >= 3) {
             finishLineLatched = true;
@@ -269,7 +267,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             return LINE_CASE_STOPPED;
         }
     } else {
-        fullLineCandidate = false;
         fullLineFrames = 0;
     }
 
@@ -327,6 +324,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 centeredTurnFrames = 0;
                 missing = false;
                 derivativeHistoryValid = false;
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES; // guard against D-spike on turn exit
                 lineLocked = true;
                 if (previouslyLocked) ++reacquisitions;
                 previouslyLocked = true;
@@ -487,6 +485,10 @@ void pid_line_follow_step(void) {
             const float rawD = pidConfig.Kd * (err - lastError) / measuredDt;
             // First-order low-pass: alpha=0.6 balances responsiveness vs noise
             d = 0.6f * rawD + 0.4f * lastDTerm;
+            // Hard clamp: prevents catastrophic D-spikes when re-entering PID after a turn
+            constexpr float D_CLAMP = 200.0f;
+            if (d >  D_CLAMP) d =  D_CLAMP;
+            if (d < -D_CLAMP) d = -D_CLAMP;
         }
         lastError = err;
         derivativeHistoryValid = true;
@@ -544,14 +546,15 @@ void pid_line_follow_step(void) {
         const int16_t speed = clampPwm((float)pidConfig.baseSpeed * 0.7f);
         motor_set_speeds(speed, speed);
     } else if (currentCase == LINE_CASE_DASHED_LINE) {
-        // Instead of going straight, coast with the last known correction.
-        // This maintains the turn trajectory through brief line gaps.
+        // Coast at elevated speed through brief line gaps (dashed line / intersection).
+        // Use a heavily-damped correction so the robot goes mostly straight instead of
+        // following the last turn direction, which causes sideways stutter.
         const float coastBase = fminf(governedForwardSpeed,
                                       (float)DROPOUT_FORWARD_PWM);
-        const float coastCorrection = lastDashedCorrection * 0.7f; // damped
+        const float coastCorrection = lastDashedCorrection * 0.3f; // was 0.7f — less sideways drift
         float leftCommand = coastBase + coastCorrection;
         float rightCommand = coastBase - coastCorrection;
-        limitMotorCommandPeak(leftCommand, rightCommand, coastBase);
+        limitMotorCommandPeak(leftCommand, rightCommand, coastBase * 1.5f); // was coastBase — allow outer wheel to stay up
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {

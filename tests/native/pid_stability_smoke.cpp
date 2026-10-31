@@ -233,12 +233,15 @@ int main(void) {
     const int16_t recoveringPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
     assert(recoveringPwm==centeredPwm);
 
-    // Stop only after all 16 eyes stay black for 50 ms.
-    for(int i=0;i<N_SENSORS;i++)sensorRaw[i]=2000;
+    // A wide crossing with two white sensors is not a finish marker.
+    setPattern("1111111111111100");
     stepMs(50);
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
     assert(leftPwm==84 && rightPwm==84);
-    stepMs(2);
+
+    // A finish marker stops after 3 frames even if one eye misses black.
+    setPattern("1111111111111110");
+    stepMs(6);
     assert(pid_get_current_case()==LINE_CASE_STOPPED);
     assert(leftPwm==0 && rightPwm==0);
     onlyEye(8,1700);
