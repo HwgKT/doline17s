@@ -196,7 +196,7 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="255 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: -- | RAMP 0-300 | CRUISE 300-2050 | BRAKE 2050-2450")
+            value="HS: -- | RAMP 0-300 | CRUISE 300-1800 | BRAKE 1800-2300 | HOLD 90 qua cua")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -1108,7 +1108,7 @@ class App(tk.Tk):
                         self.hs_peak_feedback.set(
                             f"ESP32 báo {confirmed}; chờ xác nhận PWM {expected}")
                     self.high_speed_status.set(
-                        f"HS: READY | PEAK={confirmed} | BRAKE=2050 -> 2450")
+                        f"HS: READY | PEAK={confirmed} | BRAKE=1800-2300 | HOLD=90")
                     self.update_control_buttons()
         elif message.startswith("ERR: HS_PEAK_"):
             if self.hs_peak_pending is not None:
@@ -1130,7 +1130,7 @@ class App(tk.Tk):
             if stage:
                 self.high_speed_status.set(
                     f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE=2050 -> 2450"
+                    f"| PEAK={self.high_speed_peak} | BRAKE=1800-2300 | HOLD=90"
                 )
         elif message.startswith("DIAG:"):
             peak = re.search(r"\bpeak=(\d+)\b", message)
@@ -1147,12 +1147,12 @@ class App(tk.Tk):
             hs = re.search(r"\bhs=(\d+)\b", message)
             tick = re.search(r"\brunEnc=(-?\d+)\b", message)
             if hs:
-                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE", "ABORTED")
+                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE", "ABORTED", "HOLD")
                 state = int(hs.group(1))
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
                 self.high_speed_status.set(
                     f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE=2050 -> 2450"
+                    f"| PEAK={self.high_speed_peak} | BRAKE=1800-2300 | HOLD=90"
                 )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
