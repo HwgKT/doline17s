@@ -197,8 +197,13 @@ int main(void) {
         sensorRaw[15] = 2000;
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6);
-        advanceTo(3100, origin);
+        // The moment the sensor recenters, TURN_RIGHT still persists for
+        // two controller frames. Forward target must remain at 90, not BASE.
         setLine();
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 6);
+        assert(pwmL == 90 && pwmR == 90);
+        advanceTo(3100, origin);
         stepMs(20);
         assert(pid_get_high_speed_stage() == 6);
         stepMs(60);
