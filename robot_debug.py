@@ -71,7 +71,8 @@ class Reader(threading.Thread):
 
     def __init__(self, port, out_queue, recorder=None, control_queue=None):
         super().__init__(daemon=True)
-        self.ser = serial.Serial(port, 115200, timeout=0.05)
+        # Never let a stalled Windows SPP COM write freeze the Tk UI.
+        self.ser = serial.Serial(port, 115200, timeout=0.05, write_timeout=0.5)
         self.out_queue = out_queue
         self.recorder = recorder
         self.control_queue = control_queue if control_queue is not None else out_queue
@@ -142,7 +143,9 @@ class Reader(threading.Thread):
                 del self.buf[:1]
 
     def send(self, text):
-        self.ser.write((text + "\n").encode("utf-8"))
+        data = (text + "\n").encode("utf-8")
+        if self.ser.write(data) != len(data):
+            raise serial.SerialTimeoutException("SPP command was only partially written")
 
 
 class App(tk.Tk):
@@ -1088,6 +1091,10 @@ class App(tk.Tk):
     def on_text(self, message):
         self.log(f"RX < {message}")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
+            self.stop_ack_deadline = None
+            self.stop_verify_pending = False
+            self.stop_verify_deadline = None
+            self.stop_verify_retries = 0
             self.estop_latched = True
             self.estop_pending = False
             self.start_pending = False
