@@ -119,6 +119,7 @@ Thực hiện tuần tự 4 bước sau để đảm bảo xe chạy chính xác
 3. Nhấc xe sang đặt cả 16 mắt lên **bề mặt vạch đen hoàn toàn**.
 4. Trên app bấm nút **Lấy mẫu Đen (Black)** (hoặc bấm nút vật lý lần 2).
 5. Khi màn hình hiện `CAL_OK_SAVED`, hệ thống đã tính toán xong 16 ngưỡng $TH_0 \dots TH_{15}$ và lưu an toàn vào NVS.
+6. Nếu thao tác trực tiếp bằng nút vật lý, bấm GPIO34 lần 3 để chạy AUTO PID; cấu hình PID đã lưu trong NVS được dùng (nếu chưa có profile hợp lệ thì dùng mặc định).
 
 ### Bước 2: Thiết lập Tốc độ Cơ sở & PID
 - **Tốc độ cơ bản (`Base Speed`):** Đặt từ `100` đến `160` (tối đa 255).

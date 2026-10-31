@@ -63,8 +63,7 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
                  GPIO 19 -->| PIN_MUX_S2        |--> CD74HC4067 S2 (Bit 2)
                  GPIO 23 -->| PIN_MUX_S3        |--> CD74HC4067 S3 (Bit 3)
                             |                   |
-                 GPIO 34 <--| PIN_CALIB_BUTTON  |<-- Nút Calib (Active LOW, pull-up ngoài 10 kΩ)
-                 GPIO 35 <--| PIN_START_BUTTON  |<-- Nút Start (Active LOW, pull-up ngoài 10 kΩ)
+                 GPIO 34 <--| PIN_CALIB_BUTTON  |<-- Nút đa chức năng (Active LOW, pull-up ngoài 10 kΩ)
                             |                   |
                  GPIO 21 <--| PIN_ENCODER_L1    |<-- Encoder Trái Kênh A
                  GPIO 22 <--| PIN_ENCODER_L2    |<-- Encoder Trái Kênh B
@@ -76,8 +75,7 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
                  GPIO 27 -->| PIN_MOTOR_R1      |--> Driver Động cơ Phải (Tiến)
                  GPIO 13 -->| PIN_MOTOR_R2      |--> Driver Động cơ Phải (Lùi)
                             |                   |
-                 GPIO 2  -->| PIN_DEBUG_LED     |--> LED Onboard (Nháy: ngắt BT / Sáng: nối BT)
-                 GPIO 16 -->| PIN_ACTION_LED    |--> LED RX2 (HIGH sáng; tắt mặc định; ACK 3 lần)
+                 GPIO 2  -->| PIN_ACTION_LED    |--> LED onboard (HIGH sáng; tắt mặc định; ACK 3 lần)
                             +-------------------+
 ```
 
@@ -114,18 +112,18 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 - **Lưu trữ NVS (Non-Volatile Storage):**
   - Cấu trúc `Profile` 76 bytes, lưu trong NVS namespace `"line16cal"` với Magic number `0x4C313643`, Version `1` và kiểm tra toàn vẹn bằng mã CRC32. Khởi động lại MCU tự nạp cấu hình nếu CRC hợp lệ.
 
-### 3.2.1. Nút Calib, nút Start và LED phản hồi
-- **Phần cứng nút:** GPIO34 (CALIB) và GPIO35 (START) active LOW. Mỗi chân cần điện trở kéo lên ngoài 10 kΩ tới 3.3 V; nút nối chân xuống GND. GPIO34/35 không có điện trở kéo nội.
-- **Debounce:** Mỗi nút được lấy mẫu độc lập, debounce 30 ms; chỉ phát sự kiện ở cạnh nhấn HIGH → LOW. Giữ nút không lặp sự kiện; cần thả rồi nhấn lại.
-- **CALIB:** bắt đầu ở WAIT_WHITE. Nhấn lần một gọi calibration WHITE hiện có, tích lũy 128 khung không chặn và kiểm tra noise từng mắt; chỉ khi có sự kiện `CAL_WHITE_DONE` mới xác nhận LED và chuyển logic sang WAIT_BLACK. Nhấn lần hai gọi calibration BLACK, kiểm tra contrast/noise và lưu NVS; chỉ `CAL_SAVED` mới xác nhận thành công, rồi quay về WAIT_WHITE. Nếu WHITE lỗi thì thử lại WHITE; nếu BLACK lỗi thì giữ mẫu WHITE trong RAM để thử lại BLACK. Profile NVS cũ vẫn được giữ.
-- **START:** dùng cùng hàm chuyển AUTO với lệnh SPP `AUTO`/`START`. Từ chối khi đang AUTO, E-STOP, ADC bench/lỗi ADC, đang calib, đang chờ BLACK hoặc calibration chưa hợp lệ. Không reset encoder và dùng bộ PID hiện hành.
-- **LED:** GPIO16 (RX2), active HIGH, mặc định LOW/tắt. Sau mỗi hành động nút thành công, chạy đúng ba chu kỳ HIGH 200 ms / LOW 200 ms. State machine `millis()` không dùng `delay()`; nếu có xác nhận mới khi đang nháy, mẫu nháy khởi động lại; không có self-test hoặc nháy khi chỉ nhận nút.
-- **Luồng:** `GPIO → debounce → sự kiện nút → handler calibration/AUTO hiện có → kết quả thành công → LED ACK`. Các log chẩn đoán đi qua `sppLogLine` và không thay đổi frame telemetry 72 byte. Module `include/button.h` và `src/button.cpp` quản lý GPIO34/35, debounce, trình tự CALIB vật lý, START và LED GPIO16; `main.cpp` chỉ cung cấp callback START/STOP và chuyển sự kiện hiệu chuẩn. Logic debounce/LED thuần C++ nằm trong `include/input_logic.h`, có smoke test host tại `tests/native/input_logic_smoke.cpp`.
+### 3.2.1. Nút đa chức năng và LED phản hồi
+- **Phần cứng nút:** chỉ dùng GPIO34 active LOW; cần điện trở kéo lên ngoài 10 kΩ tới 3.3 V và nút nối GPIO34 xuống GND vì GPIO34 không có điện trở kéo nội. GPIO35 không còn được dùng làm nút.
+- **Debounce:** nút được debounce 30 ms; chỉ phát sự kiện ở cạnh nhấn HIGH → LOW. Giữ nút không lặp sự kiện; cần thả rồi nhấn lại.
+- **Chu trình nút:** lần nhấn 1 lấy mẫu WHITE cho cả 16 mắt, tích lũy 128 khung không chặn và kiểm tra noise; chỉ khi có sự kiện `CAL_WHITE_DONE` chuyển sang bước BLACK. Lần nhấn 2 lấy mẫu BLACK, kiểm tra contrast/noise và lưu hiệu chuẩn vào NVS; chỉ khi có `CAL_SAVED` chuyển sang bước chạy AUTO. Lần nhấn 3 bật AUTO bằng cùng handler an toàn với lệnh SPP `AUTO`/`START`, dùng cấu hình PID đã nạp từ NVS khi khởi động (nếu không có profile hợp lệ thì firmware dùng mặc định). Nhấn tiếp sau khi chạy thành công bắt đầu lại chu trình từ WHITE; bước calib sẽ dừng động cơ trước khi lấy mẫu.
+- **Lỗi/bận:** bước chỉ tiến lên sau hiệu chuẩn tương ứng thành công; nếu mẫu WHITE/BLACK lỗi, lần nhấn tiếp theo thử lại bước đó. Lệnh AUTO bị từ chối nếu E-STOP, ADC bench/lỗi ADC hoặc điều kiện an toàn khác không đạt; lần nhấn tiếp theo thử lại AUTO.
+- **LED:** GPIO2, dùng LED onboard active HIGH, mặc định LOW/tắt. Sau mỗi hành động nút thành công, chạy đúng ba chu kỳ HIGH 200 ms / LOW 200 ms. State machine `millis()` không dùng `delay()`; nếu có xác nhận mới khi đang nháy, mẫu nháy khởi động lại; không có self-test hoặc nháy khi chỉ nhận nút. LED không còn dùng để báo trạng thái kết nối Bluetooth.
+- **Luồng:** `GPIO34 → debounce → WHITE → BLACK → AUTO → LED ACK sau mỗi bước thành công`. Các log chẩn đoán đi qua `sppLogLine` và không thay đổi frame telemetry 72 byte. Module `include/button.h` và `src/button.cpp` quản lý nút GPIO34, debounce, chu trình hiệu chuẩn/chạy AUTO và LED GPIO2; `main.cpp` chỉ cung cấp callback START/STOP và chuyển sự kiện hiệu chuẩn. Logic debounce/LED thuần C++ nằm trong `include/input_logic.h`, có smoke test host tại `tests/native/input_logic_smoke.cpp`.
 
 ### 3.2.2. Chạy độc lập Bluetooth và lưu cấu hình PID
 - Bluetooth Classic SPP là tùy chọn. `loop()` luôn quét ADC và chạy PID khi AUTO được bật vật lý, bất kể `btBegin()` thành công hoặc đang có client SPP hay không.
 - Khi SPP mất kết nối, firmware chỉ dừng chuyển động manual đang điều khiển qua Bluetooth (`manualActive`). AUTO vật lý không bị dừng; E-STOP, ADC fault và các điều kiện an toàn khác vẫn có hiệu lực.
-- Calibration cảm biến nằm độc lập trong NVS namespace `line16cal`. Cấu hình PID nằm trong namespace `line16pid`, key `config`, có magic/version/size/CRC và kiểm tra Kp/Ki/Kd trong 0–50, Base PWM trong 0–255. Boot khôi phục profile hợp lệ; nếu không có profile hợp lệ thì dùng mặc định hiện hành `Kp=2.0, Ki=0.0, Kd=0.0, Base=100`.
+- Calibration cảm biến nằm độc lập trong NVS namespace `line16cal`. Cấu hình PID nằm trong namespace `line16pid`, key `config`, có magic/version/size/CRC và kiểm tra Kp/Ki/Kd trong 0–50, Base PWM trong 0–255. Boot khôi phục profile hợp lệ; nếu không có profile hợp lệ thì dùng mặc định hiện hành `Kp=3.5, Ki=0.0, Kd=0.08, Base=195`.
 - Thay đổi PID qua `KP:`, `KI:`, `KD:` hoặc `BASE:` chỉ cập nhật RAM. Gửi `PID_SAVE` khi motor đã dừng để ghi NVS một lần có chủ đích; không ghi NVS trong vòng PID. `maxSpeed=255` là giới hạn firmware không có API tuning nên không nằm trong profile người dùng.
 
 ### 3.3. Phân hệ Động cơ & Driver LEDC PWM ([motor.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/motor.cpp) & [motor.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/motor.h))
@@ -302,7 +300,7 @@ Bảng dưới đây chia toàn bộ các file trong workspace thành các nhóm
 ### Nhóm 8: Khởi tạo & Điều phối Vòng lặp Chính (Main Core)
 | File | Đường dẫn | Trách nhiệm chính & Nội dung cốt lõi |
 | :--- | :--- | :--- |
-| **`src/main.cpp`** | [main.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/main.cpp) | Trái tim điều phối firmware: xử lý SPP, nút CALIB/START đã debounce, state machine LED ACK, ADC, PID và telemetry. AUTO vật lý/SPP dùng chung handler; khi PID chốt đích, tắt AUTO, dừng xe và báo `[FINISH]`. |
+| **`src/main.cpp`** | [main.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/main.cpp) | Trái tim điều phối firmware: xử lý SPP, chu trình nút GPIO34 WHITE/BLACK/AUTO đã debounce, state machine LED ACK, ADC, PID và telemetry. AUTO vật lý/SPP dùng chung handler; khi PID chốt đích, tắt AUTO, dừng xe và báo `[FINISH]`. |
 | **`include/input_logic.h`** | [input_logic.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/input_logic.h) | Logic độc lập phần cứng cho debounce cạnh nhấn active-low 30 ms và state machine LED ACK 3 nhịp 200 ms, dùng chung bởi firmware và native smoke test. |
 
 ### Nhóm 9: Giao diện Cũ / BLE UART Dự phòng

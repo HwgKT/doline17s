@@ -16,10 +16,9 @@
 
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
-constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
-constexpr float DEFAULT_KP=2.0f, DEFAULT_KI=0.0f, DEFAULT_KD=0.0f;
-constexpr int16_t DEFAULT_BASE_SPEED=100;
+constexpr float DEFAULT_KP=3.5f, DEFAULT_KI=0.0f, DEFAULT_KD=0.08f;
+constexpr int16_t DEFAULT_BASE_SPEED=195;
 constexpr uint32_t PID_PROFILE_MAGIC=0x50494431UL; // "PID1"
 constexpr uint16_t PID_PROFILE_VERSION=1;
 struct PidProfile {
@@ -32,13 +31,13 @@ struct PidProfile {
 };
 static_assert(sizeof(PidProfile)==28,"PID NVS profile layout changed");
 static_assert(offsetof(PidProfile,crc)==24,"PID NVS CRC offset changed");
-bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
+bool sppStarted=false, btPrevious=false, manualActive=false;
 bool pidProfilePersistent=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
 uint16_t streamHz=300;
 uint32_t streamPeriodUs=1000000UL/300;
-uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
+uint32_t lastTxUs=0,lastDiagUs=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 BtTxStats lastTxStats{};
 
@@ -86,10 +85,6 @@ bool savePidProfile() {
   return ok;
 }
 
-void ledWrite(bool on) {
-  ledOn=on;
-  digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
-}
 const char *startAuto() {
   if(pid_is_auto_mode())return "ALREADY_RUNNING";
   if(adcBenchActive())return "ADC_BENCH_ACTIVE";
@@ -303,11 +298,11 @@ void command(const String &raw) {
   }
   reply(String("ERR: UNKNOWN_COMMAND ")+s);
 }
-void connectionState(uint32_t now) {
+void connectionState() {
   bool connected=sppStarted&&btConnected();
   if(connected!=btPrevious){
     if(connected){
-      ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
+      reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
       reply(pidProfilePersistent?"PID_PROFILE: NVS_PROFILE_ACTIVE":
                                "PID_PROFILE: DEFAULTS_IN_USE (SEND PID_SAVE TO STORE)");
@@ -315,13 +310,11 @@ void connectionState(uint32_t now) {
       // Bluetooth loss stops only Bluetooth-driven manual motion. Physical AUTO
       // remains independent of SPP; ESTOP and ADC fault paths still stop motors.
       if(manualActive)safeStop();
-      adcBenchCancel();ledWrite(false);lastBlink=now;
+      adcBenchCancel();
       btDropPendingTelemetry(); // no replay after reconnect
     }
     btPrevious=connected;
   }
-  if(connected){if(!ledOn)ledWrite(true);}
-  else if(now-lastBlink>=BLINK_MS){lastBlink=now;ledWrite(!ledOn);}
 }
 void sendFrame(){
   if(!sppStarted||!btConnected())return;
@@ -343,7 +336,6 @@ void sendFrame(){
 
 void setup() {
   // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
-  pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
   sensor_init();motor_init();
   button_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
@@ -352,7 +344,6 @@ void setup() {
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
-  lastBlink=millis();
 }
 void loop() {
   const uint32_t loopStartUs=micros();
@@ -360,7 +351,7 @@ void loop() {
   uint32_t now=millis();++loopCount;
   button_update_led(now);
   uint32_t stageStartUs=micros();
-  connectionState(now);
+  connectionState();
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
   const ButtonCallbacks buttonCallbacks{startAuto,safeStop};

@@ -137,4 +137,4 @@
  include/pinout.h include/sensor.h include/pinout.h include/motor.h \
  include/encoder.h include/pid_controller.h include/bt_telemetry.h \
  include/perf_monitor.h include/adc_bench.h include/spp_debug.h \
- include/input_logic.h
+ include/button.h include/sensor.h
