@@ -188,6 +188,29 @@ int main(void) {
     advanceTo(2050, 280000); stepMs(2);
     assert(pid_get_high_speed_stage() == 3);
 
+    // Peak is adjustable only while stopped, so low-risk 180/220 trials
+    // can be run before ever enabling the full experimental 255 command.
+    pid_set_auto_mode(false);
+    assert(pid_set_high_speed_peak(180));
+    assert(pid_get_high_speed_peak() == 180);
+    assert(!pid_set_high_speed_peak(99));
+    assert(!pid_set_high_speed_peak(256));
+    assert(pid_select_map(1));
+    simLeft=300000; simRight=300700;
+    setLine(); pid_set_auto_mode(true);
+    stepMs(14);
+    simLeft+=300; simRight+=300;
+    stepMs(2);
+    assert(pwmL==180 && pwmR==180);
+    assert(!pid_set_high_speed_peak(220)); // frozen during AUTO
+    simLeft+=1750; simRight+=1750;
+    stepMs(2);
+    assert(pid_get_high_speed_stage()==3);
+    assert(pwmL==180 && pwmR==180);
+    simLeft+=400; simRight+=400;
+    stepMs(2);
+    assert(pwmL==120 && pwmR==120);
+
     // Out of the MAP 1 window: preserve the existing 30ms + startup coast.
     beginMap(1, 150000);
     advanceTo(1200, 150000);
@@ -198,6 +221,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: 3 MAP GAP windows, 100ms timeout, 300/2050/2450 PWM trapezoid, legacy outside");
+    puts("PASS: 3 MAP GAP windows, 100ms timeout, 300/2050/2450 PWM trapezoid, adjustable peak, legacy outside");
     return 0;
 }
