@@ -49,7 +49,7 @@ constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 90.0f;
 constexpr uint8_t HS_HOLD_CENTER_FRAMES = 30; // ~48 ms at 620 Hz
 constexpr float HS_HOLD_CENTER_ERROR = 15.0f;
-int16_t highSpeedPeakPwm = 255; // default; HS_PEAK:n can lower it for trials.
+int16_t highSpeedPeakPwm = 220; // safer tested starting peak; HS_PEAK:n can override.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
     HS_FINISHED=4, HS_ABORTED=5, HS_CORNER_HOLD=6
@@ -277,7 +277,7 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.minSpeed = 0;
     autoMode = false;
     selectedMap = 0;
-    highSpeedPeakPwm = 255;
+    highSpeedPeakPwm = 220;
     currentCase = LINE_CASE_STOPPED;
     clearPidState();
     resetLineTracking();
