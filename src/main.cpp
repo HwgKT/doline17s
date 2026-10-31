@@ -15,6 +15,9 @@ namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
+// GPIO34 START accepts one or more black sensors among the six central
+// eyes S5..S10. This widens the allowable placement around the line.
+constexpr uint16_t BUTTON34_START_CENTER_MASK=0x07E0U;
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
@@ -363,12 +366,27 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  // Active-LOW GPIO34: one fresh debounced press starts AUTO exactly once.
-  // Reuse command() to enforce ADC, CAL and E-STOP guards and send RUN_ORIGIN.
+  // GPIO34 START: any of the six central sensors S5..S10 may see black,
+  // including only one or two sensors. Reject an all-black 16/16 reading:
+  // it would immediately trigger the 3-sample finish-stop rule.
+  // Leave the original ADC, CAL and ESTOP checks to the AUTO handler.
   if(sensor_start_button_pressed()){
     if(!pid_is_auto_mode() && !manualActive) {
-      if(sppStarted && btConnected()) reply("BUTTON34: START_REQUEST");
-      command("AUTO");
+      if(calibrationReady && !sensor_is_calibrating() && sensor_adc_ready()){
+        const uint16_t bits=sensor_get_line_bits();
+        if(bits==0xFFFFU){
+          reply("ERR: BUTTON34_ALL_BLACK_16_CHECK_CALIBRATION");
+        }else if((bits & BUTTON34_START_CENTER_MASK)==0U){
+          reply("ERR: BUTTON34_NO_CENTER_LINE_S5_TO_S10");
+        }else{
+          reply("BUTTON34: START_REQUEST");
+          command("AUTO");
+        }
+      }else{
+        // Preserve specific firmware diagnostics, e.g. ADC_NOT_READY,
+        // CALIB_REQUIRED_OR_PENDING or ESTOP_LATCHED.
+        command("AUTO");
+      }
     }
   }
   const bool wasCalibrating=sensor_is_calibrating();
