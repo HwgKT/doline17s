@@ -101,11 +101,11 @@ int main(void) {
     advanceTo(1650, 50000);
     stepMs(2);
     assert(pid_get_high_speed_stage() == 2);
-    assert(pwmL == 255 && pwmR == 255);
+    assert(pwmL == 220 && pwmR == 220);
     setWhite();
     stepMs(60);
     assert(pid_get_current_case() == LINE_CASE_GAP_BRIDGE);
-    assert(pwmL == 255 && pwmR == 255);  // hold last forward PWM, not 95
+    assert(pwmL == 220 && pwmR == 220);  // hold last forward PWM, not 95
     assert(!pid_select_map(2));          // no MAP change mid-run
     setLine();
     stepMs(2);
@@ -158,21 +158,21 @@ int main(void) {
         assert(pid_get_high_speed_stage() == 1);
         advanceTo(100, origin);
         stepMs(2);
-        assert(pwmL >= 164 && pwmL <= 166 && pwmL == pwmR);
+        assert(pwmL >= 153 && pwmL <= 154 && pwmL == pwmR);
         advanceTo(300, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 2);
-        assert(pwmL == 255 && pwmR == 255);
+        assert(pwmL == 220 && pwmR == 220);
         advanceTo(1800, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 3);
-        assert(pwmL == 255 && pwmR == 255);
+        assert(pwmL == 220 && pwmR == 220);
         advanceTo(2050, origin);
         stepMs(2);
-        assert(pwmL >= 172 && pwmL <= 173 && pwmL == pwmR);
+        assert(pwmL == 155 && pwmL == pwmR);
         advanceTo(2250, origin);
         stepMs(2);
-        assert(pwmL >= 106 && pwmL <= 107 && pwmL == pwmR);
+        assert(pwmL == 103 && pwmL == pwmR);
         advanceTo(2300, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6); // HOLD
@@ -224,7 +224,7 @@ int main(void) {
     stepMs(2);
     assert(pid_get_high_speed_stage() == 3); // BRAKE
     const int16_t gapBrakePwm = pwmL;
-    assert(gapBrakePwm > 90 && gapBrakePwm < 255);
+    assert(gapBrakePwm > 90 && gapBrakePwm < 220);
     setWhite();
     stepMs(60);
     assert(pid_get_current_case() == LINE_CASE_GAP_BRIDGE);
