@@ -215,6 +215,24 @@ int main(void) {
         assert(pwmL == 120 && pwmR == 120);
     }
 
+    // MAP 1 has a later dashed segment (~1985-2058) inside BRAKE.
+    // Its existing 100ms GAP_BRIDGE must still work while decelerating.
+    beginMap(1, 400000);
+    advanceTo(1985, 400000);
+    stepMs(2);
+    assert(pid_get_high_speed_stage() == 3); // BRAKE
+    const int16_t gapBrakePwm = pwmL;
+    assert(gapBrakePwm > 90 && gapBrakePwm < 255);
+    setWhite();
+    stepMs(60);
+    assert(pid_get_current_case() == LINE_CASE_GAP_BRIDGE);
+    assert(pwmL == gapBrakePwm && pwmR == gapBrakePwm);
+    advanceTo(2058, 400000);
+    setLine();
+    stepMs(2);
+    assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
+    assert(pid_get_high_speed_stage() == 3);
+
     // Peak is configurable only while stopped. Low peaks still brake to 90.
     pid_set_auto_mode(false);
     assert(pid_set_high_speed_peak(180));
