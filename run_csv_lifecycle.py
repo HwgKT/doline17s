@@ -9,13 +9,13 @@ class RunCsvLifecycle:
         self.last = None
         self.closers = []
 
-    def begin(self, reader, header, calibration, thresholds):
+    def begin(self, reader, header, calibration, thresholds, map_id):
         """Open a CSV BEFORE sending AUTO; the reader immediately starts logging."""
         if self.active is not None:
             raise RuntimeError("A CSV run is already open")
         if calibration is None:
             raise ValueError("Complete calibration profile is required")
-        recorder = TelemetryCsvRecorder(header, thresholds)
+        recorder = TelemetryCsvRecorder(header, thresholds, map_id)
         white, black = calibration
         recorder.set_calibration(white, black)
         try:

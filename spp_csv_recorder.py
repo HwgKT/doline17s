@@ -7,7 +7,7 @@ import threading
 import time
 
 class TelemetryCsvRecorder(threading.Thread):
-    def __init__(self, header, thresholds):
+    def __init__(self, header, thresholds, map_id, logs_root=None):
         super().__init__(name="spp-csv-writer", daemon=True)
         if len(thresholds) != 16 or any(
                 not isinstance(v, int) or not 0 <= v <= 4095
@@ -16,10 +16,14 @@ class TelemetryCsvRecorder(threading.Thread):
         if len(header) < 18 or header[:2] != ["host_iso", "t_ms"] or (
                 header[2:18] != [f"adc{i}" for i in range(16)]):
             raise ValueError("Unexpected CSV header alignment")
-        folder = Path(__file__).resolve().parent / "logs"
+        if type(map_id) is not int or map_id not in (1, 2, 3):
+            raise ValueError("Select MAP 1, MAP 2 or MAP 3 before recording")
+        self.map_id = map_id
+        root = Path(logs_root) if logs_root is not None else Path(__file__).resolve().parent / "logs"
+        folder = root / f"map_{map_id:02d}"
         folder.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.path = folder / f"linerobot_{stamp}.csv"
+        self.path = folder / f"linerobot_map{map_id:02d}_{stamp}.csv"
         self.output = self.path.open("w", newline="", encoding="utf-8-sig")
         self.writer = csv.writer(self.output)
         self.writer.writerow(header)

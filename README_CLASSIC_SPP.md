@@ -107,3 +107,11 @@ The Windows app has **BẮT ĐẦU DÒ LINE** (`AUTO`) and **DỪNG KHẨN CẤP
 The existing on-demand SPP DIAG reply now includes case=, line=, lost=, reacq= while keeping all old fields; Python app still decodes them. Stream default is now 300Hz (72-byte frames). Binary payload/CSV schema unchanged.
 Hardware acceptance: raise wheels for first boot and verify pivot direction at low speed. With sensors all on white, initial AUTO does not move until a real line is seen steadily for 10ms. A confirmed loss during the first 5 seconds of AUTO drives straight at no more than PWM 65; afterward the robot pivots in place for at most 2 seconds to search, then stops safely if no line is found. Verify sensor order, motor polarity and E-STOP before higher speeds.
 Known unresolved investigation: prior CSV showed near-duplicate sensors 4/12,5/13,6/14,7/15. Calibration and MUX wiring should be checked independently of PID.
+
+## Three-map experimental logging (mainv10)
+
+- Before START, explicitly select **MAP 1**, **MAP 2**, or **MAP 3** in the Python dashboard status bar. START stays disabled until a map is selected.
+- Each START creates a uniquely timestamped CSV under `logs/map_01/`, `logs/map_02/`, or `logs/map_03/` according to the selected map. A per-run TXT terminal transcript with the same filename stem is saved automatically alongside it.
+- Map buttons are locked while AUTO is running, START is pending, CSV is active, or STOP acknowledgment is pending. Changes apply only to future runs.
+- Export CSV / Export TXT default to the folder and filename of the last run. CSV retains the same 61 columns and the `CAL_THRESHOLDS` row; do not mix this metadata row with actual samples. Existing root-level logs are left untouched.
+- Map selection is solely data labeling in the Python app. It does not change ESP32 firmware, PID parameters, thresholds, motor commands, or Bluetooth frames. To collect an automatically grouped CSV, START must be issued from the Python app.
