@@ -73,6 +73,9 @@ uint8_t pid_get_high_speed_stage(void);
 // Adjustable peak PWM before START (100-255), must not be below BASE.
 bool pid_set_high_speed_peak(int16_t pwm);
 int16_t pid_get_high_speed_peak(void);
+// Dynamic brake start: 1800 for HS_PEAK<230; 1600 for HS_PEAK>=230.
+// Encoder ticks are relative to the current AUTO origin on all MAPs.
+int32_t pid_get_high_speed_brake_start(void);
 // Signed average encoder progress since AUTO, without resetting global counts.
 int32_t pid_get_run_encoder_progress(void);
 void pid_get_run_encoder_origins(int32_t* left, int32_t* right);
