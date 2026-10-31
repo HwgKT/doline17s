@@ -1,5 +1,9 @@
 # MAP-specific 100ms dashed-line bridge (branch: linedutdoan)
 
+> **mainHighSpeed:** This file documents the inherited GAP-bridge baseline.
+> The first-straight PWM trapezoid is implemented on this branch; see
+> [README_MAINHIGHSPEED.md](README_MAINHIGHSPEED.md) for current commands and test instructions.
+>
 ## Scope
 This experiment is based on current mainv10 (2026-10-31, commit e7e31dc). It does NOT add any high-speed 255-PWM profile or change Kp/Ki/Kd, SEARCH PWM, sharp-turn, finish-line stop, ADC, or the 72-byte SPP telemetry frame.
 
