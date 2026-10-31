@@ -66,7 +66,7 @@ class PeakUiTest(unittest.TestCase):
         self.assertEqual(ui.messages, ["HS_PEAK:180"])
         self.assertEqual(ui.hs_peak_confirmed, 255)  # Not optimistic.
         self.assertEqual(ui.hs_peak_pending, 180)
-        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450")
+        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=90 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 180)
         self.assertIsNone(ui.hs_peak_pending)
         self.assertEqual(ui.hs_peak_var.get(), 180)
@@ -95,7 +95,7 @@ class PeakUiTest(unittest.TestCase):
     def test_readback_does_not_replace_unapplied_slider(self):
         ui = FakeApp()
         ui.hs_peak_var.set(220)
-        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450")
+        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=90 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 180)
         self.assertEqual(ui.hs_peak_var.get(), 220)
         self.assertTrue(ui.hs_peak_dirty)
@@ -112,9 +112,28 @@ class PeakUiTest(unittest.TestCase):
         self.assertIsNone(ui.hs_peak_confirmed)
         self.assertFalse(ui.hs_peak_dirty)
         self.assertEqual(ui.messages[-1], "HS_PEAK")
-        App.on_text(ui, "HS_PEAK: PWM=220 BASE=120 RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450")
+        App.on_text(ui, "HS_PEAK: PWM=220 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=90 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 220)
         self.assertEqual(ui.hs_peak_var.get(), 220)
+
+    def test_hold_and_complete_stage_messages(self):
+        ui = FakeApp()
+        App.on_text(
+            ui,
+            "HS_STAGE HOLD map=2 runEnc=2300 base=120 peak=220 brake=1800 end=2300 hold=90 minEnd=3100",
+        )
+        self.assertIn("HS: HOLD", ui.high_speed_status.get())
+        self.assertIn("HOLD=90", ui.high_speed_status.get())
+        App.on_text(
+            ui,
+            "DIAG: bt=1 auto=1 loop=620.0Hz pid=620.0Hz sent=100.0Hz hs=6 runEnc=2650 peak=220",
+        )
+        self.assertIn("HS: HOLD", ui.high_speed_status.get())
+        App.on_text(
+            ui,
+            "HS_STAGE COMPLETE map=2 runEnc=3200 base=120 peak=220 brake=1800 end=2300 hold=90 minEnd=3100",
+        )
+        self.assertIn("HS: COMPLETE", ui.high_speed_status.get())
 
     def test_base_apply_rejects_larger_than_confirmed_peak(self):
         ui = FakeApp()
