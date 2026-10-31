@@ -249,7 +249,7 @@ int main(void) {
     onlyEye(10,1700);
     stepMs(20);
     const int16_t cornerPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
-    assert(cornerPwm < centeredPwm && cornerPwm >= 80 && cornerPwm <= 95);
+    // EC corner-drag profile allows a slightly faster outside wheel than mainv7.\n    assert(cornerPwm < centeredPwm && cornerPwm >= 95 && cornerPwm <= 115);
 
     setPattern("0000000110000000");
     stepMs(10);
