@@ -270,6 +270,30 @@ class App(tk.Tk):
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
 
+        # Calibration is a prerequisite for START. Keep its controls visible at
+        # minimum window size rather than below the non-scrollable HS_PEAK panel.
+        cal_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
+        cal_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.label(cal_bar, "Calibration — 16 mắt / NVS", bg=PANEL,
+                   font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 8))
+        self.cal_white_btn = ttk.Button(
+            cal_bar, text="1. Lấy TRẮNG", command=self.start_calibration)
+        self.cal_white_btn.pack(side="left", padx=(0, 4))
+        self.cal_black_btn = ttk.Button(
+            cal_bar, text="2. Lấy ĐEN", command=self.stop_calibration)
+        self.cal_black_btn.pack(side="left", padx=(0, 8))
+        ttk.Button(cal_bar, text="CAL Status",
+                   command=lambda: self.send_command("CAL_STATUS")).pack(
+                       side="left", padx=(0, 4))
+        ttk.Button(cal_bar, text="Đọc NVS 16 mắt",
+                   command=lambda: self.send_command("CAL_DUMP")).pack(
+                       side="left", padx=(0, 8))
+        self.cal_state = tk.StringVar(
+            value="Chưa tải profile calibration từ ESP32")
+        self.label(cal_bar, textvariable=self.cal_state, bg=PANEL, fg=AMBER,
+                   font=("Segoe UI", 8), justify="left", anchor="w",
+                   wraplength=290).pack(side="left", fill="x", expand=True)
+
         # Balanced 50/50 columns; bottom-right quarter reserved for SPP console.
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=8, pady=(0, 5))
@@ -430,25 +454,6 @@ class App(tk.Tk):
         self.label(panel, textvariable=self.hs_peak_feedback,
                    bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(
                        anchor="w", pady=(0, 1))
-
-        self.label(panel, "Calibration — 16 mắt / NVS", bg=PANEL,
-                   font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(2, 1))
-        cal_buttons = tk.Frame(panel, bg=PANEL)
-        cal_buttons.pack(fill="x")
-        ttk.Button(cal_buttons, text="Lấy TRẮNG", command=self.start_calibration).pack(
-            side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(cal_buttons, text="Lấy ĐEN", command=self.stop_calibration).pack(
-            side="left", fill="x", expand=True)
-        more = tk.Frame(panel, bg=PANEL)
-        more.pack(fill="x", pady=(2, 0))
-        ttk.Button(more, text="CAL Status", command=lambda: self.send_command("CAL_STATUS")).pack(
-            side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(more, text="Đọc NVS 16 mắt", command=lambda: self.send_command("CAL_DUMP")).pack(
-            side="left", fill="x", expand=True)
-        self.cal_state = tk.StringVar(value="Chưa tải profile calibration từ ESP32")
-        self.label(panel, textvariable=self.cal_state, bg=PANEL, fg=AMBER,
-                   font=("Segoe UI", 8), justify="left", anchor="w",
-                   wraplength=430).pack(fill="x", pady=(1, 0))
 
         terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
