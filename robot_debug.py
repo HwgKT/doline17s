@@ -187,6 +187,7 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
+        self.high_speed_peak = 255
         self.high_speed_status = tk.StringVar(
             value="HS: -- | RAMP 0-300 | CRUISE 300-2050 | BRAKE 2050-2450")
         self.values = {}
@@ -942,15 +943,28 @@ class App(tk.Tk):
                 self.set_auto_running(False)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
                 self.update_control_buttons()
+        elif message.startswith("HS_PEAK: PWM="):
+            peak = re.search(r"\bPWM=(\d+)\b", message)
+            if peak:
+                self.high_speed_peak = int(peak.group(1))
+                self.high_speed_status.set(
+                    f"HS: READY | PEAK={self.high_speed_peak} | BRAKE=2050 -> 2450"
+                )
         elif message.startswith("HS_STAGE "):
+            peak = re.search(r"\bpeak=(\d+)\b", message)
+            if peak:
+                self.high_speed_peak = int(peak.group(1))
             stage = re.search(r"HS_STAGE (\w+)", message)
             tick = re.search(r"\brunEnc=(-?\d+)", message)
             if stage:
                 self.high_speed_status.set(
                     f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
-                    "| PEAK=255 | BRAKE=2050 -> 2450"
+                    f"| PEAK={self.high_speed_peak} | BRAKE=2050 -> 2450"
                 )
         elif message.startswith("DIAG:"):
+            peak = re.search(r"\bpeak=(\d+)\b", message)
+            if peak:
+                self.high_speed_peak = int(peak.group(1))
             hs = re.search(r"\bhs=(\d+)\b", message)
             tick = re.search(r"\brunEnc=(-?\d+)\b", message)
             if hs:
@@ -959,7 +973,7 @@ class App(tk.Tk):
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
                 self.high_speed_status.set(
                     f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                    "| PEAK=255 | BRAKE=2050 -> 2450"
+                    f"| PEAK={self.high_speed_peak} | BRAKE=2050 -> 2450"
                 )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
