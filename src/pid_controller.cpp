@@ -1,4 +1,5 @@
 #include "pid_controller.h"
+#include "encoder.h"
 #include "sensor.h"
 #include "motor.h"
 #include <Arduino.h>
@@ -35,6 +36,28 @@ constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
+// Named-track dashed-line coast. Encoder positions are relative to AUTO start.
+// These are provisional windows extracted from the 2026-10-31 map logs.
+constexpr uint32_t GAP_TIMEOUT_MS = 100;
+struct GapWindow { int32_t begin; int32_t end; };
+constexpr GapWindow GAP_WINDOWS[3] = {
+    {1500, 2100}, // MAP 1
+    {1050, 1750}, // MAP 2
+    {1000, 1700}  // MAP 3
+};
+uint8_t selectedMap = 0;  // No implicit map; SPP AUTO:1/2/3 selects it.
+int32_t runEncoderOriginL = 0, runEncoderOriginR = 0;
+bool gapActive = false;
+uint32_t gapStartMs = 0;
+int16_t gapHoldPwm = 0, lastNormalForwardPwm = 0;
+
+static int32_t runEncoderProgress() {
+    int32_t left = 0, right = 0;
+    encoder_get_counts(&left, &right);
+    const int64_t sum = ((int64_t)left - runEncoderOriginL) +
+                        ((int64_t)right - runEncoderOriginR);
+    return (int32_t)(sum / 2);
+}
 constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
 
 // A sharp turn is entered only when the centroid reaches the outer region.
@@ -160,6 +183,9 @@ static void resetLineTracking() {
     fullLineFrames = 0;
     lastDashedCorrection = 0;
     governedForwardSpeed = 0.0f;
+    gapActive = false;
+    gapStartMs = 0;
+    gapHoldPwm = lastNormalForwardPwm = 0;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -204,6 +230,7 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.baseSpeed = (baseSpeed < 0) ? 0 : (baseSpeed > 255 ? 255 : baseSpeed);
     pidConfig.minSpeed = 0;
     autoMode = false;
+    selectedMap = 0;
     currentCase = LINE_CASE_STOPPED;
     clearPidState();
     resetLineTracking();
@@ -226,9 +253,23 @@ void pid_set_auto_mode(bool enabled) {
     clearPidState();
     lastComputeTimeUs = micros();
     autoStartedMs = millis();
+    if (enabled) encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
+bool pid_select_map(uint8_t mapId) {
+    if (autoMode || mapId < 1 || mapId > 3) return false;
+    selectedMap = mapId;
+    return true;
+}
+uint8_t pid_get_selected_map(void) { return selectedMap; }
+int32_t pid_get_run_encoder_progress(void) { return runEncoderProgress(); }
+void pid_get_gap_window(int32_t* begin, int32_t* end) {
+    const GapWindow w = selectedMap >= 1 && selectedMap <= 3
+                      ? GAP_WINDOWS[selectedMap - 1] : GapWindow{0, 0};
+    if (begin) *begin = w.begin;
+    if (end) *end = w.end;
+}
 
 bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount) {
     if (!outPosition || !outBlackCount) return false;
@@ -270,6 +311,45 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     } else {
         fullLineFrames = 0;
+    }
+
+    // GAP_BRIDGE has priority over startup grace and the usual 30ms dropout.
+    // One timer per continuous white segment; no reentry after its timeout.
+    if (gapActive) {
+        if (blackCount == 0) {
+            if ((uint32_t)(now - gapStartMs) < GAP_TIMEOUT_MS)
+                return LINE_CASE_GAP_BRIDGE;
+            gapActive = false;
+            startupLossActive = false;
+            lineLocked = false;
+            acquiring = missing = false;
+            ++confirmedLosses;
+            turnState = searchStateFor(lastKnownPosition < 0.0f ? TURN_LEFT :
+                                       lastKnownPosition > 0.0f ? TURN_RIGHT :
+                                       lastTurnDirection);
+            searchStartedMs = now;
+            centeredTurnFrames = 0;
+            clearPidState();
+            return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+        }
+        // Line returns before 100 ms: resume existing PID without stale D term.
+        gapActive = false;
+        missing = false;
+        derivativeHistoryValid = false;
+        derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+    }
+
+    if (blackCount == 0 && turnState == TURN_NONE && lineLocked &&
+        !startupLossActive && selectedMap >= 1 && selectedMap <= 3) {
+        const int32_t progress = runEncoderProgress();
+        const GapWindow w = GAP_WINDOWS[selectedMap - 1];
+        if (progress >= w.begin && progress <= w.end) {
+            gapActive = true;
+            gapStartMs = now;
+            gapHoldPwm = lastNormalForwardPwm > 0
+                         ? lastNormalForwardPwm : clampPwm(pidConfig.baseSpeed);
+            return LINE_CASE_GAP_BRIDGE;
+        }
     }
 
     if (startupLossActive) {
@@ -528,6 +608,8 @@ void pid_line_follow_step(void) {
         if (correction > correctionLimit) correction = correctionLimit;
         if (correction < -correctionLimit) correction = -correctionLimit;
 
+        // Preserve the current governed forward PWM for map-specific gaps.
+        lastNormalForwardPwm = clampPwm(base);
         // Save correction for dashed-line coast
         lastDashedCorrection = correction;
 
@@ -547,6 +629,8 @@ void pid_line_follow_step(void) {
         clearPidState();
         const int16_t speed = clampPwm((float)pidConfig.baseSpeed * 0.7f);
         motor_set_speeds(speed, speed);
+    } else if (currentCase == LINE_CASE_GAP_BRIDGE) {
+        motor_set_speeds(gapHoldPwm, gapHoldPwm);
     } else if (currentCase == LINE_CASE_DASHED_LINE) {
         // Coast at elevated speed through brief line gaps (dashed line / intersection).
         // Use a heavily-damped correction so the robot goes mostly straight instead of
@@ -586,6 +670,7 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_STOPPED: return "CASE 8: Dung Xe";
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
         case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
+        case LINE_CASE_GAP_BRIDGE: return "CASE 11: Map GAP bridge 100ms";
         default: return "Khong Xac Dinh";
     }
 }
