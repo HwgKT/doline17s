@@ -157,6 +157,9 @@ class App(tk.Tk):
         self.reader = None
         self.run_csv = RunCsvLifecycle(self.controls_q)
         self.stop_ack_deadline = None
+        self.stop_verify_pending = False
+        self.stop_verify_deadline = None
+        self.stop_verify_retries = 0
         self.start_confirmed = False
         self.csv_status = tk.StringVar(value="CSV: chờ START")
         self.selected_map = None  # Require explicit choice to avoid mislabeled experiments.
@@ -672,6 +675,10 @@ class App(tk.Tk):
         self.frames = 0
         self.rate_time = time.monotonic()
         self.last_diag_rx = None
+        self.stop_ack_deadline = None
+        self.stop_verify_pending = False
+        self.stop_verify_deadline = None
+        self.stop_verify_retries = 0
         self.next_diag_poll = self.rate_time + self.diag_interval_s
         self.loop_debug.set("LOOP: đang đo...    PID: -- Hz    SPP TX: -- Hz")
         self.connect_btn.config(text="Ngắt")
@@ -711,6 +718,10 @@ class App(tk.Tk):
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
+        self.stop_ack_deadline = None
+        self.stop_verify_pending = False
+        self.stop_verify_deadline = None
+        self.stop_verify_retries = 0
         self.set_auto_running(False)
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
@@ -775,6 +786,7 @@ class App(tk.Tk):
                 and self.estop_latched is False and not self.estop_pending
                 and not self.auto_running and not self.start_pending
                 and self.stop_ack_deadline is None
+                and not self.stop_verify_pending
                 and self.run_csv.active is None)
 
     def read_hs_peak(self):
@@ -853,7 +865,8 @@ class App(tk.Tk):
         if map_id not in (1, 2, 3):
             raise ValueError("Map must be 1, 2 or 3")
         if (self.run_csv.active is not None or self.auto_running
-                or self.start_pending or self.stop_ack_deadline is not None):
+                or self.start_pending or self.stop_ack_deadline is not None
+                or self.stop_verify_pending):
             self.log("Không thể đổi MAP khi xe đang chạy hoặc chưa xác nhận STOP.")
             return
         self.selected_map = map_id
@@ -870,6 +883,8 @@ class App(tk.Tk):
         can_start = (connected and self.estop_latched is False
                      and not self.estop_pending and not self.start_pending
                      and not self.auto_running and self.run_csv.active is None
+                     and self.stop_ack_deadline is None
+                     and not self.stop_verify_pending
                      and self.hs_peak_pending is None
                      and self.hs_peak_confirmed is not None
                      and not self.hs_peak_dirty
@@ -878,7 +893,8 @@ class App(tk.Tk):
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
         locked = (self.run_csv.active is not None or self.auto_running
-                  or self.start_pending or self.stop_ack_deadline is not None)
+                  or self.start_pending or self.stop_ack_deadline is not None
+                  or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
         if hasattr(self, "hs_peak_widgets"):
@@ -920,10 +936,10 @@ class App(tk.Tk):
 
     def finish_run_csv(self, reason):
         recorder = self.run_csv.finish(self.reader, reason)
-        if recorder is None:
-            return
         self.stop_ack_deadline = None
         self.start_confirmed = False
+        if recorder is None:
+            return
         self.csv_status.set(f"CSV ĐANG ĐÓNG: {recorder.path.name}")
         self.log(f"CSV đang chốt ({reason}): {recorder.path}")
         if self.run_txt_file is not None:
@@ -941,8 +957,9 @@ class App(tk.Tk):
                 or self.hs_peak_dirty):
             self.log("Chưa xác nhận HS_PEAK: chọn Áp dụng HS hoặc Đọc HS trước START.")
             return
-        if self.estop_latched is not False or self.auto_running or self.start_pending:
-            self.log("Chưa thể START: AUTO đang chạy hoặc firmware bị khóa.")
+        if (self.estop_latched is not False or self.auto_running or self.start_pending
+                or self.stop_ack_deadline is not None or self.stop_verify_pending):
+            self.log("Chưa thể START: AUTO đang chạy hoặc chưa xác nhận STOP.")
             return
         if self.reader is None or not self.reader.is_alive():
             self.log("Chưa kết nối Bluetooth SPP.")
@@ -983,15 +1000,46 @@ class App(tk.Tk):
             self.finish_run_csv("KHÔNG GỬI ĐƯỢC AUTO")
 
     def stop_line(self):
-        # STOP is the single visible stop action. CSV closes after firmware ACK.
+        # Require an ESP32 ACK even if the current CSV has already closed.
         if self.send_command("STOP"):
-            if self.run_csv.active is not None:
-                self.stop_ack_deadline = time.monotonic() + 2.0
+            self.stop_ack_deadline = time.monotonic() + 2.0
+            self.stop_verify_pending = False
+            self.stop_verify_deadline = None
+            self.stop_verify_retries = 0
             self.start_pending = False
             self.control_state.set("Đã gửi STOP — chờ ESP32 xác nhận.")
             self.update_control_buttons()
         else:
             self.finish_run_csv("STOP KHÔNG GỬI ĐƯỢC / CHƯA XÁC NHẬN DỪNG")
+
+    def confirm_stopped(self, reason):
+        # Only explicit ESP32 stop/finish ACK or STATUS with zero PWM
+        # is allowed to release START after a missing STOP acknowledgment.
+        self.stop_ack_deadline = None
+        self.stop_verify_pending = False
+        self.stop_verify_deadline = None
+        self.stop_verify_retries = 0
+        self.start_pending = False
+        self.set_auto_running(False)
+        self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + reason)
+        self.start_confirmed = False
+        if self.estop_latched is False:
+            self.control_state.set("ESP32 đã xác nhận dừng — có thể START lượt mới.")
+            self.control_state_label.configure(fg=GREEN)
+        self.update_control_buttons()
+
+    def handle_stop_timeout(self):
+        # Freeze log, but keep START interlocked until ESP32 confirms stopped.
+        self.stop_ack_deadline = None
+        self.stop_verify_pending = True
+        self.stop_verify_deadline = time.monotonic() + 1.5
+        self.stop_verify_retries = 0
+        self.finish_run_csv("STOP ACK QUÁ HẠN — CHƯA XÁC NHẬN ĐỘNG CƠ")
+        self.control_state.set("Mất ACK STOP; đang hỏi STATUS để xác nhận động cơ.")
+        self.control_state_label.configure(fg=AMBER)
+        self.log("STOP timeout: đang hỏi STATUS, không cần đóng app.")
+        self.send_command("STATUS")
+        self.update_control_buttons()
 
     def start_calibration(self):
         if self.send_command("CAL_WHITE"):
@@ -1168,6 +1216,16 @@ class App(tk.Tk):
         elif message.startswith("STATUS:"):
             estop = re.search(r"\bestop=(\d)\b", message)
             auto = re.search(r"\bauto=(\d)\b", message)
+            pwm_l = re.search(r"\bpwmL=(-?\d+)\b", message)
+            pwm_r = re.search(r"\bpwmR=(-?\d+)\b", message)
+            is_stopped = (auto is not None and auto.group(1) == "0"
+                          and pwm_l is not None and pwm_r is not None
+                          and int(pwm_l.group(1)) == 0
+                          and int(pwm_r.group(1)) == 0)
+            if is_stopped and (self.stop_ack_deadline is not None
+                               or self.stop_verify_pending
+                               or self.start_confirmed or self.auto_running):
+                self.confirm_stopped("STATUS auto=0 pwmL=0 pwmR=0")
             adc_mode = re.search(r"\badc=([A-Z0-9_]+)\b", message)
             adc_ok = re.search(r"\badc_ok=(\d)\b", message)
             if adc_mode:
@@ -1193,14 +1251,10 @@ class App(tk.Tk):
                     self.control_state_label.configure(fg=GREEN)
                 self.update_control_buttons()
         elif message in ("MOTOR: STOP", "MODE: MANUAL",
+                              "AUTO_FINISHED: STOPPED",
                               "[SAFE] MANUAL DEADMAN: MOTOR STOP",
                               "ERR: ADC_READ_FAULT_MOTORS_STOPPED"):
-            self.set_auto_running(False)
-            self.start_pending = False
-            self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + message)
-            if self.estop_latched is False:
-                self.control_state.set("Đã dừng — sẵn sàng START lượt mới.")
-            self.update_control_buttons()
+            self.confirm_stopped(message)
         pid = re.search(r"PID:\s*Kp=([\d.]+)\s+Ki=([\d.]+)\s+Kd=([\d.]+)\s+Base=(\d+)",
                         message, flags=re.IGNORECASE)
         if pid:
@@ -1337,9 +1391,19 @@ class App(tk.Tk):
             else:
                 self.next_diag_poll = None
         if self.stop_ack_deadline is not None and now >= self.stop_ack_deadline:
-            self.finish_run_csv("STOP: HẾT HẠN XÁC NHẬN — CHƯA RÕ ĐỘNG CƠ ĐÃ DỪNG")
-            self.control_state.set("STOP chưa được ESP32 xác nhận. Kiểm tra động cơ!")
-            self.control_state_label.configure(fg=ROSE)
+            self.handle_stop_timeout()
+        if (self.stop_verify_pending and self.stop_verify_deadline is not None
+                and now >= self.stop_verify_deadline):
+            if self.stop_verify_retries < 3:
+                self.stop_verify_retries += 1
+                self.stop_verify_deadline = now + 1.5
+                self.send_command("STATUS")
+            else:
+                # No ACK: preserve the interlock; STOP/STATUS are still usable.
+                self.stop_verify_deadline = None
+                self.control_state.set(
+                    "Chưa xác nhận STOP; gửi lại STOP hoặc STATUS, kiểm tra bánh xe.")
+                self.control_state_label.configure(fg=ROSE)
         if self.last_diag_rx is not None and now - self.last_diag_rx > 6.0:
             self.loop_debug.set("LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (DIAG quá hạn)")
             self.last_diag_rx = None
