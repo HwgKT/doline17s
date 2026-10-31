@@ -128,9 +128,9 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
   if(s=="HS_PEAK"){
-    char b[100];
+    char b[160];
     snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450",
+      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=90 HOLD_MIN_END=3100",
       pid_get_high_speed_peak(),pid_get_base_speed());
     reply(b);return;
   }
@@ -237,7 +237,7 @@ void command(const String &raw) {
     reply(runInfo);
     char rampEvent[160];
     snprintf(rampEvent,sizeof(rampEvent),
-      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=2050 end=2450 t_ms=%lu",
+      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=1800 end=2300 hold=90 minEnd=3100 t_ms=%lu",
       (unsigned)pid_get_selected_map(),pid_get_base_speed(),
       pid_get_high_speed_peak(),(unsigned long)millis());
     reply(rampEvent);
@@ -388,12 +388,12 @@ void loop() {
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
     if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
       static const char* const labels[]={
-        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED"
+        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD"
       };
-      if(newHighSpeedStage<6U){
+      if(newHighSpeedStage<7U){
         char b[160];
         snprintf(b,sizeof(b),
-          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=2050 end=2450 t_ms=%lu",
+          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=1800 end=2300 hold=90 minEnd=3100 t_ms=%lu",
           labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
           (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
           pid_get_high_speed_peak(),(unsigned long)millis());
