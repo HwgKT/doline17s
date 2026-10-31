@@ -94,7 +94,7 @@ Review encoder speed near runEnc=2300/2550/2600, time to `HS_STAGE HOLD` and `CO
 
 ## GPIO34 physical START (ported from mainv10 button sampling)
 
-On this branch GPIO34 is the sole physical START button (not CALIB). GPIO35 is unused. ESP32 GPIO34 is input-only and **has no internal pull-up or pull-down**: use a 10-kΩ external pulldown from GPIO34 to GND and a momentary button from 3.3 V to GPIO34 (active HIGH). Never apply 5 V. Debounce is 50 ms with one rising-edge event per press; holding the button or bouncing it does not retrigger AUTO. A button already held during power-up must be released and pressed again.
+On this branch GPIO34 is the sole physical START button (not CALIB). GPIO35 is unused. ESP32 GPIO34 is input-only and **has no internal pull-up or pull-down**: use a 10-kΩ external pullup from GPIO34 to 3.3 V and a momentary button from GPIO34 to GND (active LOW). Never apply 5 V. Debounce is 50 ms with one falling-edge event per press; holding the button or bouncing it does not retrigger AUTO. A button already held during power-up must be released and pressed again.
 
 The button calls the same firmware AUTO handler as SPP, so calibration, E-STOP, ADC, and running-state guards remain in force. The firmware defaults to MAP 1 after boot for standalone operation. For MAP 2/3, connect the Python app and select MAP 2/3 **before** pressing GPIO34; selection sends MAP:2 / MAP:3 to the ESP32. The physical button does **not** recalibrate the sensors. Calibration remains available through CAL_WHITE and CAL_BLACK commands in the app.
 
