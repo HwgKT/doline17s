@@ -14,8 +14,10 @@
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
-constexpr uint32_t CAL_WHITE_LED_BLINK_MS=120; // GPIO2 rapid blink after press #1
-constexpr uint32_t CAL_BLACK_LED_BLINK_MS=450; // GPIO2 slower blink after press #2
+// 128 calibration frames take about 0.2s at ~650 Hz. Blink periods must be
+// shorter than calibration acquisition, not hundreds of ms per ADC sample.
+constexpr uint32_t CAL_WHITE_LED_BLINK_MS=40; // fast, GPIO2 toggle interval
+constexpr uint32_t CAL_BLACK_LED_BLINK_MS=90; // slower, GPIO2 toggle interval
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 // GPIO34 START accepts one or more black sensors among the six central
 // eyes S5..S10. This widens the allowable placement around the line.
@@ -33,6 +35,7 @@ BtTxStats lastTxStats{};
 // can also be restarted explicitly through CAL_WHITE via SPP.
 enum Button34Phase : uint8_t {
   BUTTON34_WHITE_NEXT,
+  BUTTON34_WHITE_CAPTURING,
   BUTTON34_BLACK_NEXT,
   BUTTON34_BLACK_CAPTURING,
   BUTTON34_START_NEXT,
@@ -48,8 +51,10 @@ void ledWrite(bool on) {
 void setButton34Phase(Button34Phase phase) {
   button34Phase=phase;
   lastButton34LedMs=millis();
-  if(phase==BUTTON34_BLACK_NEXT || phase==BUTTON34_BLACK_CAPTURING ||
-     phase==BUTTON34_START_NEXT) ledWrite(true);
+  // Only illuminate the LED during an active calibration capture.
+  // CAL_WHITE_DONE and CAL_OK_SAVED turn it OFF until the next press.
+  ledWrite(phase==BUTTON34_WHITE_CAPTURING ||
+           phase==BUTTON34_BLACK_CAPTURING);
 }
 void reply(const String &line) { btSendLine(line); }
 void safeStop() {
@@ -278,7 +283,7 @@ void command(const String &raw) {
     if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
     safeStop();
     if(sensor_capture_white()){
-      setButton34Phase(BUTTON34_BLACK_NEXT);
+      setButton34Phase(BUTTON34_WHITE_CAPTURING);
       reply("CAL_WHITE_ACCEPTED");
     }else reply("CAL_BUSY");
     return;
@@ -354,19 +359,23 @@ void connectionState(uint32_t now) {
     btPrevious=connected;
   }
 }
-// Calibration feedback overrides the Bluetooth connection LED indication.
-// Fast until WHITE has been followed by a BLACK press; slow after BLACK,
-// including when calibration is complete and waiting for physical START.
+// Calibration indicator has priority over the Bluetooth LED:
+// blink only while capturing; OFF after each completed calibration step.
 void updateLedIndicator(uint32_t now) {
   const uint32_t blinkMs =
-    button34Phase==BUTTON34_BLACK_NEXT ? CAL_WHITE_LED_BLINK_MS :
-    (button34Phase==BUTTON34_BLACK_CAPTURING ||
-     button34Phase==BUTTON34_START_NEXT) ? CAL_BLACK_LED_BLINK_MS : 0U;
+    button34Phase==BUTTON34_WHITE_CAPTURING ? CAL_WHITE_LED_BLINK_MS :
+    button34Phase==BUTTON34_BLACK_CAPTURING ? CAL_BLACK_LED_BLINK_MS : 0U;
   if(blinkMs) {
     if((uint32_t)(now-lastButton34LedMs)>=blinkMs) {
       lastButton34LedMs=now;
       ledWrite(!ledOn);
     }
+    return;
+  }
+  // Do not let a connected Bluetooth SPP session relight GPIO2 while
+  // waiting for CAL_WHITE, CAL_BLACK or START.
+  if(button34Phase!=BUTTON34_START_REUSE){
+    if(ledOn) ledWrite(false);
     return;
   }
   if(sppStarted && btConnected()){
@@ -424,6 +433,8 @@ void loop() {
     }else if(button34Phase==BUTTON34_WHITE_NEXT){
       reply("BUTTON34: CAL_WHITE_REQUEST");
       command("CAL_WHITE"); // changes phase only on accepted capture
+    }else if(button34Phase==BUTTON34_WHITE_CAPTURING){
+      reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
     }else if(button34Phase==BUTTON34_BLACK_NEXT){
       if(sensor_is_calibrating() ||
          sensor_calibration_state()!=CAL_WHITE_READY){
@@ -466,7 +477,9 @@ void loop() {
   }
   switch(sensor_take_calibration_event()){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
-    case CAL_WHITE_DONE:    reply("CAL_WHITE_DONE"); break;
+    case CAL_WHITE_DONE:
+      setButton34Phase(BUTTON34_BLACK_NEXT); // LED OFF, ready for BLACK press
+      reply("CAL_WHITE_DONE");break;
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
     case CAL_SAVED:
       setButton34Phase(BUTTON34_START_NEXT);
