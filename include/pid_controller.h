@@ -23,7 +23,9 @@ typedef enum
   LINE_CASE_T_LEFT = 6,     // Case 6: Ngã 3 chữ T bên trái
   LINE_CASE_T_RIGHT = 7,    // Case 7: Ngã 3 chữ T bên phải
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
-  LINE_CASE_DASHED_LINE = 9 // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
+  LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
+  LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
+  LINE_CASE_REACQUIRE_SETTLE = 11 // Case 11: Bám lại line ổn định và tăng tốc mềm
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
@@ -33,7 +35,7 @@ typedef struct {
   float Kd;
   int16_t baseSpeed; // Tốc độ chuẩn (ví dụ 160)
   int16_t maxSpeed;  // Tốc độ tối đa (255)
-  int16_t minSpeed;  // Tốc độ tối thiểu (-120 để quay ngược bánh khi cua)
+  int16_t minSpeed;  // Legacy field; normal PID may issue signed wheel commands
 } PID_Config_t;
 
 // =================== CÁC HÀM KHỞI TẠO & CÀI ĐẶT ===================
@@ -62,6 +64,9 @@ void pid_set_auto_mode(bool enable);
  * @brief Kiểm tra xem đang chạy tự động dò line hay lái tay
  */
 bool pid_is_auto_mode(void);
+bool pid_line_is_confirmed(void);
+uint32_t pid_get_confirmed_line_loss_count(void);
+uint32_t pid_get_line_reacquisition_count(void);
 
 // =================== CÁC HÀM XỬ LÝ CHÍNH ===================
 
@@ -70,7 +75,8 @@ bool pid_is_auto_mode(void);
  * chính giữa)
  * @param outPosition Con trỏ lưu vị trí tính được
  * @param outBlackCount Con trỏ lưu số lượng mắt đang thấy vạch đen
- * @return true nếu có ít nhất 1 mắt thấy đen, false nếu mất line
+ * @return true nếu có mắt vượt ngưỡng RAW riêng TH_i; chỉ mắt đó
+ *         góp phần vào trọng tâm Analog 0–1000
  */
 bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount);
 
@@ -89,6 +95,9 @@ LineCase_t pid_get_current_case(void);
 const char *pid_get_case_name(LineCase_t c);
 float pid_get_last_error(void);
 float pid_get_correction(void);
+float pid_get_term_p(void);
+float pid_get_term_i(void);
+float pid_get_term_d(void);
 float pid_get_kp(void);
 float pid_get_ki(void);
 float pid_get_kd(void);

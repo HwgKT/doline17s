@@ -1,88 +1,400 @@
 #include <Arduino.h>
+#include <math.h>
+#include <stdlib.h>
+#include "pinout.h"
 #include "sensor.h"
 #include "motor.h"
-#include "ble_control.h"
+#include "encoder.h"
 #include "pid_controller.h"
+#include "bt_telemetry.h"
+#include "perf_monitor.h"
+#include "adc_bench.h"
+#include "spp_debug.h"
+#include "button.h"
 
-unsigned long lastPrintTime = 0;
-
-void setup() {
-  Serial.begin(115200);
-  delay(500);
-
-  Serial.println("\n==============================================");
-  Serial.println("  ESP32 XE DO LINE 16 MAT - BLE + MOTOR + PID");
-  Serial.println("==============================================");
-
-  // 1. Khởi tạo cảm biến dò line 16 mắt (CD74HC4067)
-  sensor_init();
-
-  // 2. Khởi tạo điều khiển 2 động cơ PWM
-  motor_init();
-
-  // 3. Khởi tạo PID với cấu hình mặc định
-  pid_init(2.2f, 0.0f, 10.0f, 120);
-
-  // 4. Khởi tạo BLE Server điều khiển không dây
-  ble_control_init("ESP32_LineRobot");
-
-  Serial.println("\nSan sang!");
-  Serial.println("- Dung nut CALIB tren mach HOAC Web/BLE de lia calib Min/Max.");
-  Serial.println("- Lenh BLE/Web:");
-  Serial.println("  + 'C' / 'W': Bat dau lia calib 4s | 'K': Chot som");
-  Serial.println("  + 'INV': Dao cuc tinh cam bien (Den <-> Trang)");
-  Serial.println("  + 'A': BAT chay tu dong PID | 'M': TAT ve lai tay");
-  Serial.println("  + 'PWM': Xem toc do PWM 2 banh | 'PID': Xem thong so PID");
-  Serial.println("  + 'KP:2.2' | 'KI:0' | 'KD:10' | 'BASE:120': Chinh thong so PID");
-  Serial.println("  + 'F'/'B'/'L'/'R'/'S': Dieu khien tay tien/lui/trai/phai/dung");
+namespace {
+// 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
+constexpr uint32_t BLINK_MS=400;
+constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
+bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
+bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
+uint8_t manualSpeed=120;
+uint16_t streamHz=300;
+uint32_t streamPeriodUs=1000000UL/300;
+uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
+uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
+uint32_t markLedUntilMs=0;
+BtTxStats lastTxStats{};
+// GPIO34 sequence restarts on every boot even when a previous NVS profile exists.
+enum class ButtonStep : uint8_t { WHITE, WHITE_RUNNING, BLACK, BLACK_RUNNING, READY };
+ButtonStep buttonStep=ButtonStep::WHITE;
+const char* buttonStepName(){
+  switch(buttonStep){
+    case ButtonStep::WHITE: return "WHITE";
+    case ButtonStep::WHITE_RUNNING: return "WHITE_RUNNING";
+    case ButtonStep::BLACK: return "BLACK";
+    case ButtonStep::BLACK_RUNNING: return "BLACK_RUNNING";
+    case ButtonStep::READY: return "READY_START";
+  }
+  return "UNKNOWN";
 }
 
+void ledWrite(bool on) {
+  ledOn=on;
+  digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
+}
+void reply(const String &line) { btSendLine(line); }
+void buttonReport(const char* line) { Serial.println(line); reply(line); }
+void safeStop() {
+  pid_set_auto_mode(false); motor_stop(); manualActive=false;
+}
+bool parseGain(const String &s,float &val) {
+  if(!s.length())return false;
+  char *end=nullptr;
+  float v=strtof(s.c_str(),&end);
+  if(end==s.c_str()||*end||!isfinite(v)||v<0||v>50)return false;
+  val=v;return true;
+}
+bool parseSpeed(const String &s,int &val) {
+  if(!s.length())return false;
+  char *end=nullptr;
+  long v=strtol(s.c_str(),&end,10);
+  if(end==s.c_str()||*end||v<0||v>255)return false;
+  val=(int)v;return true;
+}
+void showPid() {
+  char b[100];
+  snprintf(b,sizeof(b),"PID: Kp=%.2f Ki=%.2f Kd=%.2f Base=%d",
+           pid_get_kp(),pid_get_ki(),pid_get_kd(),pid_get_base_speed());
+  reply(b);
+}
+void showCalib() {
+  reply(String("CAL_STATUS READY=")+(calibrationReady?"1":"0")+
+        " STATE="+String((int)sensor_calibration_state()));
+}
+void command(const String &raw) {
+  String s=raw;s.trim();s.toUpperCase();
+  if(!s.length())return;
+  // Highest-priority commands: E-STOP cuts PWM and prevents all new motion.
+  if(s=="ESTOP"||s=="E_STOP"||s=="EMERGENCY_STOP"){
+    estopLatched=true; safeStop();adcBenchCancel();
+    reply("ESTOP: LATCHED");return;
+  }
+  if(s=="RESET_ESTOP"){
+    safeStop();estopLatched=false; // Unlock only: motors remain stopped.
+    reply("ESTOP: CLEARED (MOTORS OFF)");return;
+  }
+  // USB command echo intentionally disabled.
+  if(s.startsWith("MARK_START:")||s.startsWith("MARK_END:")){
+    bool start=s.startsWith("MARK_START:");
+    String id=s.substring(start?11:9);
+    if(!id.length()||id.length()>9){reply("ERR: MARK_ID");return;}
+    for(unsigned i=0;i<id.length();++i)if(id[i]<'0'||id[i]>'9'){reply("ERR: MARK_ID");return;}
+    int32_t l=0,r=0;encoder_get_counts(&l,&r);
+    uint32_t now=millis();
+    char ack[110];
+    snprintf(ack,sizeof(ack),"MARK_ACK:%s:%s:%lu:%ld:%ld",start?"START":"END",id.c_str(),(unsigned long)now,(long)l,(long)r);
+    reply(ack);markLedUntilMs=now+150;ledWrite(false);return;
+  }
+  if(s=="MARK_CAPS"){reply("MARK_CAPS:V2 START END ACK");return;}
+  if(s=="PING"){reply("PONG");return;}
+  if(s=="?"||s=="HELP"){
+    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS BTN_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    return;
+  }
+  if(s=="STREAM"){
+    reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
+  }
+  if(s.startsWith("STREAM:")){
+    const String textHz=s.substring(7);
+    const int hz=textHz.toInt();
+    const bool valid=(textHz==String(hz))&&
+       (hz==0||hz==20||hz==50||hz==100||hz==200||hz==300);
+    if(!valid){reply("ERR: STREAM_RATE_USE_0_20_50_100_200_300");return;}
+    streamHz=(uint16_t)hz;
+    streamPeriodUs=streamHz?1000000UL/streamHz:0;
+    lastTxUs=micros();
+    btDropPendingTelemetry();
+    reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
+  }
+  if(s=="DIAG"){
+    const uint32_t t=micros(),dt=t-lastDiagUs;
+    const float sec=dt?dt*1e-6f:1.0f;
+    const BtTxStats tx=btGetTxStats();
+    int32_t encL=0,encR=0;encoder_get_counts(&encL,&encR);
+    char b[290];
+    snprintf(b,sizeof(b),
+      "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
+      "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
+      "case=%u line=%u lost=%lu reacq=%lu",
+      btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
+      loopCount/sec,pidCount/sec,
+      (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
+      (unsigned long)(tx.dropped-lastTxStats.dropped),
+      (unsigned long)(tx.failed-lastTxStats.failed),
+      (unsigned long)skippedSlots,(unsigned long)tx.pending,
+      (long)encL,(long)encR,
+      (unsigned)pid_get_current_case(),pid_line_is_confirmed()?1U:0U,
+      (unsigned long)pid_get_confirmed_line_loss_count(),
+      (unsigned long)pid_get_line_reacquisition_count());
+    lastDiagUs=t;loopCount=pidCount=txCount=0;
+    lastTxStats=tx;skippedSlots=0;
+    reply(b);return;
+  }
+  if(s=="PERF"){perfReport();return;}
+  if(s=="TASKS"){perfTaskReport();return;}
+  if(s=="ADC_BENCH"){
+    if(sensor_is_calibrating()){reply("ERR: ADC_BENCH_CALIB_ACTIVE");return;}
+    safeStop();
+    reply(adcBenchStart()?"ADC_BENCH: STARTED (SPP RESULTS)":
+                          "ERR: ADC_BENCH_BUSY_OR_INIT_FAILED");
+    return;
+  }
+  if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
+  if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
+  if(s=="PID"){showPid();return;}
+  if(s=="BTN_STATUS"){
+    reply(String("BTN_GPIO34 STEP=")+buttonStepName()+
+          " AUTO="+(pid_is_auto_mode()?"1":"0")+
+          " CAL="+(calibrationReady?"1":"0")+
+          " SENSORS="+String((unsigned)sensor_get_line_bits(),HEX));return;
+  }
+  if(s=="PWM"){
+    char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
+      motor_get_left_speed(),motor_get_right_speed(),
+      pid_get_last_error(),pid_get_correction());
+    reply(b);return;
+  }
+  if(s=="ENC"||s=="ENCODER"){
+    int32_t l=0,r=0;
+    encoder_get_counts(&l,&r);
+    char b[92];
+    snprintf(b,sizeof(b),"ENC: L=%ld R=%ld (signed x4)",(long)l,(long)r);
+    reply(b);return;
+  }
+  if(s=="ENC_RESET"||s=="RESET_ENCODER"){
+    encoder_reset_counts();
+    reply("ENC_RESET: OK");return;
+  }
+  if(s=="STATUS"){
+    char b[220];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu",
+      btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
+      calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
+      motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
+      sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count());
+    reply(b);return;
+  }
+  if(s=="P"||s=="SENSORS"){
+    String b="SENSORS: ";
+    for(int i=0;i<N_SENSORS;++i)b+=(sensor_is_black(i)?'1':'0');
+    reply(b);return;
+  }
+  if(s=="S"||s=="STOP"||s=="M"||s=="MANUAL"){
+    safeStop();adcBenchCancel();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
+  }
+  if(s=="A"||s=="AUTO"||s=="START"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
+    if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
+    manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
+  }
+  // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
+  if(s=="C"||s=="W"||s=="CALIB"||s=="CAL_WHITE"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
+    safeStop();
+    reply(sensor_capture_white()?"CAL_WHITE_ACCEPTED":"CAL_BUSY");return;
+  }
+  if(s=="CAL_BLACK"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(sensor_calibration_state()!=CAL_WHITE_READY){reply("CAL_NEED_WHITE");return;}
+    safeStop();
+    reply(sensor_capture_black()?"CAL_BLACK_ACCEPTED":"CAL_BUSY");return;
+  }
+  if(s=="CAL_STATUS"){showCalib();return;}
+  if(s=="CAL_DUMP"){
+    showCalib();
+    if(!calibrationReady){reply("CAL_NO_PROFILE");return;}
+    reply("CAL_DUMP_BEGIN");
+    for(int i=0;i<N_SENSORS;++i){
+      char line[80];
+      snprintf(line,sizeof(line),"CAL_DATA %d %u %u %u",
+          i,minValues[i],maxValues[i],thresholds[i]);
+      reply(line);
+    }
+    reply("CAL_DUMP_DONE");return;
+  }
+  if(s=="K"||s=="STOP_CALIB"||s=="SWEEP"){reply("CAL_USE_WHITE_THEN_BLACK");return;}
+  if(s=="INV"||s=="INVERT"){reply("CAL_FIXED_POLARITY BLACK_ADC_HIGH");return;}
+  if(s.startsWith("KP:")||s.startsWith("KI:")||s.startsWith("KD:")){
+    float v;
+    if(!parseGain(s.substring(3),v)){reply("ERR: PID_VALUE_0_50");return;}
+    float kp=pid_get_kp(),ki=pid_get_ki(),kd=pid_get_kd();
+    if(s.startsWith("KP:"))kp=v;
+    if(s.startsWith("KI:"))ki=v;
+    if(s.startsWith("KD:"))kd=v;
+    pid_set_tunings(kp,ki,kd);showPid();return;
+  }
+  if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
+    int v;int sep=s.indexOf(':');
+    if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
+    pid_set_base_speed(v);manualSpeed=(uint8_t)v;
+    reply(String("SPEED SET: ")+v);return;
+  }
+  if(s=="F"||s=="B"||s=="L"||s=="R"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
+    safeStop();
+    if(s=="F")motor_forward(manualSpeed);
+    if(s=="B")motor_backward(manualSpeed);
+    if(s=="L")motor_set_speeds(-(int16_t)manualSpeed*2/3,manualSpeed);
+    if(s=="R")motor_set_speeds(manualSpeed,-(int16_t)manualSpeed*2/3);
+    manualActive=true;lastManual=millis();
+    reply(String("MOTOR: ")+s+" (deadman 750ms)");return;
+  }
+  reply(String("ERR: UNKNOWN_COMMAND ")+s);
+}
+void connectionState(uint32_t now) {
+  bool connected=sppStarted&&btConnected();
+  if(connected!=btPrevious){
+    if(connected){
+      ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
+      reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
+    }else{
+      if(manualActive)safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
+      btDropPendingTelemetry(); // no replay after reconnect
+    }
+    btPrevious=connected;
+  }
+  if(connected){if((int32_t)(now-markLedUntilMs)>=0){if(!ledOn)ledWrite(true);}else if(ledOn)ledWrite(false);}
+  else if(now-lastBlink>=BLINK_MS){lastBlink=now;ledWrite(!ledOn);}
+}
+void sendFrame(){
+  if(!sppStarted||!btConnected())return;
+  Telemetry t{};
+  // Timestamp belongs to the single post-PID snapshot, not the Bluetooth write.
+  t.t_ms=millis();
+  for(int i=0;i<N_SENSORS;++i)t.adc[i]=sensorRaw[i];
+  int32_t l=0,r=0;
+  encoder_get_counts(&l,&r);
+  t.encL=l;t.encR=r;
+  t.pwmL=motor_get_left_speed();t.pwmR=motor_get_right_speed();
+  t.err=pid_is_auto_mode()?pid_get_last_error():0.0f;
+  t.p=pid_get_term_p();t.i=pid_get_term_i();t.d=pid_get_term_d();
+  t.out=pid_is_auto_mode()?pid_get_correction():0.0f;
+  t.mode=pid_is_auto_mode()?1:0;
+  if(btSendTelemetry(t))++txCount;
+}
+} // namespace
+
+void setup() {
+  // USB: low-rate button/calibration event debug; main telemetry remains SPP.
+  Serial.begin(115200);
+  pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
+  sensor_init();motor_init();
+  button_init();
+  encoder_init(); // mainv2 signed quadrature x4 on A and B channels
+  pid_init(2.0f,0.0f,0.0f,100); // conservative baseline while validating sharp-turn behavior
+  sppStarted=btBegin("LineRobot");
+  lastTxUs=lastDiagUs=micros();
+  lastTxStats=btGetTxStats();
+  lastBlink=millis();
+  buttonReport("[GPIO34] click1 WHITE -> click2 BLACK -> click3 START; next click STOP");
+}
 void loop() {
-  // 1. Duy trì kết nối và thông báo qua BLE
-  ble_control_update();
-
-  // 2. Kiểm tra nút nhấn vật lý (hoạt động song song với lệnh BLE/Web)
-  if (sensor_is_button_pressed()) {
-    sensor_handle_calibration_step();
-  }
-
-  // 3. Xử lý quét Min/Max nếu đang trong chế độ lia calib (trong hàm này đã có sensor_read_all)
-  sensor_update_calibration_loop();
-
-  // 4. Quét các mắt cảm biến khi ở chế độ bình thường (tránh quét 2 lần liên tiếp khi calib)
-  if (!sensor_is_calibrating()) {
-    sensor_read_all();
-  }
-
-  // 5. Nếu đang ở chế độ Tự động -> Chạy thuật toán PID xử lý từng Case
-  if (pid_is_auto_mode()) {
-    pid_line_follow_step();
-  }
-
-  // 6. Định kỳ in thông tin trạng thái ra Serial & xuất PWM qua BLE (150ms/lần)
-  if (millis() - lastPrintTime >= 150) {
-    lastPrintTime = millis();
-    int16_t leftPwm = motor_get_left_speed();
-    int16_t rightPwm = motor_get_right_speed();
-    float err = pid_get_last_error();
-    const char* caseName = pid_get_case_name(pid_get_current_case());
-
-    if (pid_is_auto_mode()) {
-      Serial.printf("[%s] Err: %.1f | PWM L:%d R:%d | Corr: %.1f\n",
-                    caseName,
-                    err,
-                    leftPwm,
-                    rightPwm,
-                    pid_get_correction());
-    } else if (calibrationReady) {
-      sensor_print_states();
-    }
-
-    // Xuất giá trị PWM 2 động cơ, sai số và tên Case lên BLE
-    if (ble_is_connected()) {
-      ble_send_pwm_telemetry(leftPwm, rightPwm, err, caseName);
+  const uint32_t loopStartUs=micros();
+  perfLoopBegin(loopStartUs);
+  uint32_t now=millis();++loopCount;
+  uint32_t stageStartUs=micros();
+  connectionState(now);
+  if(sppStarted)btPollCommands(command);
+  perfRecord(PERF_COMM, micros()-stageStartUs);
+  if(button_pressed(now)) {
+    if(pid_is_auto_mode() || manualActive) {
+      safeStop(); // Fourth click stops; fifth click may restart.
+      buttonReport("BUTTON34: STOP");
+    } else if(adcBenchActive() || sensor_is_calibrating()) {
+      buttonReport("BUTTON34: BUSY");
+    } else if(buttonStep==ButtonStep::WHITE) {
+      safeStop();
+      if(sensor_capture_white()) {
+        buttonStep=ButtonStep::WHITE_RUNNING;
+        buttonReport("BUTTON34: WHITE_ACCEPTED");
+      } else buttonReport("BUTTON34: WHITE_REJECTED_ADC");
+    } else if(buttonStep==ButtonStep::BLACK) {
+      safeStop();
+      if(sensor_capture_black()) {
+        buttonStep=ButtonStep::BLACK_RUNNING;
+        buttonReport("BUTTON34: BLACK_ACCEPTED");
+      } else buttonReport("BUTTON34: BLACK_REJECTED");
+    } else if(buttonStep==ButtonStep::READY) {
+      if(estopLatched) buttonReport("BUTTON34: START_DENIED_ESTOP");
+      else if(!sensor_adc_ready() || !calibrationReady ||
+              sensor_calibration_state()!=CAL_READY)
+        buttonReport("BUTTON34: START_DENIED_CAL_OR_ADC");
+      else {
+        pid_set_auto_mode(true);
+        buttonReport("BUTTON34: AUTO_STARTED");
+      }
+    } else {
+      buttonReport("BUTTON34: CALIB_IN_PROGRESS");
     }
   }
-
-  delay(5); // Chu kỳ lấy mẫu và điều khiển 5ms chuẩn ổn định
+  const bool wasCalibrating=sensor_is_calibrating();
+  stageStartUs=micros();
+  if(adcBenchActive())adcBenchStep();
+  else if(wasCalibrating)sensor_update_calibration_loop();
+  else sensor_read_all();
+  perfRecord(PERF_ADC, micros()-stageStartUs);
+  if(!sensor_adc_ready() && (pid_is_auto_mode() || manualActive)){
+    safeStop();
+    reply("ERR: ADC_READ_FAULT_MOTORS_STOPPED");
+  }
+  switch(sensor_take_calibration_event()){
+    case CAL_WHITE_STARTED:
+      buttonStep=ButtonStep::WHITE_RUNNING;
+      buttonReport("CAL_WHITE_STARTED"); break;
+    case CAL_WHITE_DONE:
+      buttonStep=ButtonStep::BLACK;
+      buttonReport("CAL_WHITE_DONE: NEXT_PRESS_BLACK"); break;
+    case CAL_BLACK_STARTED:
+      buttonStep=ButtonStep::BLACK_RUNNING;
+      buttonReport("CAL_BLACK_STARTED"); break;
+    case CAL_SAVED:
+      buttonStep=ButtonStep::READY;
+      buttonReport("CAL_OK_SAVED: NEXT_PRESS_START");showCalib(); break;
+    case CAL_ERROR:
+      buttonStep=ButtonStep::WHITE;
+      buttonReport("CAL_FAILED: RETRY_WHITE");showCalib(); break;
+    default: break;
+  }
+  if(pid_is_auto_mode()&&!sensor_is_calibrating()){
+    stageStartUs=micros();
+    pid_line_follow_step();++pidCount;
+    if(!pid_is_auto_mode()) buttonReport("AUTO: START_BOX_TIMEOUT_MOTORS_STOPPED");
+    perfRecord(PERF_PID, micros()-stageStartUs);
+  }
+  if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
+    motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
+  }
+  // No stale bursts; bounded nonblocking enqueue at the selected stream rate.
+  const uint32_t txNow=micros();
+  if(streamPeriodUs&&!adcBenchActive()){
+    const uint32_t elapsed=txNow-lastTxUs;
+    if(elapsed>=streamPeriodUs){
+      const uint32_t slots=elapsed/streamPeriodUs;
+      lastTxUs+=slots*streamPeriodUs;
+      if(slots>1)skippedSlots+=slots-1;
+      if(sppStarted&&btConnected()){
+        stageStartUs=micros();
+        sendFrame();
+        perfRecord(PERF_TX,micros()-stageStartUs);
+      }
+    }
+  }
+  perfLoopEnd(micros()-loopStartUs);
+  // Loop start-to-start time includes yield and background scheduler work.
+  yield();
 }

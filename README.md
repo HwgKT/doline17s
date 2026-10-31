@@ -1,6 +1,6 @@
-# 🏎️ ESP32 16-Sensor High-Speed Line Follower Robot (PID + BLE Dashboard)
+# ESP32 16-Sensor High-Speed Line Follower Robot (PID + Bluetooth Classic Debug)
 
-Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều khiển **ESP32**, thanh cảm biến quang trở hồng ngoại **16 mắt qua IC giải mã CD74HC4067**, thuật toán **PID phi tuyến kết hợp điều tốc động (Dynamic Speed Profiling)**, và giao diện giám sát/điều khiển không dây qua **Web Bluetooth (BLE) / Web Serial Dashboard**.
+Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều khiển **ESP32**, thanh cảm biến quang trở hồng ngoại **16 mắt qua IC giải mã CD74HC4067**, thuật toán **PID phi tuyến kết hợp điều tốc động (Dynamic Speed Profiling)**, và giao diện giám sát/điều khiển qua **Bluetooth Classic SPP với robot_debug.py** trên nhánh `mainv4`.
 
 ---
 
@@ -19,11 +19,11 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 - ⚡ **Chu kỳ lấy mẫu siêu tốc (~400Hz - 500Hz):** Phản xạ chỉ trong 2ms - 2.5ms, loại bỏ hoàn toàn hiện tượng trễ pha quán tính khi chạy tốc độ cao.
 - 🎯 **Thanh cảm biến 16 mắt chuẩn hóa Analog (0 - 1000):** Tính toán trọng tâm liên tục (*Smooth Centroid*) với độ mịn cao từ `-65.0` đến `+65.0`.
-- 🔄 **Cơ chế Hiệu chuẩn Quét (Sweep Calibration):** Chỉ cần lia xe qua vạch line trong 4 giây, hệ thống tự động lưu ngưỡng Min/Max và tính toán giá trị trung bình cho từng mắt riêng biệt.
+- 🔄 **Hiệu chuẩn 2 bề mặt:** Lấy mẫu đồng thời 16 mắt lần lượt trên nền trắng và đen (128 khung mỗi nền), kiểm tra nhiễu/tương phản rồi lưu NVS với CRC32. Không dùng lia Min/Max nữa.
 - 🚀 **Bứt tốc đường thẳng & Tự hạ ga ôm cua (Dynamic Speed Curve):** Tự động bốc ga kịch trần (lên tới 215–255 PWM) khi đi thẳng và tự ghì ga xuống 95–115 PWM khi vào cua để bánh xe bám chặt mặt đường.
 - 🛡️ **Khâu vi phân $K_d$ có lọc thông thấp (Anti-Oscillation IIR):** Triệt tiêu hoàn toàn hiện tượng rung lắc li ti hoặc lắc đuôi cá ở tốc độ cao.
 - 📐 **Xử lý chuyên sâu Cua vuông 90° & Vạch đứt nét:** Phanh giật ngược chủ động (*Active Counter-Brake*) kết hợp quay tâm xe đón line tức thời.
-- 📱 **Điều khiển & Tinh chỉnh không dây qua Web Bluetooth:** Giám sát trạng thái 16 mắt cảm biến, đo sai số, hiển thị PWM động cơ thời gian thực và chỉnh thông số PID trực tiếp từ trình duyệt điện thoại/máy tính.
+- **Giám sát bằng app Python Bluetooth Classic:** 16 ADC, 16 giá trị chuẩn hóa, ngưỡng White/Black riêng từng mắt, logic 0/1, PID, PWM và encoder; xuất TXT/CSV.
 
 ---
 
@@ -45,7 +45,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 ### 3. Nút nhấn.
 
-| **Nút Calib** | `GPIO 34` | Nút nhấn vật lý kích hoạt lia Calib |
+| **Nút Calib** | `GPIO 34` | Bấm lần 1 để lấy trắng; chờ hoàn tất, bấm lần 2 để lấy đen |
 | **Nút Start** | `GPIO35`  | Nút nhấn vật lý kích hoạt start     |
 
 ### 4. Động cơ & Driver (LEDC PWM 8-bit, 1000Hz)
@@ -88,17 +88,19 @@ Bạn có thể gửi các lệnh sau từ máy tính (qua cáp USB 115200 baud)
 
 | Lệnh | Ý nghĩa & Chức năng |
 | :--- | :--- |
-| **`A`** hoặc **`AUTO`** | **BẬT** chế độ tự động dò line theo PID |
+| **`AUTO`** / **`A`** / **`START`** | Bật PID dò line nếu calibration hợp lệ và E-STOP không khóa |
 | **`M`** hoặc **`MANUAL`** | **TẮT** tự động, chuyển sang lái tay |
-| **`STAGE1`** hoặc **`SAFE12`** | Đổi ngay sang **Nấc 1 An Toàn (12–13s)**: `Base=175, Kp=1.55, Kd=3.4` |
-| **`STAGE2`** hoặc **`RACE10`** | Đổi ngay sang **Nấc 2 Đua 10s**: `Base=205, Kp=1.75, Kd=4.2` |
-| **`C`** hoặc **`W`** | Bắt đầu chu trình **Lia Calib 4s** (lia qua vạch đen/trắng) |
-| **`K`** | Chốt kết thúc sớm chu trình Calib |
-| **`INV`** | Đảo cực tính cảm biến (Vạch đen nền trắng $\leftrightarrow$ Vạch trắng nền đen) |
+| **`ESTOP`** | Dừng PWM, tắt AUTO, chốt khóa khẩn cấp phần mềm |
+| **`RESET_ESTOP`** | Mở khóa nhưng động cơ vẫn dừng |
+| **`STATUS`** | Đọc trạng thái AUTO, calibration, `estop=0/1`, PWM |
+| **`CAL_WHITE`** / **`C`** | Bắt đầu lấy mẫu 16 mắt trên nền **trắng** |
+| **`CAL_BLACK`** | Sau `CAL_WHITE_DONE`, bắt đầu lấy mẫu trên nền **đen** và lưu NVS nếu đạt |
+| **`CAL_STATUS`** | Xem trạng thái hiệu chuẩn trên ESP32 |
+| **`CAL_DUMP`** | Đọc 16 cặp trắng/đen/threshold từ ESP32 qua SPP hoặc USB |
 | **`BASE:xxx`** | Chỉnh tốc độ cơ sở (mặc định `BASE:120`) |
 | **`KP:x.x`** | Chỉnh hệ số tỉ lệ Kp (mặc định `KP:2.2`) |
 | **`KI:x.x`** | Chỉnh hệ số tích phân Ki (mặc định `KI:0`) |
-| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:10`) |
+| **`KD:x.x`** | Chỉnh hệ số vi phân Kd (mặc định `KD:0`; D = Kd × (e[k] − e[k−1]) / dt, với dt đo bằng giây) |
 | **`V:xxx`** | Chỉnh tốc độ tay và tốc độ cơ sở PID (0–255) |
 | **`PWM`** | Xem giá trị PWM 2 bánh và sai số tức thời |
 | **`PID`** | Xem các thông số PID và Base Speed hiện tại |
@@ -144,3 +146,41 @@ pio run -t monitor
 - **Organization:** [clb-robot-line-2026](https://github.com/clb-robot-line-2026)
 - **Repository:** [ECcodedoline](https://github.com/clb-robot-line-2026/ECcodedoline.git)
 - Giấy phép: MIT License.
+
+
+## Hiệu chuẩn 16 mắt — mainv4 Bluetooth Classic
+
+1. Đặt đủ 16 mắt lên cùng một mặt **trắng** đồng nhất, giữ nguyên chiều cao, gửi `CAL_WHITE` (hoặc bấm nút CALIB một lần), chờ `CAL_WHITE_DONE`.
+2. Chuyển đủ 16 mắt sang cùng một mặt **đen** đồng nhất, gửi `CAL_BLACK` (hoặc bấm nút CALIB lần hai sau bước trắng), chờ `CAL_OK_SAVED`.
+3. `CAL_FAILED` có nghĩa là độ tương phản của ít nhất một mắt < 150 ADC, nhiễu quá lớn, hoặc không ghi được NVS; dữ liệu hợp lệ cũ được giữ nguyên.
+4. Gửi `CAL_DUMP` để đọc 16 mức white/black được lưu và ngưỡng riêng (40% độ tương phản) của từng mắt; app Python `robot_debug.py` tự truy vấn NVS sau khi kết nối.
+5. Nếu ESP32 mất nguồn, firmware tự tải lại profile NVS hợp lệ. Cực tính phần cứng cố định: **ADC đen > ADC trắng**; `INV` không còn đảo cực.
+
+SPP device: **`LineRobot`**; BLE Web **không được khởi tạo trong `mainv4`**. Protocol telemetry 72 byte và các chức năng PID/encoder giữ nguyên.
+
+## Debug SPP và CSV trong app Python (mainv4)
+
+- **Không có ngưỡng RAW chung** cho 16 mắt. Mắt `i` có `T_i = white_i + ceil(0.40 * (black_i - white_i))` tải từ NVS bằng `CAL_DUMP`. `CAL_i = clamp(1000*(ADC_i-white_i)/(black_i-white_i),0,1000)`; `logic_i = (CAL_i >= 400)`. `0=TRẮNG`, `1=ĐEN`. Trước khi đọc đủ NVS, app hiện `—`, không đoán logic theo ngưỡng giả.
+- **App:** `robot_debug.py` có nút `Bảng 16 mắt` hiển thị RAW, W, B, T_i, CAL, logic từng mắt; terminal `Mở rộng`, `Xuất TXT`, `Xuất CSV`. Tùy chọn `Xem mẫu PID` mặc định bật, chỉ in 5 Hz để không tràn terminal; `Ghi CSV` lưu **toàn bộ** telemetry ở tần số nhận được, không giảm mẫu.
+- **SPP telemetry:** giữ nguyên 72 byte/frame, header `AA 55`, payload 69 byte (`<I16H2i2h5fB`), byte XOR; để tương thích app cũ. Payload chứa `t_ms` tại snapshot sau PID, `adc0..15` raw 12-bit, `encL/encR` signed quadrature x4, `pwmL/pwmR` sau điều khiển (có dấu), `err,p,i,d,out,mode`. Dữ liệu đã chuẩn hóa và 16 bit logic do app **tính từ profile NVS thực**; không gửi lặp 16 giá trị CAL/logic qua Bluetooth.
+- **Tần số gửi:** mặc định 100 Hz (72×100 = 7200 bytes/s dữ liệu ứng dụng), có thể chỉnh `STREAM:20`, `STREAM:50`, `STREAM:100`, `STREAM:200`, `STREAM:300` hoặc `STREAM:0` (tạm ngừng). `STREAM` truy vấn trạng thái. Không gửi các dòng TXT cho từng mẫu trên ESP32. Tần số thực đo phụ thuộc tốc độ quét ADC/vòng lặp và kết nối SPP; kiểm tra `tx=...Hz`, tỷ lệ lỗi gói và `loop=...Hz`. Lịch TX dùng pha cộng dồn, bỏ lượt quá hạn (không gửi dồn). Đã bỏ `delay(5)` trong `loop()` và dùng `yield()` để nhường scheduler; `delay(300)` trong `setup()` vẫn giữ nguyên.
+- **CSV:** cột `host_iso` là thời gian PC nhận/xử lý, `t_ms` là đồng hồ ESP32, `adc0..15`, `cal0..15`, `logic0..15`, encoder, PWM, PID và chuỗi `logic16`. Các cột CAL/logic để trống trước khi tải đủ profile NVS. Xuất CSV lưu tối đa 15.000 mẫu gần nhất; `Ghi CSV` ghi liên tục để thu thập thí nghiệm dài hơn. Xuất TXT chỉ là log lệnh/trạng thái/PID preview, không thay thế CSV toàn tốc độ.
+- **Kết nối:** tên Classic SPP là `LineRobot`; COM Windows chọn `Outgoing`. `COM4` kiểu CP210x chỉ là cổng USB trên máy người dùng ví dụ, không phải SPP.
+
+
+## Tinh chỉnh ngưỡng phát hiện đen (400/1000)
+
+- Ngưỡng cũ: midpoint = 50% khoảng trắng→đen. Ngưỡng mới: 40% khoảng tương phản, giảm nhẹ để line đen yếu được phát hiện sớm hơn.
+- **Mỗi mắt có ngưỡng RAW riêng**: `T_i = W_i + ceil((B_i - W_i) * 400 / 1000)` (ADC đen cao hơn ADC trắng). `0 = TRẮNG` khi ADC dưới ngưỡng; `1 = ĐEN` khi ADC >= ngưỡng.
+- NVS chỉ chứa W/B; firmware tự tính ngưỡng 40% khi khởi động. Không cần hiệu chuẩn lại nếu profile NVS cũ vẫn hợp lệ.
+- Thuật toán PID dùng đúng ngưỡng đen của từng mắt, thống nhất với hiển thị/CSV của app Python. Bộ lọc trọng tâm `CAL >= 150` được giữ nguyên, tránh thay đổi quá nhiều tầng điều khiển cùng lúc.
+- **Chất lượng calibration** vẫn dùng chênh lệch >=150 ADC và độ nhiễu <=90; không hạ các ngưỡng kiểm tra chất lượng này.
+- Hạ ngưỡng tăng độ nhạy nhưng có thể tăng dương tính giả nếu mặt trắng tối/nhiễu; thử trên robot thực và kiểm tra tất cả 16 mắt trước khi chạy nhanh.
+
+### Profiling vòng loop/PID (mainv4)
+
+Mỗi giây, USB terminal in `[PERF]` và `[PERF_LOOP]`. Các trường `adc_us`, `pid_us`, `comm_us`, `tx_us`, `busy_us` có dạng trung bình/cao nhất tính bằng microgiây; `other_us` là phần không nằm trong các khối đo riêng. `period_us=min/avg/max` đo khoảng cách giữa hai lần bắt đầu loop, `jitter_pp_us=max-min`. `peak_observed_hz` là đỉnh đã quan sát; `ceiling_busy_hz` và `ceiling_adc_hz` chỉ là giới hạn lạc quan suy từ thời gian đo, KHÔNG phải Hz đã đạt ổn định. `TASKS` in thống kê runtime FreeRTOS nếu framework có bật trace/runtime stats, nếu không sẽ báo không khả dụng. Các thời gian đo trong `[PERF]` không phải % CPU theo task. Khi đang hiệu chuẩn, `adc_us` có thể bao gồm thống kê và thao tác NVS. Hãy đo khi BT tắt, BT+STREAM:100, rồi AUTO với bánh xe kê lên để đối chiếu.
+
+### Python App: bắt đầu và dừng khẩn cấp (mainv4)
+
+`robot_debug.py` có nút **BẮT ĐẦU DÒ LINE** và **DỪNG KHẨN CẤP** (hoặc phím Esc). Dừng khẩn cấp gửi `ESTOP`, firmware trả `ESTOP: LATCHED`. Bấm **Mở khóa E-STOP** rồi đợi `ESTOP: CLEARED (MOTORS OFF)` trước khi bắt đầu lại. Không có tự động chạy khi mở khóa. Bốn nút preset Siêu bám / 3S / 2S / Race đã bỏ ở app và firmware. Giao thức SPP 72 byte vẫn tương thích. Đây là dừng phần mềm qua Bluetooth, không thay thế công tắc ngắt nguồn động cơ vật lý.

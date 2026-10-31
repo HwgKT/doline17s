@@ -1,0 +1,316 @@
+// Compile on a PC without any ESP32 board:
+// g++ -std=c++17 -Wall -Wextra -Itests/native -Iinclude src/pid_controller.cpp tests/native/pid_stability_smoke.cpp -o pid_stability_smoke
+// ./pid_stability_smoke
+#include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
+#include "sensor.h"
+#include "motor.h"
+#include "pid_controller.h"
+
+static uint32_t clockUs=0;
+uint32_t millis(void) { return clockUs/1000; }
+uint32_t micros(void) { return clockUs; }
+
+extern "C" {
+uint16_t sensorRaw[N_SENSORS]={};
+uint16_t minValues[N_SENSORS]={};
+uint16_t maxValues[N_SENSORS]={};
+uint16_t thresholds[N_SENSORS]={};
+bool calibrationReady=true;
+bool isCalibrating=false;
+
+bool sensor_adc_ready(void) {return true;}
+bool sensor_is_black(uint8_t i) {
+    return calibrationReady && i<N_SENSORS && sensorRaw[i]>=thresholds[i];
+}
+uint16_t sensor_get_calibrated(uint8_t i) {
+    if (!calibrationReady || i>=N_SENSORS) return 0;
+    const uint16_t x=sensorRaw[i], w=minValues[i], b=maxValues[i];
+    if (x<=w) return 0;
+    if (x>=b) return 1000;
+    return (uint32_t)(x-w)*1000U/(b-w);
+}
+uint16_t sensor_get_line_bits(void) {
+    uint16_t mask=0;
+    for(uint8_t i=0;i<N_SENSORS;i++)
+        if(sensor_is_black(i))mask|=(uint16_t)(1U<<i);
+    return mask;
+}
+static int16_t leftPwm=0,rightPwm=0;
+void motor_set_speeds(int16_t left,int16_t right) {
+    assert(left>=-220 && right>=-220);
+    assert(left<=220 && right<=220);
+    if(left<0 || right<0) {
+        const LineCase_t current=pid_get_current_case();
+        assert(current==LINE_CASE_SHARP_LEFT || current==LINE_CASE_SHARP_RIGHT ||
+               current==LINE_CASE_DASHED_LINE || current==LINE_CASE_NORMAL_PID ||
+               current==LINE_CASE_REACQUIRE_SETTLE);
+        if(current==LINE_CASE_SHARP_LEFT) assert(left<0 && right>0);
+        if(current==LINE_CASE_SHARP_RIGHT) assert(left>0 && right<0);
+    }
+    leftPwm=left;rightPwm=right;
+}
+void motor_stop(void) {leftPwm=rightPwm=0;}
+}
+
+static void stepMs(unsigned ms) {
+    for(unsigned elapsed=0;elapsed<ms;elapsed+=2) {
+        clockUs+=2000;
+        pid_line_follow_step();
+    }
+}
+static void allWhite(void) {
+    for(int i=0;i<N_SENSORS;i++)sensorRaw[i]=1000;
+}
+static void onlyEye(unsigned eye, uint16_t raw) {
+    allWhite();
+    sensorRaw[eye]=raw;
+}
+static void setPattern(const char *bits) {
+    for(unsigned i=0;i<N_SENSORS;i++)
+        sensorRaw[i]=bits[i]=='1'?2000:1000;
+}
+int main(void) {
+    for(int i=0;i<N_SENSORS;i++){
+        minValues[i]=1000;maxValues[i]=2000;thresholds[i]=1400;
+    }
+    pid_init(2.2f,0,0,120);
+    pid_set_auto_mode(true);
+    pid_line_follow_step();
+    assert(leftPwm==0 && rightPwm==0);
+
+    // 1) Analog CAL=350, logic=0: must NOT start or count as a line.
+    onlyEye(8,1350);
+    stepMs(20);
+    assert(!pid_line_is_confirmed());
+    assert(leftPwm==0 && rightPwm==0);
+
+    // 2) Valid black must persist for >=10ms before PID drives.
+    onlyEye(8,1700);
+    stepMs(8);
+    assert(leftPwm==0 && rightPwm==0);
+    stepMs(6);
+    assert(pid_line_is_confirmed());
+    assert(leftPwm>0 && rightPwm>=0);
+
+    // Startup loss stays straight at a bounded speed, then recovers on line.
+    allWhite();
+    stepMs(60);
+    assert(pid_get_current_case()==LINE_CASE_STARTUP_COAST);
+    assert(leftPwm==65 && rightPwm==65);
+    onlyEye(8,1700);
+    stepMs(12);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(pid_line_is_confirmed());
+
+    // Outside the startup grace window, a brief missed sensor run coasts
+    // with the damped PID correction before the existing pivot search.
+    stepMs(5000);
+    allWhite();
+    stepMs(10);
+    assert(pid_get_current_case()==LINE_CASE_DASHED_LINE);
+    assert(leftPwm>0 && rightPwm>0);
+    stepMs(32);
+    assert(!pid_line_is_confirmed());
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm==85 && rightPwm==-85);
+    assert(pid_get_confirmed_line_loss_count()==1);
+
+    // 4) SEARCH cannot exit until a centered contiguous line lasts 40ms.
+    pid_set_tunings(2.2f,0.0f,2.0f);
+    onlyEye(8,1600);
+    stepMs(20);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm>0 && rightPwm>0); // forward steering during candidate
+    assert(leftPwm>=75 && rightPwm>=75);
+    stepMs(26);
+    assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+    assert(pid_line_is_confirmed());
+    assert(pid_get_line_reacquisition_count()==1);
+    assert(leftPwm>0 && rightPwm>0);
+    assert(pid_get_term_d()==0.0f);
+    stepMs(80);
+    assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+    stepMs(75);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    setPattern("0000000000110000");
+    stepMs(6);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    pid_set_tunings(2.2f,0.0f,0.0f);
+
+    // Visible corners stay under PID control instead of using a fixed arc.
+    setPattern("0000001000001100");
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(leftPwm>rightPwm);
+    onlyEye(8,1600);
+    stepMs(4);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+
+    // Outermost-sensor errors allow full PID steering authority up to maxSpeed.
+    onlyEye(15,2000);
+    stepMs(14);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(leftPwm>0 && rightPwm<0);
+    // mainv4 retains +10% NORMAL_PID base and the same 2B correction cap.
+    assert(leftPwm>=205 && leftPwm<=220);
+    assert(rightPwm>=-85 && rightPwm<=-60);
+    assert(leftPwm-rightPwm>=270);
+
+    // Keep the arc through a brief line gap; then pivot to search.
+    allWhite();
+    stepMs(20);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm>rightPwm && rightPwm>0);
+    assert(leftPwm>66 && leftPwm<=185);
+    stepMs(620);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm==85 && rightPwm==-85);
+    onlyEye(15,2000);
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm==85 && rightPwm==-85);
+    setPattern("0000000000000011");
+    stepMs(50); // two outermost sensors must not stop SEARCH
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm==85 && rightPwm==-85);
+    setPattern("0000000110000000");
+    stepMs(20);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    assert(leftPwm>0 && rightPwm>0);
+    assert(leftPwm>=75 && rightPwm>=75);
+    stepMs(26);
+    assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+    assert(leftPwm>0 && rightPwm>0);
+    stepMs(154);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+
+    // A wide junction can be seen while PID tracks a sharp turn.
+    onlyEye(0,2000);
+    stepMs(14);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(rightPwm>leftPwm && leftPwm<0);
+    allWhite();
+    stepMs(350);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
+    assert(leftPwm==-85 && rightPwm==85);
+    setPattern("1101111111110000");
+    stepMs(20);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
+    assert(leftPwm==-85 && rightPwm==85);
+    setPattern("0111111111111100");
+    stepMs(50);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
+    assert(leftPwm==-85 && rightPwm==85);
+    setPattern("0000000110000000");
+    stepMs(46);
+    assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+    stepMs(154);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+
+    // A pivot search that finds no line stops safely after two seconds.
+    onlyEye(0,2000);
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(rightPwm>leftPwm && leftPwm<0);
+    allWhite();
+    stepMs(44);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
+    assert(leftPwm==-85 && rightPwm==85);
+    stepMs(2010);
+    assert(pid_get_current_case()==LINE_CASE_LOST_LINE);
+    assert(leftPwm==0 && rightPwm==0);
+    onlyEye(8,1700);
+    stepMs(50);
+    assert(pid_get_current_case()==LINE_CASE_LOST_LINE); // timeout latched
+    assert(leftPwm==0 && rightPwm==0);
+
+    // The speed governor follows line error directly, without a timed
+    // post-reacquisition acceleration ramp.
+    pid_set_auto_mode(false);
+    setPattern("0000000110000000");
+    pid_set_auto_mode(true);
+    stepMs(12);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    const int16_t centeredPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
+    assert(centeredPwm==132);
+
+    onlyEye(10,1700);
+    stepMs(20);
+    const int16_t cornerPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
+    assert(cornerPwm < centeredPwm && cornerPwm >= 90 && cornerPwm <= 115);
+
+    setPattern("0000000110000000");
+    stepMs(10);
+    const int16_t recoveringPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
+    assert(recoveringPwm==centeredPwm);
+
+    // Stop only after all 16 eyes stay black for 50 ms.
+    for(int i=0;i<N_SENSORS;i++)sensorRaw[i]=2000;
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
+    assert(leftPwm==84 && rightPwm==84);
+    stepMs(6);
+    assert(pid_get_current_case()==LINE_CASE_STOPPED);
+    assert(leftPwm==0 && rightPwm==0);
+    onlyEye(8,1700);
+    stepMs(20);
+    assert(pid_get_current_case()==LINE_CASE_STOPPED);
+    assert(leftPwm==0 && rightPwm==0);
+
+    // Outer sensors reduce forward speed before centroid error reaches the
+    // normal governor limit.
+    pid_set_auto_mode(false);
+    pid_init(0.0f,0.0f,0.0f,120);
+    setPattern("0000000110000000");
+    pid_set_auto_mode(true);
+    stepMs(12);
+    assert(leftPwm==132 && rightPwm==132);
+    setPattern("0000000110000001");
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(leftPwm==79 && rightPwm==79);
+
+    // 6) mainv4 start-box behavior must be unchanged by SEARCH recovery.
+    pid_set_auto_mode(false);
+    for (int i=0;i<N_SENSORS;i++) sensorRaw[i]=2000;
+    pid_set_auto_mode(true);
+    stepMs(2);
+    assert(pid_get_current_case()==LINE_CASE_STARTUP_COAST);
+    assert(leftPwm==135 && rightPwm==135);
+    setPattern("0000000110000000");
+    stepMs(24);
+    assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
+    assert(leftPwm==132 && rightPwm==132);
+
+    // 7) False recovery/repeated SEARCH must not reset a 2.5-second watchdog.
+    pid_set_auto_mode(false);
+    pid_init(2.2f,0.0f,0.0f,120);
+    setPattern("0000000110000000");
+    pid_set_auto_mode(true);
+    stepMs(12);
+    stepMs(5000);
+    allWhite();
+    stepMs(44);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    for (unsigned attempt=0; attempt<5; ++attempt) {
+        onlyEye(8,1700);
+        stepMs(46);
+        assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
+        allWhite();
+        stepMs(44);
+        assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+        stepMs(380);
+        assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
+    }
+    stepMs(200);
+    assert(pid_get_current_case()==LINE_CASE_LOST_LINE);
+    assert(leftPwm==0 && rightPwm==0);
+
+    // 6) Disabling AUTO immediately stops both motors.
+    pid_set_auto_mode(false);
+    assert(leftPwm==0 && rightPwm==0);
+    puts("PASS: mainv4 start box, guarded SEARCH, timed settle, preserved +10% normal base, 2B cap, recovery watchdog");
+    return 0;
+}
