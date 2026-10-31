@@ -206,6 +206,11 @@ int main(void) {
     stepMs(50);
     assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
     assert(leftPwm==-85 && rightPwm==85);
+    // Two separated black clusters with a centered centroid are not a line.
+    setPattern("1000000110000001");
+    stepMs(50);
+    assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
+    assert(leftPwm==-85 && rightPwm==85);
     setPattern("0000000110000000");
     stepMs(46);
     assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
