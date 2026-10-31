@@ -203,6 +203,8 @@ int main(void) {
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6);
         assert(pwmL == 90 && pwmR == 90);
+        stepMs(100); // centered too early at 2600: HOLD must remain
+        assert(pid_get_high_speed_stage() == 6);
         advanceTo(3100, origin);
         stepMs(20);
         assert(pid_get_high_speed_stage() == 6);
