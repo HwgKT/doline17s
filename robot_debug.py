@@ -203,7 +203,7 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: -- | BRAKE 1800 (<230) / 1600 (>=230) -> 2300 | HOLD 110")
+            value="HS: -- | BRAKE 1800 (<230), 1600 (230–239), 1400 (240–255) → 2300 | HOLD 110")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -1211,7 +1211,7 @@ class App(tk.Tk):
                     start_match = re.search(r"\bBRAKE_START=(\d+)\b", message)
                     self.hs_brake_start = (
                         int(start_match.group(1)) if start_match
-                        else (1600 if confirmed >= 230 else 1800))
+                        else (1400 if confirmed >= 240 else 1600 if confirmed >= 230 else 1800))
                     self.hs_peak_confirmed = confirmed
                     expected = self.hs_peak_pending
                     if expected is None or expected == confirmed:
@@ -1248,7 +1248,7 @@ class App(tk.Tk):
                 self.high_speed_peak = int(peak.group(1))
             start = re.search(r"\bbrake=(\d+)\b", message)
             self.hs_brake_start = (int(start.group(1)) if start
-                                   else (1600 if self.high_speed_peak >= 230 else 1800))
+                                   else (1400 if self.high_speed_peak >= 240 else 1600 if self.high_speed_peak >= 230 else 1800))
             stage = re.search(r"HS_STAGE (\w+)", message)
             tick = re.search(r"\brunEnc=(-?\d+)", message)
             if stage:
@@ -1262,7 +1262,7 @@ class App(tk.Tk):
                 value = int(peak.group(1))
                 if 100 <= value <= 255:
                     self.high_speed_peak = value
-                    self.hs_brake_start = 1600 if value >= 230 else 1800
+                    self.hs_brake_start = 1400 if value >= 240 else 1600 if value >= 230 else 1800
                     # DIAG is telemetry, not an ACK for a pending HS write.
                     if self.hs_peak_pending is None:
                         self.hs_peak_confirmed = value
