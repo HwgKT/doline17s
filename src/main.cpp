@@ -98,7 +98,7 @@ void command(const String &raw) {
     snprintf(b,sizeof(b),
       "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
       "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
-      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld",
+      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u",
       btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
       loopCount/sec,pidCount/sec,
       (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
@@ -109,7 +109,8 @@ void command(const String &raw) {
       (unsigned)pid_get_current_case(),pid_line_is_confirmed()?1U:0U,
       (unsigned long)pid_get_confirmed_line_loss_count(),
       (unsigned long)pid_get_line_reacquisition_count(),
-      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress());
+      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
+      (unsigned)pid_get_high_speed_stage());
     lastDiagUs=t;loopCount=pidCount=txCount=0;
     lastTxStats=tx;skippedSlots=0;
     reply(b);return;
@@ -144,12 +145,13 @@ void command(const String &raw) {
     reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
-    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld",
+    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld hs=%u",
       btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
       calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
       motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
       sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count(),
-      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress());
+      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
+      (unsigned)pid_get_high_speed_stage());
     reply(b);return;
   }
   if(s=="P"||s=="SENSORS"){
@@ -338,9 +340,25 @@ void loop() {
   if(pid_is_auto_mode()&&!sensor_is_calibrating()){
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
+    const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
     pid_line_follow_step();++pidCount;
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
+    const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
+    if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
+      static const char* const labels[]={
+        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED"
+      };
+      if(newHighSpeedStage<6U){
+        char b[160];
+        snprintf(b,sizeof(b),
+          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=255 brake=2050 end=2450 t_ms=%lu",
+          labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
+          (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
+          (unsigned long)millis());
+        reply(b);
+      }
+    }
     // Only log transitions, never print from the high-frequency PID controller.
     // The Python app already mirrors text replies into the MAP-specific TXT.
     if(oldCase!=newCase &&
