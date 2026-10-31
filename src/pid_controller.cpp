@@ -59,7 +59,7 @@ int32_t highSpeedMaxProgress = 0;
 
 static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     const float peak = fmaxf(basePwm, (float)highSpeedPeakPwm);
-    // If BASE is below 90, never accelerate during a supposed brake hold.
+    // If BASE is below 110, never accelerate during a supposed brake hold.
     const float holdPwm = fminf(HS_CORNER_HOLD_PWM, basePwm);
     if (ticks <= 0) return basePwm;
     if (ticks < HS_RAMP_END_ENC) {
@@ -372,7 +372,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             // Release immediately when both requested conditions are met:
             // current encoder progress has passed the threshold and a valid
             // line measurement is near center. blackCount>0 prevents a false
-            // release because an absent line leaves position at its default 0.
+            // release because absent-line samples only return lastKnownPosition,
+            // which may still be near center and is not current line evidence.
             const bool validCenteredLine =
                 blackCount > 0 && fabsf(position) <= HS_HOLD_CENTER_ERROR;
             highSpeedStage =
