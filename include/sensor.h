@@ -41,7 +41,7 @@ bool sensor_get_last_calibration_result(void);
 CalState sensor_calibration_state(void);
 CalEvent sensor_take_calibration_event(void);
 void sensor_print_calibration(void);
-// Debounced rising edge (50ms) on active-HIGH GPIO34 START button.
+// Debounced falling edge (50ms) on active-LOW GPIO34 START button.
 bool sensor_start_button_pressed(void);
 uint16_t sensor_get_calibrated(uint8_t index);
 bool sensor_is_black(uint8_t index);
