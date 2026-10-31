@@ -203,7 +203,7 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: -- | BRAKE 1800 (<230) / 1600 (>=230) -> 2300 | HOLD 110")
+            value="HS: -- | BRAKE 1800 (<230) / 1600 (>=230) -> 2300 | HOLD 120")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -1170,7 +1170,7 @@ class App(tk.Tk):
                         self.hs_peak_feedback.set(
                             f"ESP32 báo {confirmed}; chờ xác nhận PWM {expected}")
                     self.high_speed_status.set(
-                        f"HS: READY | PEAK={confirmed} | BRAKE={self.hs_brake_start}-2300 | HOLD=110")
+                        f"HS: READY | PEAK={confirmed} | BRAKE={self.hs_brake_start}-2300 | HOLD=120")
                     self.update_control_buttons()
         elif message.startswith("ERR: HS_PEAK_"):
             if self.hs_peak_pending is not None:
@@ -1195,7 +1195,7 @@ class App(tk.Tk):
             if stage:
                 self.high_speed_status.set(
                     f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
+                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=120"
                 )
         elif message.startswith("DIAG:"):
             peak = re.search(r"\bpeak=(\d+)\b", message)
@@ -1218,7 +1218,7 @@ class App(tk.Tk):
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
                 self.high_speed_status.set(
                     f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
+                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=120"
                 )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
