@@ -15,13 +15,13 @@ An experimental **PWM command envelope**, not a physical speed controller. The s
 | >=2300 | `HOLD`: maintain forward target `min(90, BASE)` through first right turn |
 | >=3100 **and** first right corner confirmed **and** line centered for 30 PID frames | `COMPLETE`: return to original PID speed governor with `BASE` |
 
-Defaults: `BASE=100` after boot; `HS_PEAK=255`. Example with `BASE:120` and `HS_PEAK:220`: `120 → 220 → 90 (HOLD) → 120 after corner recovery`. Start experiments at `HS_PEAK:180`, then 220.
+Defaults: `BASE=100` after boot; `HS_PEAK=220` (safer default based on the first-corner overshoot logs). Example with `BASE:120` and `HS_PEAK:220`: `120 → 220 → 90 (HOLD) → 120 after corner recovery`. Start experiments at `HS_PEAK:180`, then 220.
 
 The PID's error-dependent speed governor and outer-eye speed reduction still apply, therefore actual wheel PWM may differ from the forward target; sharp-turn/SEARCH motor commands retain their original higher turning authority. `HOLD` releases only after a detected right-hand sharp corner, monotonic encoder progress >=3100, and 30 consecutive controller frames with line confirmed near the sensor center (|error|<=15, no outermost-four sensors). A failed turn/search leaves the robot in HOLD or the existing STOP/search safety logic rather than automatically returning to BASE. In `GAP_BRIDGE`, the motor holds the **last governed forward PWM** equally on both wheels for at most 100ms, rather than using a new speed target while line is missing. This avoids introducing an acceleration step when there is no line feedback.
 
 `runEnc = ((encL-encL0)+(encR-encR0))/2`, with origin taken at `AUTO`. No global encoder reset. An internal monotonic progress high-water mark prevents the acceleration ramp from restarting if wheels temporarily reverse. After an unexpected SEARCH before the brake end, the high-speed profile is marked `ABORTED` for the remainder of that AUTO run.
 
-**The 1800/2300/3100 ticks and hold PWM 90 are experimental settings.** Their braking performance has NOT been validated on hardware. Test with wheels lifted and physical clearance; use `HS_PEAK:180` first, then 220, then 255 after successful runs. The finish line still requires all 16 sensors black for three consecutive controller samples.
+**The 1800/2300/3100 ticks and hold PWM 90 are experimental settings.** Their braking performance has NOT been validated on hardware. Test with wheels lifted and physical clearance; use `HS_PEAK:180` first, then 220, then 255 only after successful runs. The finish line still requires all 16 sensors black for three consecutive controller samples.
 
 ## 2. Three track-specific dashed-line modes
 
