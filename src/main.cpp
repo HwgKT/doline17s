@@ -130,8 +130,8 @@ void command(const String &raw) {
   if(s=="HS_PEAK"){
     char b[100];
     snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450",
-      pid_get_high_speed_peak());
+      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=2050 BRAKE_END=2450",
+      pid_get_high_speed_peak(),pid_get_base_speed());
     reply(b);return;
   }
   if(s.startsWith("HS_PEAK:")){
@@ -283,6 +283,9 @@ void command(const String &raw) {
   if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
     int v;int sep=s.indexOf(':');
     if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
+    // A BASE above HS_PEAK makes the trapezoid undefined. Reject instead
+    // of silently turning a supposedly lower peak into a higher target.
+    if(v>pid_get_high_speed_peak()){reply("ERR: BASE_GT_HS_PEAK");return;}
     pid_set_base_speed(v);manualSpeed=(uint8_t)v;
     reply(String("SPEED SET: ")+v);return;
   }
@@ -306,6 +309,7 @@ void connectionState(uint32_t now) {
     if(connected){
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
+      command("HS_PEAK");
     }else{
       safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
       btDropPendingTelemetry(); // no replay after reconnect
