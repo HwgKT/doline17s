@@ -958,6 +958,11 @@ class App(tk.Tk):
         self.prev = (t, left, right)
 
     def on_text(self, message):
+        # Preserve significant firmware events in the selected map's terminal TXT.
+        # Exclude high-volume CAL_DATA and periodic DIAG/PERF replies.
+        if message.startswith(("BUTTON34:", "MODE:", "MOTOR:", "AUTO:",
+                               "ERR:", "ESTOP:", "STATUS:")):
+            self.log(f"RX < {message}")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
             self.estop_latched = True
             self.estop_pending = False
@@ -1088,6 +1093,9 @@ class App(tk.Tk):
                 self.cal_thresholds = [self.cal_data[i][2] for i in range(16)]
                 self.calibration_ok = True
                 self.update_control_buttons()
+                # GPIO34 may have started AUTO before CAL_DUMP finished loading.
+                if self.auto_running and self.run_csv.active is None:
+                    self.open_run_csv("CAL_DUMP DONE / GPIO34 AUTO")
                 # Update the current START/STOP CSV with newly downloaded NVS data.
                 if self.run_csv.active is not None:
                     self.run_csv.active.set_calibration(self.cal_min, self.cal_max)
