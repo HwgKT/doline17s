@@ -24,7 +24,8 @@ typedef enum
   LINE_CASE_T_RIGHT = 7,    // Case 7: Ngã 3 chữ T bên phải
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
   LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
-  LINE_CASE_STARTUP_COAST = 10 // Case 10: Khởi động mất line, chạy thẳng có giới hạn
+  LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
+  LINE_CASE_GAP_BRIDGE = 11 // Case 11: Qua line dut theo MAP, toi da 100ms
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
@@ -63,6 +64,12 @@ void pid_set_auto_mode(bool enable);
  * @brief Kiểm tra xem đang chạy tự động dò line hay lái tay
  */
 bool pid_is_auto_mode(void);
+// Set track profile before AUTO. Valid MAP values: 1, 2, 3.
+bool pid_select_map(uint8_t mapId);
+uint8_t pid_get_selected_map(void);
+// Signed average encoder progress since AUTO, without resetting global counts.
+int32_t pid_get_run_encoder_progress(void);
+void pid_get_gap_window(int32_t* begin, int32_t* end);
 bool pid_line_is_confirmed(void);
 uint32_t pid_get_confirmed_line_loss_count(void);
 uint32_t pid_get_line_reacquisition_count(void);
