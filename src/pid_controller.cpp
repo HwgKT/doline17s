@@ -13,7 +13,7 @@ static const float SENSOR_WEIGHTS[N_SENSORS] = {
 
 // Optimised tune for sharp-turn responsiveness.  Gains are still live-tuneable
 // via the SPP KP:/KI:/KD: commands.
-static PID_Config_t pidConfig = {3.8f, 0.015f, 2.0f, 100, 255, -100};
+static PID_Config_t pidConfig = {1.6f, 0.0f, 0.8f, 100, 255, -100};
 static bool autoMode = false;
 static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0, integralError = 0, lastCorrection = 0;
@@ -46,9 +46,8 @@ constexpr int32_t HS_RAMP_END_ENC = 300;
 constexpr int32_t HS_BRAKE_START_ENC = 1800;
 constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
-constexpr float HS_CORNER_HOLD_PWM = 90.0f;
-constexpr uint8_t HS_HOLD_CENTER_FRAMES = 30; // ~48 ms at 620 Hz
-constexpr float HS_HOLD_CENTER_ERROR = 15.0f;
+constexpr float HS_CORNER_HOLD_PWM = 110.0f;
+constexpr float HS_HOLD_CENTER_ERROR = 15.0f; // valid line position near center
 int16_t highSpeedPeakPwm = 220; // safer tested starting peak; HS_PEAK:n can override.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
@@ -57,8 +56,6 @@ enum HighSpeedStage : uint8_t {
 HighSpeedStage highSpeedStage = HS_DISABLED;
 bool highSpeedAborted = false;
 int32_t highSpeedMaxProgress = 0;
-bool firstRightCornerSeen = false;
-uint8_t holdCenteredFrames = 0;
 
 static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     const float peak = fmaxf(basePwm, (float)highSpeedPeakPwm);
@@ -230,8 +227,6 @@ static void resetLineTracking() {
     highSpeedStage = HS_DISABLED;
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
-    firstRightCornerSeen = false;
-    holdCenteredFrames = 0;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -374,23 +369,15 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         } else if (highSpeedStage == HS_FINISHED) {
             // Completion is sticky; encoder reversal cannot restart HS.
         } else if (highSpeedMaxProgress >= HS_BRAKE_END_ENC) {
-            // Do not resume BASE merely because the PWM ramp finished.
-            // Require the actual right corner, enough encoder progress,
-            // and 30 consecutive centered, visibly tracked line frames.
-            const bool centeredAfterCorner =
-                firstRightCornerSeen &&
-                progress >= HS_HOLD_MIN_END_ENC &&
-                turnState == TURN_NONE && lineLocked &&
-                blackCount > 0 && fabsf(position) <= HS_HOLD_CENTER_ERROR &&
-                (mask & 0xF00FU) == 0;
-            if (centeredAfterCorner) {
-                if (holdCenteredFrames < HS_HOLD_CENTER_FRAMES)
-                    ++holdCenteredFrames;
-            } else {
-                holdCenteredFrames = 0;
-            }
-            highSpeedStage = holdCenteredFrames >= HS_HOLD_CENTER_FRAMES
-                                 ? HS_FINISHED : HS_CORNER_HOLD;
+            // Release immediately when both requested conditions are met:
+            // current encoder progress has passed the threshold and a valid
+            // line measurement is near center. blackCount>0 prevents a false
+            // release because an absent line leaves position at its default 0.
+            const bool validCenteredLine =
+                blackCount > 0 && fabsf(position) <= HS_HOLD_CENTER_ERROR;
+            highSpeedStage =
+                (progress >= HS_HOLD_MIN_END_ENC && validCenteredLine)
+                    ? HS_FINISHED : HS_CORNER_HOLD;
         } else if (highSpeedMaxProgress >= HS_BRAKE_START_ENC) {
             highSpeedStage = HS_BRAKE;
         } else if (highSpeedMaxProgress >= HS_RAMP_END_ENC) {
@@ -573,10 +560,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             (position >= SHARP_TURN_POSITION_WITH_OUTER_EYES && rightOuter >= 2);
 
         if (sharpLeft || sharpRight) {
-            // Only the first detected right-hand 90-degree corner can unlock
-            // the low-speed hold; a dashed-line reacquisition is not enough.
-            if (sharpRight && highSpeedStage == HS_CORNER_HOLD)
-                firstRightCornerSeen = true;
             turnState = sharpLeft ? TURN_LEFT : TURN_RIGHT;
             lastTurnDirection = turnState;
             turnStartedMs = now;
