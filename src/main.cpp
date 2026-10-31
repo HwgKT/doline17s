@@ -71,7 +71,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -98,7 +98,7 @@ void command(const String &raw) {
     snprintf(b,sizeof(b),
       "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
       "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
-      "case=%u line=%u lost=%lu reacq=%lu",
+      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld",
       btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
       loopCount/sec,pidCount/sec,
       (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
@@ -108,7 +108,8 @@ void command(const String &raw) {
       (long)encL,(long)encR,
       (unsigned)pid_get_current_case(),pid_line_is_confirmed()?1U:0U,
       (unsigned long)pid_get_confirmed_line_loss_count(),
-      (unsigned long)pid_get_line_reacquisition_count());
+      (unsigned long)pid_get_line_reacquisition_count(),
+      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress());
     lastDiagUs=t;loopCount=pidCount=txCount=0;
     lastTxStats=tx;skippedSlots=0;
     reply(b);return;
@@ -143,11 +144,12 @@ void command(const String &raw) {
     reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
-    char b[220];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu",
+    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld",
       btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
       calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
       motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
-      sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count());
+      sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count(),
+      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress());
     reply(b);return;
   }
   if(s=="P"||s=="SENSORS"){
@@ -155,14 +157,51 @@ void command(const String &raw) {
     for(int i=0;i<N_SENSORS;++i)b+=(sensor_is_black(i)?'1':'0');
     reply(b);return;
   }
+  // Explicit track profile, independent of the Python CSV destination.
+  if(s=="MAP"){
+    int32_t gapBegin=0,gapEnd=0;
+    pid_get_gap_window(&gapBegin,&gapEnd);
+    char b[100];
+    snprintf(b,sizeof(b),"MAP: SELECTED %u GAP=%ld-%ld TIMEOUT=100ms",
+      (unsigned)pid_get_selected_map(),(long)gapBegin,(long)gapEnd);
+    reply(b);return;
+  }
+  if(s.startsWith("MAP:")){
+    const String idText=s.substring(4);
+    const int id=idText.toInt();
+    if(id<1||id>3||idText!=String(id)){
+      reply("ERR: MAP_USE_1_2_3");return;
+    }
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: MAP_REQUIRES_STOPPED");return;
+    }
+    pid_select_map((uint8_t)id);
+    command("MAP");return;
+  }
   if(s=="S"||s=="STOP"||s=="M"||s=="MANUAL"){
     safeStop();adcBenchCancel();reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
   }
-  if(s=="A"||s=="AUTO"||s=="START"){
+  if(s=="A"||s=="AUTO"||s=="START"||s.startsWith("AUTO:")){
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(pid_is_auto_mode()){reply("ERR: AUTO_ALREADY_RUNNING");return;}
     if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
     if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
+    // AUTO:1/2/3 sets the firmware track atomically with START, avoiding
+    // a mismatch between the Python logging MAP and the active controller.
+    if(s.startsWith("AUTO:")){
+      const String idText=s.substring(5);
+      const int id=idText.toInt();
+      if(id<1||id>3||idText!=String(id)){
+        reply("ERR: MAP_USE_1_2_3");return;
+      }
+      if(!pid_select_map((uint8_t)id)){
+        reply("ERR: MAP_SELECT_FAILED");return;
+      }
+    }
+    if(pid_get_selected_map()==0){
+      reply("ERR: MAP_NOT_SELECTED");return;
+    }
     manualActive=false;pid_set_auto_mode(true);reply("MODE: AUTO PID");return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
