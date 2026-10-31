@@ -48,7 +48,7 @@ constexpr int32_t HS_EARLY_BRAKE_START_ENC = 1600;  // Peak 230..255
 constexpr int16_t HS_EARLY_BRAKE_PEAK_THRESHOLD = 230;
 constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
-constexpr float HS_CORNER_HOLD_PWM = 120.0f;
+constexpr float HS_CORNER_HOLD_PWM = 110.0f;
 constexpr float HS_HOLD_CENTER_ERROR = 15.0f; // valid line position near center
 int16_t highSpeedPeakPwm = 220; // safer tested starting peak; HS_PEAK:n can override.
 enum HighSpeedStage : uint8_t {
@@ -68,8 +68,8 @@ static int32_t highSpeedBrakeStart() {
 
 static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     const float peak = fmaxf(basePwm, (float)highSpeedPeakPwm);
-    // HOLD target is independent of BASE (e.g. BASE=100, HOLD=120).
-    // Never turn braking into acceleration if HS_PEAK is below 120.
+    // HOLD target is independent of BASE (e.g. BASE=100, HOLD=110).
+    // Never turn braking into acceleration if HS_PEAK is below 110.
     const float holdPwm = fminf(HS_CORNER_HOLD_PWM, peak);
     if (ticks <= 0) return basePwm;
     if (ticks < HS_RAMP_END_ENC) {
