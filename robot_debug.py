@@ -916,6 +916,15 @@ class App(tk.Tk):
             self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
+        elif message in ("ERR: MAP_NOT_SELECTED", "ERR: MAP_USE_1_2_3",
+                              "ERR: MAP_SELECT_FAILED", "ERR: AUTO_ALREADY_RUNNING"):
+            if self.start_pending and not self.start_confirmed:
+                self.start_pending = False
+                self.set_auto_running(False)
+                self.control_state.set("Firmware từ chối START/MAP: " + message)
+                self.control_state_label.configure(fg=AMBER)
+                self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
+                self.update_control_buttons()
         elif message.startswith("ERR: CALIB_REQUIRED_OR_PENDING"):
             self.start_pending = False
             self.set_auto_running(False)
