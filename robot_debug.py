@@ -1108,7 +1108,7 @@ class App(tk.Tk):
                         self.hs_peak_feedback.set(
                             f"ESP32 báo {confirmed}; chờ xác nhận PWM {expected}")
                     self.high_speed_status.set(
-                        f"HS: READY | PEAK={confirmed} | BRAKE=1800-2300 | HOLD=90")
+                        f"HS: READY | PEAK={confirmed} | BRAKE=1800-2300 | HOLD=110")
                     self.update_control_buttons()
         elif message.startswith("ERR: HS_PEAK_"):
             if self.hs_peak_pending is not None:
@@ -1130,7 +1130,7 @@ class App(tk.Tk):
             if stage:
                 self.high_speed_status.set(
                     f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE=1800-2300 | HOLD=90"
+                    f"| PEAK={self.high_speed_peak} | BRAKE=1800-2300 | HOLD=110"
                 )
         elif message.startswith("DIAG:"):
             peak = re.search(r"\bpeak=(\d+)\b", message)
@@ -1152,7 +1152,7 @@ class App(tk.Tk):
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
                 self.high_speed_status.set(
                     f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE=1800-2300 | HOLD=90"
+                    f"| PEAK={self.high_speed_peak} | BRAKE=1800-2300 | HOLD=110"
                 )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
