@@ -39,6 +39,35 @@ constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 // Named-track dashed-line coast. Encoder positions are relative to AUTO start.
 // These are provisional windows extracted from the 2026-10-31 map logs.
 constexpr uint32_t GAP_TIMEOUT_MS = 100;
+// First straight trapezoid in relative motor-encoder ticks.
+// An experimental open-loop PWM envelope, not closed-loop wheel velocity.
+constexpr int32_t HS_RAMP_END_ENC = 300;
+constexpr int32_t HS_BRAKE_START_ENC = 2050;
+constexpr int32_t HS_BRAKE_END_ENC = 2450;
+constexpr int16_t HS_PEAK_PWM = 255;
+enum HighSpeedStage : uint8_t {
+    HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
+    HS_FINISHED=4, HS_ABORTED=5
+};
+HighSpeedStage highSpeedStage = HS_DISABLED;
+bool highSpeedAborted = false;
+int32_t highSpeedMaxProgress = 0;
+
+static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
+    if (ticks <= 0) return basePwm;
+    if (ticks < HS_RAMP_END_ENC) {
+        return basePwm + (float)(HS_PEAK_PWM - basePwm) *
+            ((float)ticks / (float)HS_RAMP_END_ENC);
+    }
+    if (ticks < HS_BRAKE_START_ENC) return HS_PEAK_PWM;
+    if (ticks < HS_BRAKE_END_ENC) {
+        return (float)HS_PEAK_PWM +
+            (basePwm - (float)HS_PEAK_PWM) *
+            ((float)(ticks - HS_BRAKE_START_ENC) /
+             (float)(HS_BRAKE_END_ENC - HS_BRAKE_START_ENC));
+    }
+    return basePwm;
+}
 struct GapWindow { int32_t begin; int32_t end; };
 constexpr GapWindow GAP_WINDOWS[3] = {
     {1500, 2100}, // MAP 1
@@ -186,6 +215,9 @@ static void resetLineTracking() {
     gapActive = false;
     gapStartMs = 0;
     gapHoldPwm = lastNormalForwardPwm = 0;
+    highSpeedStage = HS_DISABLED;
+    highSpeedAborted = false;
+    highSpeedMaxProgress = 0;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -253,7 +285,10 @@ void pid_set_auto_mode(bool enabled) {
     clearPidState();
     lastComputeTimeUs = micros();
     autoStartedMs = millis();
-    if (enabled) encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
+    if (enabled) {
+        encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
+        highSpeedStage = selectedMap >= 1 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED;
+    }
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
@@ -263,6 +298,7 @@ bool pid_select_map(uint8_t mapId) {
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
+uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
 int32_t pid_get_run_encoder_progress(void) { return runEncoderProgress(); }
 void pid_get_gap_window(int32_t* begin, int32_t* end) {
     const GapWindow w = selectedMap >= 1 && selectedMap <= 3
@@ -300,6 +336,24 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     if (finishLineLatched) return LINE_CASE_STOPPED;
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
+    // Stage uses monotonic maximum forward progress, not time or raw encoder
+    // sum; wheel reversal during SEARCH must not reactivate earlier zones.
+    if (selectedMap >= 1 && selectedMap <= 3 && !highSpeedAborted) {
+        const int32_t progress = runEncoderProgress();
+        if (progress > highSpeedMaxProgress) highSpeedMaxProgress = progress;
+        if (isSearchTurn() && highSpeedMaxProgress < HS_BRAKE_END_ENC) {
+            highSpeedAborted = true;
+            highSpeedStage = HS_ABORTED;
+        } else if (highSpeedMaxProgress >= HS_BRAKE_END_ENC) {
+            highSpeedStage = HS_FINISHED;
+        } else if (highSpeedMaxProgress >= HS_BRAKE_START_ENC) {
+            highSpeedStage = HS_BRAKE;
+        } else if (highSpeedMaxProgress >= HS_RAMP_END_ENC) {
+            highSpeedStage = HS_CRUISE;
+        } else {
+            highSpeedStage = HS_ACCEL;
+        }
+    }
 
     if (bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
         if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
@@ -580,6 +634,25 @@ void pid_line_follow_step(void) {
         lastCorrection = p + it + d;
 
         float base = updateForwardSpeed(absErr);
+        // Replace only the forward-speed target on the first straight. Keep
+        // existing PID steering, error governor, outer-eye limits, and SEARCH.
+        // For BASE:120, command envelope is 120 -> 255 -> 120.
+        if (highSpeedStage == HS_ACCEL ||
+            highSpeedStage == HS_CRUISE ||
+            highSpeedStage == HS_BRAKE) {
+            if (turnState == TURN_NONE) {
+                const float profile = highSpeedForwardTarget(
+                    highSpeedMaxProgress, (float)pidConfig.baseSpeed);
+                const float errorRatio = fminf(
+                    absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
+                const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
+                    ? pidConfig.baseSpeed : 45);
+                base = fmaxf(minimumSpeed,
+                    profile * (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio));
+                if (base > pidConfig.maxSpeed) base = pidConfig.maxSpeed;
+                governedForwardSpeed = base;
+            }
+        }
         const uint16_t sensorMask = sensor_get_line_bits();
         const float edgeSeverity = outerSensorSeverity(sensorMask);
         if (edgeSeverity > 0.0f) {
