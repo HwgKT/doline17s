@@ -66,9 +66,10 @@ static void setLine(void) {
 static void setWhite(void) {
     for (int i = 0; i < N_SENSORS; ++i) sensorRaw[i] = 1000;
 }
-static void beginMap(uint8_t map, int32_t origin) {
+static void beginMap(uint8_t map, int32_t origin, int16_t peak=220) {
     pid_set_auto_mode(false);
     pid_init(1.6f, 0.0f, 0.8f, 120);
+    assert(pid_set_high_speed_peak(peak));
     simLeft = origin;
     simRight = origin + 700;
     assert(pid_select_map(map));
@@ -212,6 +213,42 @@ int main(void) {
         assert(pid_get_high_speed_stage() == 4);
     }
 
+    // High peaks (>=230) must enter BRAKE 200 ticks earlier on all three
+    // MAPs. 229 stays on the original 1800 start; 230 and 255 use 1600.
+    for (uint8_t map = 1; map <= 3; ++map) {
+        for (const int16_t peak : {int16_t(229), int16_t(230), int16_t(255)}) {
+            const int32_t origin = 410000 + int32_t(map)*10000 + int32_t(peak)*100;
+            beginMap(map, origin, peak);
+            const bool early = peak >= 230;
+            const int32_t expectedStart = early ? 1600 : 1800;
+            assert(pid_get_high_speed_brake_start() == expectedStart);
+            advanceTo(1599, origin);
+            stepMs(2);
+            assert(pid_get_high_speed_stage() == 2); // CRUISE at 1599
+            assert(pwmL == peak && pwmR == peak);
+            advanceTo(1600, origin);
+            stepMs(2);
+            assert(pid_get_high_speed_stage() == (early ? 3 : 2));
+            assert(pwmL == peak && pwmR == peak);
+            advanceTo(1700, origin);
+            stepMs(2);
+            assert(pid_get_high_speed_stage() == (early ? 3 : 2));
+            if (early) {
+                assert(pwmL < peak && pwmR < peak);
+                assert(pwmL > 110 && pwmR > 110);
+            } else {
+                assert(pwmL == peak && pwmR == peak);
+            }
+            advanceTo(1800, origin);
+            stepMs(2);
+            assert(pid_get_high_speed_stage() == 3); // all now braking
+            advanceTo(2300, origin);
+            stepMs(2);
+            assert(pid_get_high_speed_stage() == 6); // HOLD at same 2300
+            assert(pwmL == 110 && pwmR == 110);
+        }
+    }
+
     // MAP 1 has a later dashed segment (~1985-2058) inside BRAKE.
     // Its existing 100ms GAP_BRIDGE must still work while decelerating.
     beginMap(1, 400000);
@@ -266,6 +303,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: 3 MAP GAP windows, common 300/1800/2300 PWM brake to 110, immediate encoder+center HOLD release, adjustable peak");
+    puts("PASS: MAP 1/2/3 GAP and HS BRAKE 1800(<230) or 1600(>=230), HOLD 110 at 2300, centered-line release");
     return 0;
 }
