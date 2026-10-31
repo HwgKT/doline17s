@@ -35,11 +35,14 @@ constexpr uint8_t START_BOX_LINE_FRAMES = 3;
 constexpr uint32_t START_BOX_LINE_STABLE_MS = 20;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
 constexpr int16_t LINE_SEARCH_PWM = 85;
-constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
+// Require a continuous, centered and contiguous line before exiting SEARCH.
+constexpr uint32_t SEARCH_REACQUIRE_CONFIRM_MS = 40;
+constexpr uint32_t REACQUIRE_SETTLE_MS = 150;
+constexpr uint32_t REACQUIRE_INVALID_MS = 40;
+// Do not reset this watchdog when a false reacquisition briefly leaves SEARCH.
+constexpr uint32_t RECOVERY_SESSION_TIMEOUT_MS = 2500;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
-constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
-// Temporary experiment: skip the short post-reacquisition speed ramp.
-constexpr bool ENABLE_REACQUIRE_SPEED_RAMP = false;
+constexpr float REACQUIRE_CORRECTION_MULTIPLIER = 1.0f;
 // Increase only NORMAL_PID forward reference by 10%; other modes unchanged.
 constexpr float NORMAL_PID_BASE_GAIN = 1.10f;
 constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
@@ -81,7 +84,14 @@ uint32_t autoStartedMs = 0;
 uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
 uint8_t derivativeWarmupFrames = 0;
-uint8_t reacquireSpeedFrames = 0;
+bool searchCandidateActive = false;
+uint32_t searchCandidateSinceMs = 0;
+bool settlingActive = false;
+uint32_t settleStartedMs = 0;
+uint32_t settleInvalidSinceMs = 0;
+bool recoverySessionActive = false;
+uint32_t recoveryStartedMs = 0;
+bool recoveryTimeoutLatched = false;
 bool turnMissing = false;
 bool startupLossActive = false;
 bool startBoxCheckPending = false;
@@ -131,6 +141,15 @@ static float outerSensorSeverity(uint16_t mask) {
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
 }
+// A centered narrow line must be a SINGLE contiguous band, not separate black
+// islands or a wide crossing. Allow one black eye when it is near center.
+static bool isCenteredNarrowLine(uint16_t mask, float position, uint8_t blackCount) {
+    if (blackCount == 0 || blackCount > 6 ||
+        fabsf(position) > TURN_CENTERED_POSITION ||
+        (mask & TURN_CENTER_SENSOR_MASK) == 0) return false;
+    const uint16_t shifted = (uint16_t)(mask >> __builtin_ctz((unsigned)mask));
+    return (shifted & (uint16_t)(shifted + 1U)) == 0;
+}
 static void limitMotorCommandPeak(float& left, float& right, float limit) {
     const float peak = fmaxf(fabsf(left), fabsf(right));
     if (peak > limit && peak > 0.0f) {
@@ -166,7 +185,14 @@ static void resetLineTracking() {
     turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
     derivativeWarmupFrames = 0;
-    reacquireSpeedFrames = 0;
+    searchCandidateActive = false;
+    searchCandidateSinceMs = 0;
+    settlingActive = false;
+    settleStartedMs = 0;
+    settleInvalidSinceMs = 0;
+    recoverySessionActive = false;
+    recoveryStartedMs = 0;
+    recoveryTimeoutLatched = false;
     turnMissing = false;
     startupLossActive = false;
     startBoxCheckPending = false;
@@ -214,6 +240,32 @@ static bool isLeftTurn() {
 }
 static TurnState searchStateFor(TurnState direction) {
     return direction == TURN_LEFT ? SEARCH_LEFT : SEARCH_RIGHT;
+}
+static void beginRecoverySearch(TurnState direction, uint32_t now) {
+    if (!recoverySessionActive) {
+        recoverySessionActive = true;
+        recoveryStartedMs = now;
+    }
+    ++confirmedLosses;
+    turnState = searchStateFor(direction);
+    searchStartedMs = now;
+    searchCandidateActive = false;
+    searchCandidateSinceMs = 0;
+    settlingActive = false;
+    settleInvalidSinceMs = 0;
+    centeredTurnFrames = 0;
+    turnMissing = false;
+    missing = false;
+}
+static void latchRecoveryTimeout() {
+    recoveryTimeoutLatched = true;
+    recoverySessionActive = false;
+    settlingActive = false;
+    searchCandidateActive = false;
+    turnState = TURN_NONE;
+    lineLocked = false;
+    acquiring = missing = false;
+    clearPidState();
 }
 } // namespace
 
@@ -323,7 +375,15 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     }
     if (startBoxTimedOut) return LINE_CASE_STOPPED;
 
-    if (mask == 0xFFFFU) {
+    if (recoveryTimeoutLatched) return LINE_CASE_LOST_LINE;
+    if (recoverySessionActive &&
+        (uint32_t)(now - recoveryStartedMs) >= RECOVERY_SESSION_TIMEOUT_MS) {
+        latchRecoveryTimeout();
+        return LINE_CASE_LOST_LINE;
+    }
+
+    // During recovery, a wide region is ambiguous and NOT a finish line.
+    if (!recoverySessionActive && mask == 0xFFFFU) {
         fullLineCandidate = true;
         if (fullLineFrames < 3) ++fullLineFrames;
         if (fullLineFrames >= 3) {
@@ -351,29 +411,31 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     // Keep PID steering while a corner remains visible; pivot only after line loss.
     if (turnState != TURN_NONE) {
         if (isSearchTurn()) {
-            const bool reliableReacquisition =
-                (blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
-                (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION);
-            if (reliableReacquisition) {
-                if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
-                    ++centeredTurnFrames;
+            const bool centeredLine = isCenteredNarrowLine(mask, position, blackCount);
+            if (centeredLine) {
+                if (!searchCandidateActive) {
+                    searchCandidateActive = true;
+                    searchCandidateSinceMs = now;
+                }
+                if ((uint32_t)(now - searchCandidateSinceMs) >=
+                    SEARCH_REACQUIRE_CONFIRM_MS) {
+                    turnState = TURN_NONE;
+                    searchCandidateActive = false;
+                    centeredTurnFrames = 0;
+                    missing = false;
+                    turnMissing = false;
+                    settlingActive = true;
+                    settleStartedMs = now;
+                    settleInvalidSinceMs = 0;
+                    derivativeHistoryValid = false;
+                    derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                    lineLocked = true;
+                    if (previouslyLocked) ++reacquisitions;
+                    previouslyLocked = true;
+                    return LINE_CASE_REACQUIRE_SETTLE;
+                }
             } else {
-                centeredTurnFrames = 0;
-            }
-            if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
-                turnState = TURN_NONE;
-                centeredTurnFrames = 0;
-                missing = false;
-                turnMissing = false;
-                derivativeHistoryValid = false;
-                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
-                reacquireSpeedFrames = ENABLE_REACQUIRE_SPEED_RAMP
-                    ? REACQUIRE_SPEED_RAMP_FRAMES : 0;
-                lineLocked = true;
-                if (previouslyLocked) ++reacquisitions;
-                previouslyLocked = true;
-                if (bitCount16(mask) >= 11) return LINE_CASE_CROSS_LINE;
-                return LINE_CASE_NORMAL_PID;
+                searchCandidateActive = false;
             }
         } else {
             const bool narrowCenteredLine =
@@ -405,10 +467,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 turnMissing = true;
                 turnMissingSinceMs = now;
             } else if (uint32_t(now - turnMissingSinceMs) >= LINE_LOSS_MS) {
-                turnState = searchStateFor(turnState);
-                searchStartedMs = now;
-                centeredTurnFrames = 0;
-                turnMissing = false;
+                beginRecoverySearch(turnState, now);
                 clearPidState();
                 return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
             }
@@ -418,16 +477,39 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
-            turnState = TURN_NONE;
-            centeredTurnFrames = 0;
-            lineLocked = false;
-            acquiring = missing = false;
-            turnMissing = false;
-            ++confirmedLosses;
+            latchRecoveryTimeout();
             return LINE_CASE_LOST_LINE;
         }
         if (!isSearchTurn() && blackCount > 0)
             return LINE_CASE_NORMAL_PID;
+        return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+    }
+
+    if (settlingActive) {
+        if (isCenteredNarrowLine(mask, position, blackCount)) {
+            if (settleInvalidSinceMs != 0) {
+                // Require a new full stable interval after a dropout.
+                settleStartedMs = now;
+            }
+            settleInvalidSinceMs = 0;
+            missing = false;
+            if ((uint32_t)(now - settleStartedMs) >= REACQUIRE_SETTLE_MS) {
+                settlingActive = false;
+                recoverySessionActive = false;
+                derivativeHistoryValid = false;
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                return LINE_CASE_NORMAL_PID;
+            }
+            return LINE_CASE_REACQUIRE_SETTLE;
+        }
+        // Do not drive through an ambiguous junction during recovery.
+        if (settleInvalidSinceMs == 0) settleInvalidSinceMs = now;
+        if ((uint32_t)(now - settleInvalidSinceMs) < REACQUIRE_INVALID_MS)
+            return LINE_CASE_REACQUIRE_SETTLE;
+        const TurnState direction = position < 0.0f ? TURN_LEFT :
+            position > 0.0f ? TURN_RIGHT : lastTurnDirection;
+        beginRecoverySearch(direction, now);
+        clearPidState();
         return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
     }
 
@@ -485,12 +567,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     }
     lineLocked = false;
     missing = false;
-    ++confirmedLosses;
-    turnState = searchStateFor(lastKnownPosition < 0.0f ? TURN_LEFT :
-                               lastKnownPosition > 0.0f ? TURN_RIGHT :
-                               lastTurnDirection);
-    searchStartedMs = now;
-    centeredTurnFrames = 0;
+    beginRecoverySearch(lastKnownPosition < 0.0f ? TURN_LEFT :
+                        lastKnownPosition > 0.0f ? TURN_RIGHT :
+                        lastTurnDirection, now);
     clearPidState();
     return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
 }
@@ -518,7 +597,8 @@ void pid_line_follow_step(void) {
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
-            motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
+            if (searchCandidateActive) motor_stop();
+            else motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
@@ -527,13 +607,17 @@ void pid_line_follow_step(void) {
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
         if (turnState == SEARCH_RIGHT) {
-            motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
+            if (searchCandidateActive) motor_stop();
+            else motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
-    } else if (currentCase == LINE_CASE_NORMAL_PID && good) {
+    } else if ((currentCase == LINE_CASE_NORMAL_PID ||
+                currentCase == LINE_CASE_REACQUIRE_SETTLE) && good &&
+               (currentCase != LINE_CASE_REACQUIRE_SETTLE ||
+                isCenteredNarrowLine(sensor_get_line_bits(), pos, blackCount))) {
         const float err = pos;
         const float absErr = fabsf(err);
 
@@ -582,18 +666,19 @@ void pid_line_follow_step(void) {
             if (edgeSpeed < base) base = edgeSpeed;
             governedForwardSpeed = base;
         }
-        if (ENABLE_REACQUIRE_SPEED_RAMP && reacquireSpeedFrames > 0) {
-            const float rampProgress =
-                (float)(REACQUIRE_SPEED_RAMP_FRAMES -
-                        reacquireSpeedFrames) /
-                (float)(REACQUIRE_SPEED_RAMP_FRAMES - 1U);
+        const bool settling = currentCase == LINE_CASE_REACQUIRE_SETTLE;
+        if (settling) {
+            const float progress = fminf(
+                (float)(millis() - settleStartedMs) / (float)REACQUIRE_SETTLE_MS,
+                1.0f);
             const float rampSpeed = (float)DROPOUT_FORWARD_PWM +
-                (governedForwardSpeed - (float)DROPOUT_FORWARD_PWM) *
-                    rampProgress;
+                (base - (float)DROPOUT_FORWARD_PWM) * progress;
             if (rampSpeed < base) base = rampSpeed;
-            --reacquireSpeedFrames;
         }
-        const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
+        // Normal_PID remains at 2B, while settling forbids reversing a wheel.
+        const float correctionLimit = base *
+            (settling ? REACQUIRE_CORRECTION_MULTIPLIER :
+                        PID_CORRECTION_BASE_MULTIPLIER);
         float correction = lastCorrection;
         if (correction > correctionLimit) correction = correctionLimit;
         if (correction < -correctionLimit) correction = -correctionLimit;
@@ -656,14 +741,15 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_STOPPED: return "CASE 8: Dung Xe";
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
         case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
+        case LINE_CASE_REACQUIRE_SETTLE: return "CASE 11: Reacquire - slow stable tracking";
         default: return "Khong Xac Dinh";
     }
 }
 float pid_get_last_error(void) { return lastError; }
 float pid_get_correction(void) { return lastCorrection; }
-float pid_get_term_p(void) { return currentCase == LINE_CASE_NORMAL_PID ? lastPTerm : 0.0f; }
-float pid_get_term_i(void) { return currentCase == LINE_CASE_NORMAL_PID ? lastITerm : 0.0f; }
-float pid_get_term_d(void) { return currentCase == LINE_CASE_NORMAL_PID ? lastDTerm : 0.0f; }
+float pid_get_term_p(void) { return (currentCase == LINE_CASE_NORMAL_PID || currentCase == LINE_CASE_REACQUIRE_SETTLE) ? lastPTerm : 0.0f; }
+float pid_get_term_i(void) { return (currentCase == LINE_CASE_NORMAL_PID || currentCase == LINE_CASE_REACQUIRE_SETTLE) ? lastITerm : 0.0f; }
+float pid_get_term_d(void) { return (currentCase == LINE_CASE_NORMAL_PID || currentCase == LINE_CASE_REACQUIRE_SETTLE) ? lastDTerm : 0.0f; }
 float pid_get_kp(void) { return pidConfig.Kp; }
 float pid_get_ki(void) { return pidConfig.Ki; }
 float pid_get_kd(void) { return pidConfig.Kd; }
