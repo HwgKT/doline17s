@@ -69,6 +69,18 @@ constexpr float EC_P_GAIN_ERROR_SLOPE = 0.012f;
 constexpr float EC_D_FILTER_ALPHA = 0.20f;
 constexpr float EC_D_MAX_BASE_FRACTION = 0.55f;
 constexpr float EC_D_MAX_ABSOLUTE = 120.0f;
+// ECcodedoline 3-phase sharp corner (time-based, never delay/block SPP).
+constexpr uint32_t EC_SHARP_BRAKE_MS = 22;
+constexpr uint32_t EC_SHARP_COUNTER_BRAKE_MS = 18;
+constexpr int16_t EC_SHARP_BRAKE_REVERSE_PWM = 110;
+constexpr int16_t EC_SHARP_BRAKE_FORWARD_PWM = 35;
+constexpr int16_t EC_SHARP_PIVOT_INNER_PWM = 105;
+constexpr int16_t EC_SHARP_PIVOT_OUTER_PWM = 115;
+constexpr int16_t EC_SHARP_COUNTER_BRAKE_PWM = 45;
+constexpr uint32_t EC_SHARP_REENTRY_COOLDOWN_MS = 80;
+constexpr uint32_t EC_CROSS_COOLDOWN_MS = 120;
+constexpr uint32_t EC_T_JUNCTION_CONFIRM_MS = 20;
+constexpr uint32_t EC_T_JUNCTION_COOLDOWN_MS = 120;
 constexpr float PID_CORRECTION_BASE_MULTIPLIER = 2.0f;
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
@@ -108,6 +120,15 @@ uint32_t acquireSinceMs = 0, missingSinceMs = 0;
 uint32_t confirmedLosses = 0, reacquisitions = 0;
 float governedForwardSpeed = 0.0f;
 uint32_t ecCenteredSinceMs = 0;
+uint32_t ecLastCrossMs = 0;
+uint32_t ecLastSharpExitMs = 0;
+uint32_t ecCounterBrakeUntilMs = 0;
+int8_t ecCounterBrakeSide = 0; // -1 left, +1 right
+bool ecShapeQualified = false;
+bool ecActiveSharpSearch = false;
+int8_t ecTCandidate = 0;
+uint32_t ecTCandidateSinceMs = 0;
+uint32_t ecLastTJunctionExitMs = 0;
 
 static int16_t clampPwm(float value) {
     if (value <= 0.0f) return 0;
@@ -235,6 +256,15 @@ static void resetLineTracking() {
     lastDashedCorrection = 0;
     governedForwardSpeed = 0.0f;
     ecCenteredSinceMs = 0;
+    ecLastCrossMs = 0;
+    ecLastSharpExitMs = 0;
+    ecCounterBrakeUntilMs = 0;
+    ecCounterBrakeSide = 0;
+    ecShapeQualified = false;
+    ecActiveSharpSearch = false;
+    ecTCandidate = 0;
+    ecTCandidateSinceMs = 0;
+    ecLastTJunctionExitMs = 0;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -271,6 +301,12 @@ static TurnState searchStateFor(TurnState direction) {
     return direction == TURN_LEFT ? SEARCH_LEFT : SEARCH_RIGHT;
 }
 static void beginRecoverySearch(TurnState direction, uint32_t now) {
+    // Only an explicitly outer-edge-qualified corner gets EC's aggressive
+    // three-phase pivot; generic lost-line recovery retains +/-85 PWM.
+    ecActiveSharpSearch = (turnState == TURN_LEFT || turnState == TURN_RIGHT) &&
+        ecShapeQualified;
+    ecShapeQualified = false;
+    ecCounterBrakeUntilMs = 0;
     if (!recoverySessionActive) {
         recoverySessionActive = true;
         recoveryStartedMs = now;
@@ -371,6 +407,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         return LINE_CASE_LOST_LINE;
     }
 
+    // Sample code: a 120ms cooldown keeps junction edges from rearming a turn.
+    if (!recoverySessionActive && bitCount16(mask) >= 11)
+        ecLastCrossMs = now;
+
     // During recovery, a wide region must NOT be mistaken for a finish line.
     if (!recoverySessionActive && mask == 0xFFFFU) {
         fullLineCandidate = true;
@@ -408,6 +448,14 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 }
                 if ((uint32_t)(now - searchCandidateSinceMs) >=
                     SEARCH_REACQUIRE_CONFIRM_MS) {
+                    // Complete the EC pivot with a short counter-brake only
+                    // for an actual qualified 90-degree edge, not normal search.
+                    if (ecActiveSharpSearch) {
+                        ecCounterBrakeSide = isLeftTurn() ? -1 : 1;
+                        ecCounterBrakeUntilMs = now + EC_SHARP_COUNTER_BRAKE_MS;
+                        ecLastSharpExitMs = now;
+                    }
+                    ecActiveSharpSearch = false;
                     turnState = TURN_NONE;
                     searchCandidateActive = false;
                     centeredTurnFrames = 0;
@@ -439,6 +487,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 centeredTurnFrames = 0;
             }
             if (centeredTurnFrames >= TURN_CENTERED_FRAMES) {
+                if (ecShapeQualified) ecLastSharpExitMs = now;
+                ecShapeQualified = false;
                 turnState = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
@@ -520,10 +570,34 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
 
         // Cross-line takes priority over corner classification.
-        if (bitCount16(mask) >= 11) return LINE_CASE_CROSS_LINE;
+        if (bitCount16(mask) >= 11) {
+            ecTCandidate = 0;
+            return LINE_CASE_CROSS_LINE;
+        }
 
         const uint8_t leftOuter = bitCount16(mask & 0x000FU);
         const uint8_t rightOuter = bitCount16(mask & 0xF000U);
+        const uint8_t leftHalf = bitCount16(mask & 0x00FFU);
+        const uint8_t rightHalf = bitCount16(mask & 0xFF00U);
+        const bool centerPair = bitCount16(mask & TURN_CENTER_SENSOR_MASK) >= 2;
+        const bool cooldownClear =
+            (uint32_t)(now - ecLastCrossMs) >= EC_CROSS_COOLDOWN_MS &&
+            (uint32_t)(now - ecLastSharpExitMs) >= EC_SHARP_REENTRY_COOLDOWN_MS;
+        // ECcodedoline T-junction signature: center + outer branch while
+        // opposite outer sensors remain clear. 20ms deglitch before turning.
+        const int8_t tCandidate = (centerPair && leftOuter >= 2 && rightOuter == 0 &&
+            rightHalf <= 2) ? -1 :
+            (centerPair && rightOuter >= 2 && leftOuter == 0 &&
+            leftHalf <= 2) ? 1 : 0;
+        if (ecTCandidate != tCandidate) {
+            ecTCandidate = tCandidate;
+            ecTCandidateSinceMs = now;
+        }
+        if (cooldownClear && tCandidate != 0 &&
+            (uint32_t)(now - ecLastTJunctionExitMs) >= EC_T_JUNCTION_COOLDOWN_MS &&
+            (uint32_t)(now - ecTCandidateSinceMs) >= EC_T_JUNCTION_CONFIRM_MS) {
+            return tCandidate < 0 ? LINE_CASE_T_LEFT : LINE_CASE_T_RIGHT;
+        }
         const bool sharpLeft =
             position <= -SHARP_TURN_POSITION ||
             (position <= -SHARP_TURN_POSITION_WITH_OUTER_EYES && leftOuter >= 2);
@@ -532,6 +606,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             (position >= SHARP_TURN_POSITION_WITH_OUTER_EYES && rightOuter >= 2);
 
         if (sharpLeft || sharpRight) {
+            const bool qualifiedEdge = cooldownClear &&
+                ((sharpLeft && leftOuter >= 3 && rightHalf == 0) ||
+                 (sharpRight && rightOuter >= 3 && leftHalf == 0));
+            ecShapeQualified = qualifiedEdge;
             turnState = sharpLeft ? TURN_LEFT : TURN_RIGHT;
             lastTurnDirection = turnState;
             turnStartedMs = now;
@@ -581,12 +659,36 @@ void pid_line_follow_step(void) {
         derivativeHistoryValid = false;
         ecCenteredSinceMs = 0;
     }
+    if ((prev == LINE_CASE_T_LEFT || prev == LINE_CASE_T_RIGHT) &&
+        currentCase != prev) {
+        ecLastTJunctionExitMs = millis();
+        ecTCandidate = 0;
+    }
+    // Opposite pulse only after a verified centered reacquisition from an
+    // EC-shaped corner. If center is lost, the pulse is cancelled immediately.
+    if (ecCounterBrakeUntilMs != 0) {
+        if (currentCase == LINE_CASE_REACQUIRE_SETTLE && good &&
+            isCenteredNarrowLine(sensor_get_line_bits(), pos, blackCount) &&
+            (int32_t)(ecCounterBrakeUntilMs - millis()) > 0) {
+            const int16_t b = EC_SHARP_COUNTER_BRAKE_PWM;
+            lastPTerm = lastITerm = lastDTerm = lastCorrection = 0.0f;
+            motor_set_speeds(ecCounterBrakeSide < 0 ? b : -b,
+                             ecCounterBrakeSide < 0 ? -b : b);
+            return;
+        }
+        ecCounterBrakeUntilMs = 0;
+    }
 
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
             if (searchCandidateActive) motor_stop(); // Validate centered line without pivoting.
-            else motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
+            else if (ecActiveSharpSearch) {
+                const uint32_t e = (uint32_t)(millis() - searchStartedMs);
+                motor_set_speeds(
+                    e < EC_SHARP_BRAKE_MS ? -EC_SHARP_BRAKE_REVERSE_PWM : -EC_SHARP_PIVOT_INNER_PWM,
+                    e < EC_SHARP_BRAKE_MS ? EC_SHARP_BRAKE_FORWARD_PWM : EC_SHARP_PIVOT_OUTER_PWM);
+            } else motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
@@ -596,7 +698,12 @@ void pid_line_follow_step(void) {
         clearPidState();
         if (turnState == SEARCH_RIGHT) {
             if (searchCandidateActive) motor_stop();
-            else motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
+            else if (ecActiveSharpSearch) {
+                const uint32_t e = (uint32_t)(millis() - searchStartedMs);
+                motor_set_speeds(
+                    e < EC_SHARP_BRAKE_MS ? EC_SHARP_BRAKE_FORWARD_PWM : EC_SHARP_PIVOT_OUTER_PWM,
+                    e < EC_SHARP_BRAKE_MS ? -EC_SHARP_BRAKE_REVERSE_PWM : -EC_SHARP_PIVOT_INNER_PWM);
+            } else motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
@@ -685,6 +792,14 @@ void pid_line_follow_step(void) {
             ((float)pidConfig.maxSpeed - base) * steeringSeverity;
         limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
         motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
+    } else if (currentCase == LINE_CASE_T_LEFT ||
+               currentCase == LINE_CASE_T_RIGHT) {
+        // EC sample T-branch steering, non-blocking and bounded by maxSpeed.
+        clearPidState();
+        const int16_t outer = clampPwm((float)pidConfig.baseSpeed);
+        const int16_t inner = clampPwmSigned(-0.4f * (float)pidConfig.baseSpeed);
+        if (currentCase == LINE_CASE_T_LEFT) motor_set_speeds(inner, outer);
+        else motor_set_speeds(outer, inner);
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
         const int16_t speed = clampPwm((float)pidConfig.baseSpeed * 0.7f);
