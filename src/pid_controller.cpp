@@ -152,6 +152,11 @@ bool turnMissing = false;
 bool startupLossActive = false;
 bool finishLineLatched = false;
 uint8_t fullLineFrames = 0;
+// A robot may START on an all-black square. Arm the finish detector only
+// after leaving that square and tracking a narrow line after the ramp.
+bool finishDetectorArmed = false;
+uint8_t normalLineArmFrames = 0;
+constexpr uint8_t FINISH_ARM_FRAMES = 3;
 
 bool lineLocked = false, previouslyLocked = false;
 bool acquiring = false, missing = false;
@@ -231,6 +236,8 @@ static void resetLineTracking() {
     startupLossActive = false;
     finishLineLatched = false;
     fullLineFrames = 0;
+    finishDetectorArmed = false;
+    normalLineArmFrames = 0;
     lastDashedCorrection = 0;
     governedForwardSpeed = 0.0f;
     gapActive = false;
@@ -401,7 +408,21 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
-    if (bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
+    // START may be inside a black launch box (all 16 sensors dark).
+    // Do not mistake that box for the finish line. The detector is armed
+    // only after enough forward movement and 3 narrow-line samples.
+    if (!finishDetectorArmed) {
+        if (runEncoderProgress() >= HS_RAMP_END_ENC &&
+            blackCount >= 1 && blackCount <= 10) {
+            if (normalLineArmFrames < FINISH_ARM_FRAMES)
+                ++normalLineArmFrames;
+            if (normalLineArmFrames >= FINISH_ARM_FRAMES)
+                finishDetectorArmed = true;
+        } else {
+            normalLineArmFrames = 0;
+        }
+        fullLineFrames = 0;
+    } else if (bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
         if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
         if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {
             finishLineLatched = true;
