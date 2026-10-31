@@ -246,10 +246,10 @@ int main(void) {
 
     // Stop only after all 16 eyes stay black for 50 ms.
     for(int i=0;i<N_SENSORS;i++)sensorRaw[i]=2000;
-    stepMs(50);
+    stepMs(2);
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
     assert(leftPwm==84 && rightPwm==84);
-    stepMs(2);
+    stepMs(6);
     assert(pid_get_current_case()==LINE_CASE_STOPPED);
     assert(leftPwm==0 && rightPwm==0);
     onlyEye(8,1700);
