@@ -17,7 +17,7 @@ An experimental **PWM command envelope**, not a physical speed controller. The s
 | >=2300 | `HOLD`: maintain forward target `min(110, HS_PEAK)` through first right turn |
 | current encoder >=3100 **and** valid line position within ±15 of center | `COMPLETE`: return to original PID speed governor with `BASE` |
 
-Defaults: `BASE=100` after boot; `HS_PEAK=220` (safer default based on the first-corner overshoot logs). Example with `BASE:120` and `HS_PEAK:220`: `120 → 220 → 110 (HOLD) → 120 when encoder and centered-line conditions are met`. Start experiments at `HS_PEAK:180`, then 220.
+**Built-in MAP defaults (no Python app required):** MAP 1: `BASE=130`, `HS_PEAK=240`; MAP 2: `BASE=160`, `HS_PEAK=240`; MAP 3: `BASE=150`, `HS_PEAK=240`. Firmware boots into MAP 1. The first switch to MAP 2 or 3 loads that map's defaults; selecting the same map again preserves deliberate app overrides. All maps use `Kp=1.6`, `Ki=0.0`, `Kd=0.8`. HOLD remains 110 PWM.
 
 The HOLD forward target is **110 PWM when HS_PEAK >=110**, regardless of the configured BASE. At peaks 100–109, it is capped at HS_PEAK to prevent the BRAKE phase from accelerating. The physical PWM on each wheel can still be reduced or differentiated by tracking and steering controllers.
 
