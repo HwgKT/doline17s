@@ -99,10 +99,13 @@ int main(void) {
     pid_get_gap_window(&from, &to);
     assert(from == 1500 && to == 2100);
     advanceTo(1650, 50000);
+    stepMs(2);
+    assert(pid_get_high_speed_stage() == 2);
+    assert(pwmL == 255 && pwmR == 255);
     setWhite();
     stepMs(60);
     assert(pid_get_current_case() == LINE_CASE_GAP_BRIDGE);
-    assert(pwmL == 120 && pwmR == 120);  // no fallback to 95
+    assert(pwmL == 255 && pwmR == 255);  // hold last forward PWM, not 95
     assert(!pid_select_map(2));          // no MAP change mid-run
     setLine();
     stepMs(2);
@@ -147,6 +150,44 @@ int main(void) {
     setLine(); stepMs(2);
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
 
+    // First-straight trapezoidal PWM envelope, based on encoder since AUTO.
+    // Baseline remains configurable; here the app would set BASE:120.
+    beginMap(1, 210000);
+    assert(pid_get_high_speed_stage() == 1);
+    advanceTo(100, 210000);
+    stepMs(2);
+    assert(pwmL >= 164 && pwmL <= 166 && pwmL == pwmR);
+    advanceTo(300, 210000);
+    stepMs(2);
+    assert(pid_get_high_speed_stage() == 2);
+    assert(pwmL == 255 && pwmR == 255);
+    advanceTo(2050, 210000);
+    stepMs(2);
+    assert(pid_get_high_speed_stage() == 3);
+    assert(pwmL == 255 && pwmR == 255);
+    advanceTo(2250, 210000);
+    stepMs(2);
+    assert(pwmL >= 187 && pwmL <= 188 && pwmL == pwmR);
+    advanceTo(2450, 210000);
+    stepMs(2);
+    assert(pid_get_high_speed_stage() == 4);
+    assert(pwmL == 120 && pwmR == 120);
+    advanceTo(2500, 210000);
+    stepMs(2);
+    assert(pwmL == 120 && pwmR == 120);
+    advanceTo(1900, 210000); // encoder reversal must not re-enter high speed
+    stepMs(2);
+    assert(pid_get_high_speed_stage() == 4);
+    assert(pwmL == 120 && pwmR == 120);
+
+    // Track window selection does not change the common brake-onset target.
+    beginMap(2, 250000);
+    advanceTo(2050, 250000); stepMs(2);
+    assert(pid_get_high_speed_stage() == 3);
+    beginMap(3, 280000);
+    advanceTo(2050, 280000); stepMs(2);
+    assert(pid_get_high_speed_stage() == 3);
+
     // Out of the MAP 1 window: preserve the existing 30ms + startup coast.
     beginMap(1, 150000);
     advanceTo(1200, 150000);
@@ -157,6 +198,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: 3 MAP GAP windows, 100ms timeout, recovery, encoder origin, legacy outside");
+    puts("PASS: 3 MAP GAP windows, 100ms timeout, 300/2050/2450 PWM trapezoid, legacy outside");
     return 0;
 }
