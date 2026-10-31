@@ -43,10 +43,15 @@ class GPIO34ThreePressSourceTests(unittest.TestCase):
         self.assertIn("setButton34Phase(BUTTON34_WHITE_NEXT);", MAIN)
 
     def test_led_fast_then_slow_then_bt(self):
-        self.assertIn("CAL_WHITE_LED_BLINK_MS=120", MAIN)
-        self.assertIn("CAL_BLACK_LED_BLINK_MS=450", MAIN)
+        self.assertIn("CAL_WHITE_LED_BLINK_MS=40", MAIN)
+        self.assertIn("CAL_BLACK_LED_BLINK_MS=90", MAIN)
         self.assertIn("void updateLedIndicator(uint32_t now)", MAIN)
         self.assertIn("updateLedIndicator(now);", MAIN)
+        self.assertIn("BUTTON34_WHITE_CAPTURING", MAIN)
+        self.assertIn("setButton34Phase(BUTTON34_BLACK_NEXT); // LED OFF", MAIN)
+        self.assertIn("setButton34Phase(BUTTON34_START_NEXT);", MAIN)
+        self.assertIn("if(button34Phase!=BUTTON34_START_REUSE)", MAIN)
+        self.assertIn("ledWrite(phase==BUTTON34_WHITE_CAPTURING ||", MAIN)
         self.assertIn("setButton34Phase(BUTTON34_START_REUSE)", MAIN)
 
     def test_start_guard_and_finish_detection_unchanged(self):
