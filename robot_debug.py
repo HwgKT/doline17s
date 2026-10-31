@@ -827,7 +827,8 @@ class App(tk.Tk):
         self.start_confirmed = False
         self.csv_status.set(f"CSV GHI: {recorder.path.name}")
         self.log(f"CSV BẮT ĐẦU: {recorder.path}")
-        if self.send_command("AUTO"):
+        # Firmware receives the same MAP ID as the CSV recorder in one START command.
+        if self.send_command(f"AUTO:{self.selected_map}"):
             self.start_pending = True
             self.control_state.set("Đã gửi AUTO — chờ ESP32 xác nhận.")
             self.update_control_buttons()
