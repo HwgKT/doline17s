@@ -78,6 +78,8 @@ int32_t pid_get_run_encoder_progress(void);
 void pid_get_run_encoder_origins(int32_t* left, int32_t* right);
 void pid_get_gap_window(int32_t* begin, int32_t* end);
 bool pid_line_is_confirmed(void);
+// True only after 16 black sensors for 3 consecutive PID cycles.
+bool pid_finish_line_latched(void);
 uint32_t pid_get_confirmed_line_loss_count(void);
 uint32_t pid_get_line_reacquisition_count(void);
 
