@@ -150,46 +150,67 @@ int main(void) {
     setLine(); stepMs(2);
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
 
-    // First-straight trapezoidal PWM envelope, based on encoder since AUTO.
-    // Baseline remains configurable; here the app would set BASE:120.
-    beginMap(1, 210000);
-    assert(pid_get_high_speed_stage() == 1);
-    advanceTo(100, 210000);
-    stepMs(2);
-    assert(pwmL >= 164 && pwmL <= 166 && pwmL == pwmR);
-    advanceTo(300, 210000);
-    stepMs(2);
-    assert(pid_get_high_speed_stage() == 2);
-    assert(pwmL == 255 && pwmR == 255);
-    advanceTo(2050, 210000);
-    stepMs(2);
-    assert(pid_get_high_speed_stage() == 3);
-    assert(pwmL == 255 && pwmR == 255);
-    advanceTo(2250, 210000);
-    stepMs(2);
-    assert(pwmL >= 187 && pwmL <= 188 && pwmL == pwmR);
-    advanceTo(2450, 210000);
-    stepMs(2);
-    assert(pid_get_high_speed_stage() == 4);
-    assert(pwmL == 120 && pwmR == 120);
-    advanceTo(2500, 210000);
-    stepMs(2);
-    assert(pwmL == 120 && pwmR == 120);
-    advanceTo(1900, 210000); // encoder reversal must not re-enter high speed
-    stepMs(2);
-    assert(pid_get_high_speed_stage() == 4);
-    assert(pwmL == 120 && pwmR == 120);
+    // All MAPs share first-straight brake 1800->2300, then HOLD PWM 90.
+    // Finishing the ramp must NOT return to BASE at encoder 2300.
+    for (uint8_t map = 1; map <= 3; ++map) {
+        const int32_t origin = 210000 + int32_t(map) * 10000;
+        beginMap(map, origin);
+        assert(pid_get_high_speed_stage() == 1);
+        advanceTo(100, origin);
+        stepMs(2);
+        assert(pwmL >= 164 && pwmL <= 166 && pwmL == pwmR);
+        advanceTo(300, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 2);
+        assert(pwmL == 255 && pwmR == 255);
+        advanceTo(1800, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 3);
+        assert(pwmL == 255 && pwmR == 255);
+        advanceTo(2050, origin);
+        stepMs(2);
+        assert(pwmL >= 172 && pwmL <= 173 && pwmL == pwmR);
+        advanceTo(2250, origin);
+        stepMs(2);
+        assert(pwmL >= 106 && pwmL <= 107 && pwmL == pwmR);
+        advanceTo(2300, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 6); // HOLD
+        assert(pwmL == 90 && pwmR == 90);
+        advanceTo(2500, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 6);
+        assert(pwmL == 90 && pwmR == 90);
+        advanceTo(3100, origin);
+        stepMs(100);
+        assert(pid_get_high_speed_stage() == 6); // never release without corner
+        assert(pwmL == 90 && pwmR == 90);
+        // Encoder high-water mark must prevent a ramp restart.
+        advanceTo(1900, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 6);
+        assert(pwmL == 90 && pwmR == 90);
 
-    // Track window selection does not change the common brake-onset target.
-    beginMap(2, 250000);
-    advanceTo(2050, 250000); stepMs(2);
-    assert(pid_get_high_speed_stage() == 3);
-    beginMap(3, 280000);
-    advanceTo(2050, 280000); stepMs(2);
-    assert(pid_get_high_speed_stage() == 3);
+        // Real right-hand edge, then stable centered line after the turn.
+        advanceTo(2600, origin);
+        setWhite();
+        sensorRaw[15] = 2000;
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 6);
+        advanceTo(3100, origin);
+        setLine();
+        stepMs(20);
+        assert(pid_get_high_speed_stage() == 6);
+        stepMs(60);
+        assert(pid_get_high_speed_stage() == 4); // COMPLETE after 30 frames
+        assert(pwmL == 120 && pwmR == 120);
+        advanceTo(1900, origin);
+        stepMs(2);
+        assert(pid_get_high_speed_stage() == 4);
+        assert(pwmL == 120 && pwmR == 120);
+    }
 
-    // Peak is adjustable only while stopped, so low-risk 180/220 trials
-    // can be run before ever enabling the full experimental 255 command.
+    // Peak is configurable only while stopped. Low peaks still brake to 90.
     pid_set_auto_mode(false);
     assert(pid_set_high_speed_peak(180));
     assert(pid_get_high_speed_peak() == 180);
@@ -203,13 +224,17 @@ int main(void) {
     stepMs(2);
     assert(pwmL==180 && pwmR==180);
     assert(!pid_set_high_speed_peak(220)); // frozen during AUTO
-    simLeft+=1750; simRight+=1750;
+    simLeft+=1500; simRight+=1500; // 1800
     stepMs(2);
     assert(pid_get_high_speed_stage()==3);
     assert(pwmL==180 && pwmR==180);
-    simLeft+=400; simRight+=400;
+    simLeft+=250; simRight+=250; // 2050
     stepMs(2);
-    assert(pwmL==120 && pwmR==120);
+    assert(pwmL==135 && pwmR==135);
+    simLeft+=250; simRight+=250; // 2300
+    stepMs(2);
+    assert(pid_get_high_speed_stage()==6);
+    assert(pwmL==90 && pwmR==90);
 
     // Out of the MAP 1 window: preserve the existing 30ms + startup coast.
     beginMap(1, 150000);
@@ -221,6 +246,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: 3 MAP GAP windows, 100ms timeout, 300/2050/2450 PWM trapezoid, adjustable peak, legacy outside");
+    puts("PASS: 3 MAP GAP windows, common 300/1800/2300 PWM brake to 90, stable right-corner HOLD release, adjustable peak");
     return 0;
 }
