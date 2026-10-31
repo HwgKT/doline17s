@@ -30,7 +30,9 @@ constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 // First AUTO frame on a completely black start box: forward-only escape.
 // Stops rather than drives indefinitely if no narrow line is found.
 constexpr uint32_t START_BOX_TIMEOUT_MS = 2500;
-constexpr int16_t START_BOX_PWM = 90;
+// Minimum straight escape drive; independent from low NORMAL_PID base.
+// Tune this against loaded wheel motion before running at full speed.
+constexpr int16_t START_BOX_PWM = 135;
 constexpr uint8_t START_BOX_LINE_FRAMES = 3;
 constexpr uint32_t START_BOX_LINE_STABLE_MS = 20;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
@@ -43,6 +45,9 @@ constexpr uint32_t REACQUIRE_INVALID_MS = 40;
 constexpr uint32_t RECOVERY_SESSION_TIMEOUT_MS = 2500;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr float REACQUIRE_CORRECTION_MULTIPLIER = 1.0f;
+constexpr float SEARCH_CANDIDATE_PWM = 95.0f;
+constexpr float SEARCH_CANDIDATE_KP = 0.65f;
+constexpr float SEARCH_CANDIDATE_MAX_CORRECTION = 20.0f;
 // Increase only NORMAL_PID forward reference by 10%; other modes unchanged.
 constexpr float NORMAL_PID_BASE_GAIN = 1.10f;
 constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
@@ -149,6 +154,15 @@ static bool isCenteredNarrowLine(uint16_t mask, float position, uint8_t blackCou
         (mask & TURN_CENTER_SENSOR_MASK) == 0) return false;
     const uint16_t shifted = (uint16_t)(mask >> __builtin_ctz((unsigned)mask));
     return (shifted & (uint16_t)(shifted + 1U)) == 0;
+}
+// Forward, bounded steering keeps the candidate line underneath the array
+// while validating it. Stopping the motors here stranded the robot in SEARCH.
+static void driveSearchCandidate(float position) {
+    const float correction = fmaxf(-SEARCH_CANDIDATE_MAX_CORRECTION,
+        fminf(SEARCH_CANDIDATE_KP * position,
+              SEARCH_CANDIDATE_MAX_CORRECTION));
+    motor_set_speeds((int16_t)(SEARCH_CANDIDATE_PWM + correction),
+                     (int16_t)(SEARCH_CANDIDATE_PWM - correction));
 }
 static void limitMotorCommandPeak(float& left, float& right, float limit) {
     const float peak = fmaxf(fabsf(left), fabsf(right));
@@ -597,7 +611,7 @@ void pid_line_follow_step(void) {
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
-            if (searchCandidateActive) motor_stop();
+            if (searchCandidateActive) driveSearchCandidate(pos);
             else motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
@@ -607,7 +621,7 @@ void pid_line_follow_step(void) {
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
         if (turnState == SEARCH_RIGHT) {
-            if (searchCandidateActive) motor_stop();
+            if (searchCandidateActive) driveSearchCandidate(pos);
             else motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
@@ -714,9 +728,11 @@ void pid_line_follow_step(void) {
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {
-        const int16_t maxCoast = startBoxEscaping ? START_BOX_PWM : DROPOUT_FORWARD_PWM;
-        const int16_t speed = pidConfig.baseSpeed < maxCoast
-            ? pidConfig.baseSpeed : maxCoast;
+        // The start box requires enough PWM to overcome static friction, even
+        // when the tuned NORMAL_PID Base is deliberately conservative.
+        const int16_t speed = startBoxEscaping ? START_BOX_PWM :
+            (pidConfig.baseSpeed < DROPOUT_FORWARD_PWM ?
+             pidConfig.baseSpeed : DROPOUT_FORWARD_PWM);
         motor_set_speeds(speed, speed);
     } else {
         clearPidState();
