@@ -1250,10 +1250,11 @@ class App(tk.Tk):
                     self.control_state.set("SẴN SÀNG — động cơ đang dừng.")
                     self.control_state_label.configure(fg=GREEN)
                 self.update_control_buttons()
-        elif message in ("MOTOR: STOP", "MODE: MANUAL",
-                              "AUTO_FINISHED: STOPPED",
+        elif (message in ("MOTOR: STOP", "MODE: MANUAL",
                               "[SAFE] MANUAL DEADMAN: MOTOR STOP",
-                              "ERR: ADC_READ_FAULT_MOTORS_STOPPED"):
+                              "ERR: ADC_READ_FAULT_MOTORS_STOPPED")
+              or message.startswith("AUTO_FINISHED:")
+              or message.startswith("AUTO_STOPPED:")):
             self.confirm_stopped(message)
         pid = re.search(r"PID:\s*Kp=([\d.]+)\s+Ki=([\d.]+)\s+Kd=([\d.]+)\s+Base=(\d+)",
                         message, flags=re.IGNORECASE)
