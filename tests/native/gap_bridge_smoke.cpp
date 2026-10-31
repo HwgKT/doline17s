@@ -154,7 +154,7 @@ int main(void) {
     setLine(); stepMs(2);
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
 
-    // All MAPs share first-straight brake 1800->2300, then HOLD PWM 120.
+    // All MAPs share first-straight brake 1800->2300, then HOLD PWM 110.
     // Finishing the ramp must NOT return to BASE at encoder 2300.
     for (uint8_t map = 1; map <= 3; ++map) {
         const int32_t origin = 210000 + int32_t(map) * 10000;
@@ -173,18 +173,18 @@ int main(void) {
         assert(pwmL == 220 && pwmR == 220);
         advanceTo(2050, origin);
         stepMs(2);
-        assert(pwmL == 170 && pwmL == pwmR);
+        assert(pwmL == 165 && pwmL == pwmR);
         advanceTo(2250, origin);
         stepMs(2);
-        assert(pwmL == 130 && pwmL == pwmR);
+        assert(pwmL == 121 && pwmL == pwmR);
         advanceTo(2300, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6); // HOLD
-        assert(pwmL == 120 && pwmR == 120);
+        assert(pwmL == 110 && pwmR == 110);
         advanceTo(2500, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6);
-        assert(pwmL == 120 && pwmR == 120);
+        assert(pwmL == 110 && pwmR == 110);
 
         // Encoder threshold alone must not release when no line is visible.
         advanceTo(3099, origin);
@@ -195,7 +195,7 @@ int main(void) {
         setWhite();
         stepMs(2);
         assert(pid_get_high_speed_stage() == 6); // position defaults to zero, but no valid line
-        assert(pwmL == 120 && pwmR == 120);
+        assert(pwmL == 110 && pwmR == 110);
 
         // A visible off-center line is insufficient; a centered line releases
         // on the very first PID sample (no 30-frame dwell / corner flag).
@@ -206,7 +206,7 @@ int main(void) {
         setLine();
         stepMs(2);
         assert(pid_get_high_speed_stage() == 4);
-        assert(pwmL == 120 && pwmR == 120);
+        assert(pwmL == 110 && pwmR == 110);
         // Completion is sticky; encoder reversal cannot restart the profile.
         advanceTo(1900, origin);
         stepMs(2);
@@ -236,7 +236,7 @@ int main(void) {
             assert(pid_get_high_speed_stage() == (early ? 3 : 2));
             if (early) {
                 assert(pwmL < peak && pwmR < peak);
-                assert(pwmL > 120 && pwmR > 120);
+                assert(pwmL > 110 && pwmR > 110);
             } else {
                 assert(pwmL == peak && pwmR == peak);
             }
@@ -246,7 +246,7 @@ int main(void) {
             advanceTo(2300, origin);
             stepMs(2);
             assert(pid_get_high_speed_stage() == 6); // HOLD at same 2300
-            assert(pwmL == 120 && pwmR == 120);
+            assert(pwmL == 110 && pwmR == 110);
         }
     }
 
@@ -257,7 +257,7 @@ int main(void) {
     stepMs(2);
     assert(pid_get_high_speed_stage() == 3); // BRAKE
     const int16_t gapBrakePwm = pwmL;
-    assert(gapBrakePwm > 120 && gapBrakePwm < 220);
+    assert(gapBrakePwm > 110 && gapBrakePwm < 220);
     setWhite();
     stepMs(60);
     assert(pid_get_current_case() == LINE_CASE_GAP_BRIDGE);
@@ -268,7 +268,7 @@ int main(void) {
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
     assert(pid_get_high_speed_stage() == 3);
 
-    // Peak is configurable only while stopped. Low peaks still brake to 120 if peak >= 120.
+    // Peak is configurable only while stopped. Low peaks brake to 110 when peak >= 110.
     pid_set_auto_mode(false);
     assert(pid_set_high_speed_peak(180));
     assert(pid_get_high_speed_peak() == 180);
@@ -288,31 +288,31 @@ int main(void) {
     assert(pwmL==180 && pwmR==180);
     simLeft+=250; simRight+=250; // 2050
     stepMs(2);
-    assert(pwmL==150 && pwmR==150);
+    assert(pwmL==145 && pwmR==145);
     simLeft+=250; simRight+=250; // 2300
     stepMs(2);
     assert(pid_get_high_speed_stage()==6);
-    assert(pwmL==120 && pwmR==120);
+    assert(pwmL==110 && pwmR==110);
 
-    // HOLD=120 is a genuine target when BASE=100 or BASE=140;
-    // it must not silently become min(120, BASE).
+    // HOLD=110 is a genuine target when BASE=100 or BASE=140;
+    // it must not silently become min(110, BASE).
     beginMap(2, 610000, 220, 100);
     advanceTo(2300, 610000);
     stepMs(2);
     assert(pid_get_high_speed_stage() == 6);
-    assert(pwmL == 120 && pwmR == 120);
+    assert(pwmL == 110 && pwmR == 110);
     beginMap(2, 620000, 220, 140);
     advanceTo(2300, 620000);
     stepMs(2);
     assert(pid_get_high_speed_stage() == 6);
-    assert(pwmL == 120 && pwmR == 120);
+    assert(pwmL == 110 && pwmR == 110);
 
-    // A peak below 120 must never accelerate during a supposed BRAKE.
-    beginMap(2, 630000, 110, 100);
+    // A peak below 110 must never accelerate during a supposed BRAKE.
+    beginMap(2, 630000, 100, 100);
     advanceTo(2300, 630000);
     stepMs(2);
     assert(pid_get_high_speed_stage() == 6);
-    assert(pwmL == 110 && pwmR == 110);
+    assert(pwmL == 100 && pwmR == 100);
 
     // Out of the MAP 1 window: preserve the existing 30ms + startup coast.
     beginMap(1, 150000);
@@ -324,6 +324,6 @@ int main(void) {
     assert(pwmL == 95 && pwmR == 95);
     pid_set_auto_mode(false);
     assert(pwmL == 0 && pwmR == 0);
-    puts("PASS: MAP 1/2/3 GAP and HS BRAKE 1800(<230) or 1600(>=230), HOLD 120 at 2300, centered-line release");
+    puts("PASS: MAP 1/2/3 GAP and HS BRAKE 1800(<230) or 1600(>=230), HOLD 110 at 2300, centered-line release");
     return 0;
 }
