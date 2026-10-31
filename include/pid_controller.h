@@ -68,7 +68,7 @@ bool pid_is_auto_mode(void);
 bool pid_select_map(uint8_t mapId);
 uint8_t pid_get_selected_map(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
- // 4 complete, 5 aborted after losing line.
+// 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
 // Adjustable peak PWM before START (100-255), must not be below BASE.
 bool pid_set_high_speed_peak(int16_t pwm);
