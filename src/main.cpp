@@ -130,7 +130,7 @@ void command(const String &raw) {
   if(s=="HS_PEAK"){
     char b[160];
     snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=90 HOLD_MIN_END=3100",
+      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
       pid_get_high_speed_peak(),pid_get_base_speed());
     reply(b);return;
   }
@@ -237,7 +237,7 @@ void command(const String &raw) {
     reply(runInfo);
     char rampEvent[160];
     snprintf(rampEvent,sizeof(rampEvent),
-      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=1800 end=2300 hold=90 minEnd=3100 t_ms=%lu",
+      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=1800 end=2300 hold=110 minEnd=3100 t_ms=%lu",
       (unsigned)pid_get_selected_map(),pid_get_base_speed(),
       pid_get_high_speed_peak(),(unsigned long)millis());
     reply(rampEvent);
@@ -342,7 +342,7 @@ void setup() {
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
-  pid_init(2.0f,0.0f,0.0f,100); // conservative baseline while validating sharp-turn behavior
+  pid_init(1.6f,0.0f,0.8f,100); // default PID gains for MAP 1/2/3
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
@@ -393,7 +393,7 @@ void loop() {
       if(newHighSpeedStage<7U){
         char b[160];
         snprintf(b,sizeof(b),
-          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=1800 end=2300 hold=90 minEnd=3100 t_ms=%lu",
+          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=1800 end=2300 hold=110 minEnd=3100 t_ms=%lu",
           labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
           (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
           pid_get_high_speed_peak(),(unsigned long)millis());
