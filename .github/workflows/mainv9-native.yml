@@ -1,0 +1,24 @@
+name: mainv9 native PID smoke
+
+on:
+  push:
+    branches: [mainv9]
+    paths:
+      - 'src/pid_controller.cpp'
+      - 'include/pid_controller.h'
+      - 'tests/native/**'
+      - '.github/workflows/mainv9-native.yml'
+  workflow_dispatch:
+
+jobs:
+  native-pid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native PID smoke
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Itests/native -Iinclude \
+            src/pid_controller.cpp tests/native/pid_stability_smoke.cpp \
+            -o /tmp/mainv9_pid_smoke
+      - name: Run native PID smoke
+        run: /tmp/mainv9_pid_smoke
