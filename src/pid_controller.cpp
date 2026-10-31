@@ -379,7 +379,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             // and 30 consecutive centered, visibly tracked line frames.
             const bool centeredAfterCorner =
                 firstRightCornerSeen &&
-                highSpeedMaxProgress >= HS_HOLD_MIN_END_ENC &&
+                progress >= HS_HOLD_MIN_END_ENC &&
                 turnState == TURN_NONE && lineLocked &&
                 blackCount > 0 && fabsf(position) <= HS_HOLD_CENTER_ERROR &&
                 (mask & 0xF00FU) == 0;
