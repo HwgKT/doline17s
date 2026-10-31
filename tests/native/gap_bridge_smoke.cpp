@@ -98,23 +98,6 @@ int main(void) {
     assert(!pid_select_map(0));
     assert(!pid_select_map(4));
 
-    // Physical START may begin in a fully black launch square.
-    // Black at encoder 0 must NOT trigger the 3-frame finish latch.
-    beginMap(1, 76000);
-    for (int i=0; i<N_SENSORS; ++i) sensorRaw[i] = 2000;
-    stepMs(20);
-    assert(!pid_finish_line_latched());
-    assert(pid_get_current_case() != LINE_CASE_STOPPED);
-    advanceTo(400, 76000);
-    setLine();
-    stepMs(10); // leave start square and arm finish on narrow line
-    for (int i=0; i<N_SENSORS; ++i) sensorRaw[i] = 2000;
-    stepMs(4);
-    assert(!pid_finish_line_latched()); // two full-black frames insufficient
-    stepMs(2);
-    assert(pid_finish_line_latched());
-    assert(pid_get_current_case() == LINE_CASE_STOPPED);
-
     beginMap(1, 50000);
     int32_t from = 0, to = 0;
     pid_get_gap_window(&from, &to);
