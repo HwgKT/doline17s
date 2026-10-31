@@ -593,10 +593,14 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             ecTCandidate = tCandidate;
             ecTCandidateSinceMs = now;
         }
+        // A T-branch resembles an outer-edge sharp turn. Give the candidate
+        // its 20ms deglitch window before allowing the sharp-turn latch.
+        // This prevents the sharp classifier from permanently hiding T cases.
         if (cooldownClear && tCandidate != 0 &&
-            (uint32_t)(now - ecLastTJunctionExitMs) >= EC_T_JUNCTION_COOLDOWN_MS &&
-            (uint32_t)(now - ecTCandidateSinceMs) >= EC_T_JUNCTION_CONFIRM_MS) {
-            return tCandidate < 0 ? LINE_CASE_T_LEFT : LINE_CASE_T_RIGHT;
+            (uint32_t)(now - ecLastTJunctionExitMs) >= EC_T_JUNCTION_COOLDOWN_MS) {
+            if ((uint32_t)(now - ecTCandidateSinceMs) >= EC_T_JUNCTION_CONFIRM_MS)
+                return tCandidate < 0 ? LINE_CASE_T_LEFT : LINE_CASE_T_RIGHT;
+            return LINE_CASE_NORMAL_PID;
         }
         const bool sharpLeft =
             position <= -SHARP_TURN_POSITION ||
