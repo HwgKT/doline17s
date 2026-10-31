@@ -45,7 +45,7 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 ### 3. Nút nhấn.
 
-| **Nút START** | `GPIO34` | Nhấn một lần để chạy AUTO trên MAP firmware đã chọn; chống dội 50 ms, chỉ nhận cạnh nhấn |
+| **Nút CAL / START** | `GPIO34` | Bấm 1: calib TRẮNG (LED nháy nhanh), bấm 2: calib ĐEN (LED nháy chậm), bấm 3: START (S5–S10 có line); chống dội 50 ms |
 | **GPIO35** | Không dùng | Không cần nút START riêng |
 
 ### 4. Động cơ & Driver (LEDC PWM 8-bit, 1000Hz)
