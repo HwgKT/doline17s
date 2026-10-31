@@ -91,3 +91,11 @@ Review encoder speed near runEnc=2300/2550/2600, time to `HS_STAGE HOLD` and `CO
 
 **MAP 1 caveat:** its GAP window (1500–2100) overlaps the early BRAKE. While `GAP_BRIDGE` is active, the firmware holds the last forward PWM; the requested linear ramp resumes after line reacquisition. Starting BRAKE earlier does not guarantee immediate mechanical deceleration during white gaps.
 
+
+## GPIO34 physical START (ported from mainv10 button sampling)
+
+On this branch GPIO34 is the sole physical START button (not CALIB). GPIO35 is unused. ESP32 GPIO34 is input-only and **has no internal pull-up or pull-down**: use a 10-kΩ external pulldown from GPIO34 to GND and a momentary button from 3.3 V to GPIO34 (active HIGH). Never apply 5 V. Debounce is 50 ms with one rising-edge event per press; holding the button or bouncing it does not retrigger AUTO. A button already held during power-up must be released and pressed again.
+
+The button calls the same firmware AUTO handler as SPP, so calibration, E-STOP, ADC, and running-state guards remain in force. The firmware defaults to MAP 1 after boot for standalone operation. For MAP 2/3, connect the Python app and select MAP 2/3 **before** pressing GPIO34; selection sends MAP:2 / MAP:3 to the ESP32. The physical button does **not** recalibrate the sensors. Calibration remains available through CAL_WHITE and CAL_BLACK commands in the app.
+
+While connected, the app sees the button's MODE: AUTO PID and RUN_ORIGIN map=N responses and opens map-specific CSV/TXT automatically if no run log was already created by the app. A physical START without SPP can still run with NVS calibration but cannot produce PC-side CSV/TXT; a connected app should first finish reading CAL_DUMP so it has all 16 calibrated thresholds for the log. A run started from the physical button cannot be started twice while AUTO is active; STOP remains an independent app/SPP command.
