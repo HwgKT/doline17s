@@ -62,6 +62,8 @@ uint8_t holdCenteredFrames = 0;
 
 static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     const float peak = fmaxf(basePwm, (float)highSpeedPeakPwm);
+    // If BASE is below 90, never accelerate during a supposed brake hold.
+    const float holdPwm = fminf(HS_CORNER_HOLD_PWM, basePwm);
     if (ticks <= 0) return basePwm;
     if (ticks < HS_RAMP_END_ENC) {
         return basePwm + (peak - basePwm) *
@@ -70,13 +72,13 @@ static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     if (ticks < HS_BRAKE_START_ENC) return peak;
     if (ticks < HS_BRAKE_END_ENC) {
         return peak +
-            (HS_CORNER_HOLD_PWM - peak) *
+            (holdPwm - peak) *
             ((float)(ticks - HS_BRAKE_START_ENC) /
              (float)(HS_BRAKE_END_ENC - HS_BRAKE_START_ENC));
     }
     // Keep low forward thrust until the first right turn is recovered.
     // HS_FINISHED bypasses this envelope and returns to normal BASE.
-    return HS_CORNER_HOLD_PWM;
+    return holdPwm;
 }
 struct GapWindow { int32_t begin; int32_t end; };
 constexpr GapWindow GAP_WINDOWS[3] = {
