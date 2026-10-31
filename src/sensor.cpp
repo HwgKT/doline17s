@@ -166,7 +166,7 @@ void finish() {
 void sensor_init(void) {
   pinMode(PIN_MUX_S0, OUTPUT); pinMode(PIN_MUX_S1, OUTPUT);
   pinMode(PIN_MUX_S2, OUTPUT); pinMode(PIN_MUX_S3, OUTPUT);
-  pinMode(PIN_START_BUTTON, INPUT); // external pulldown; GPIO34 has no internal pull
+  pinMode(PIN_START_BUTTON, INPUT); // external pull-up; GPIO34 has no internal pull
   lastButtonRead = buttonState = digitalRead(PIN_START_BUTTON);
   lastButtonChange = millis(); // require a fresh press after initial release
   analogReadResolution(12);
