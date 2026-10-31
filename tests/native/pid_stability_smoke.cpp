@@ -122,7 +122,8 @@ int main(void) {
     onlyEye(8,1600);
     stepMs(20);
     assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
-    assert(leftPwm==0 && rightPwm==0); // stop pivot when checking a candidate
+    assert(leftPwm>0 && rightPwm>0); // forward steering during candidate
+    assert(leftPwm>=75 && rightPwm>=75);
     stepMs(26);
     assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
     assert(pid_line_is_confirmed());
@@ -177,7 +178,8 @@ int main(void) {
     setPattern("0000000110000000");
     stepMs(20);
     assert(pid_get_current_case()==LINE_CASE_SHARP_RIGHT);
-    assert(leftPwm==0 && rightPwm==0);
+    assert(leftPwm>0 && rightPwm>0);
+    assert(leftPwm>=75 && rightPwm>=75);
     stepMs(26);
     assert(pid_get_current_case()==LINE_CASE_REACQUIRE_SETTLE);
     assert(leftPwm>0 && rightPwm>0);
@@ -276,7 +278,7 @@ int main(void) {
     pid_set_auto_mode(true);
     stepMs(2);
     assert(pid_get_current_case()==LINE_CASE_STARTUP_COAST);
-    assert(leftPwm==90 && rightPwm==90);
+    assert(leftPwm==135 && rightPwm==135);
     setPattern("0000000110000000");
     stepMs(24);
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
