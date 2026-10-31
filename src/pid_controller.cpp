@@ -52,7 +52,7 @@ constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 110.0f;
 constexpr float HS_HOLD_CENTER_ERROR = 15.0f; // valid line position near center
-int16_t highSpeedPeakPwm = 220; // safer tested starting peak; HS_PEAK:n can override.
+int16_t highSpeedPeakPwm = 240; // All three MAPs default to peak PWM 240.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
     HS_FINISHED=4, HS_ABORTED=5, HS_CORNER_HOLD=6
@@ -99,7 +99,9 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1050, 1750}, // MAP 2
     {1000, 1700}  // MAP 3
 };
-uint8_t selectedMap = 0;  // No implicit map; SPP AUTO:1/2/3 selects it.
+uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
+constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 int32_t runEncoderOriginL = 0, runEncoderOriginR = 0;
 bool gapActive = false;
 uint32_t gapStartMs = 0;
@@ -288,7 +290,7 @@ void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.minSpeed = 0;
     autoMode = false;
     selectedMap = 0;
-    highSpeedPeakPwm = 220;
+    highSpeedPeakPwm = MAP_DEFAULT_HS_PEAK_PWM;
     currentCase = LINE_CASE_STOPPED;
     clearPidState();
     resetLineTracking();
@@ -320,6 +322,12 @@ void pid_set_auto_mode(bool enabled) {
 bool pid_is_auto_mode(void) { return autoMode; }
 bool pid_select_map(uint8_t mapId) {
     if (autoMode || mapId < 1 || mapId > 3) return false;
+    // Apply the track defaults only when changing MAP, not when the Python
+    // app resends AUTO:<same map> after an intentional manual adjustment.
+    if (selectedMap != mapId) {
+        pidConfig.baseSpeed = MAP_DEFAULT_BASE_PWM[mapId - 1];
+        highSpeedPeakPwm = MAP_DEFAULT_HS_PEAK_PWM;
+    }
     selectedMap = mapId;
     return true;
 }
