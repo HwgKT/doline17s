@@ -387,6 +387,13 @@ void loop() {
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
+    // A full-black finish (3 confirmed sensor samples) stops the wheels in
+    // pid_line_follow_step(), but AUTO previously remained enabled forever.
+    // Finish the AUTO session too, so the PC can close its log and START again.
+    if(newCase==LINE_CASE_STOPPED){
+      safeStop();
+      reply("AUTO_FINISHED: STOPPED");
+    }
     if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
       static const char* const labels[]={
         "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD"
