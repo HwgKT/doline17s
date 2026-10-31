@@ -230,9 +230,10 @@ void command(const String &raw) {
     pid_get_run_encoder_origins(&runL,&runR); // exactly the PID's AUTO origin
     char runInfo[180];
     snprintf(runInfo,sizeof(runInfo),
-       "RUN_ORIGIN map=%u encL0=%ld encR0=%ld base=%d peak=%d t_ms=%lu",
+       "RUN_ORIGIN map=%u encL0=%ld encR0=%ld base=%d peak=%d kp=%.2f ki=%.2f kd=%.2f t_ms=%lu",
        (unsigned)pid_get_selected_map(),(long)runL,(long)runR,
        pid_get_base_speed(),pid_get_high_speed_peak(),
+       pid_get_kp(),pid_get_ki(),pid_get_kd(),
        (unsigned long)millis());
     reply(runInfo);
     char rampEvent[160];
