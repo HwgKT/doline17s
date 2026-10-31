@@ -148,7 +148,7 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
   - Cả hai số đếm đều tăng dương khi xe chuyển động thẳng tiến về phía trước.
 - **An toàn luồng (Thread-safety):** Dùng `portENTER_CRITICAL_ISR` / `portENTER_CRITICAL` bảo vệ biến đếm `leftCount` và `rightCount` khỏi xung đột giữa ngắt và vòng lặp chính.
 
-### 3.5. Thuật toán Điều khiển Dò Line PID & State Machine 10 Cases ([pid_controller.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/pid_controller.cpp) & [pid_controller.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/pid_controller.h))
+### 3.5. Thuật toán Điều khiển Dò Line PID & State Machine 11 Cases ([pid_controller.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/pid_controller.cpp) & [pid_controller.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/pid_controller.h))
 
 #### A. Trọng số Cảm biến & Tính toán Vị trí Trọng tâm (Centroid Calculation)
 - **Mảng trọng số 16 mắt (`SENSOR_WEIGHTS`):**
@@ -179,7 +179,7 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 - **Mở rộng hạn mức công suất bẻ lái (Steering Peak Authority):**
   - Khi xe đi thẳng, giới hạn công suất bánh xe bị hãm ở tốc độ $BaseSpeed$. Khi sai số tăng từ 20 đến 60, hạn mức trần mở rộng dần lên tới $MaxSpeed$ (255) cho phép bánh ngoài bốc ga mạnh để kéo xe về lại tâm line.
 
-#### D. Bảng Trạng thái 10 Cases Dò Line (`LineCase_t`)
+#### D. Bảng Trạng thái 11 Cases Dò Line (`LineCase_t`)
 | Case ID | Tên Case Enum | Điều kiện Kích hoạt | Hành vi Điều khiển Động cơ |
 | :---: | :--- | :--- | :--- |
 | **Case 1** | `LINE_CASE_NORMAL_PID` | Thấy line ổn định, sai số trong tầm kiểm soát | Chạy thuật toán PID phi tuyến + Điều tốc động |
@@ -192,11 +192,14 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 | **Case 8** | `LINE_CASE_STOPPED` | Đang tắt AUTO, hoặc chốt đích khi cả 16 mắt đen liên tục $\ge 50$ ms | Dừng cả hai động cơ (`PWM = 0`); vạch ngang có 11–15 mắt đen chỉ chạy qua |
 | **Case 9** | `LINE_CASE_DASHED_LINE` | Mất vạch đen $< 40$ ms | Duy trì quán tính góc lái cũ (coast với $70\%$ lực bẻ lái trước đó) |
 | **Case 10** | `LINE_CASE_STARTUP_COAST`| Mất line trong 5 giây đầu sau khi bật AUTO | Chạy thẳng với PWM tối đa $65$ để tìm lại line |
+| **Case 11** | `LINE_CASE_REACQUIRE_SETTLE` | SEARCH đã xác nhận line hẹp gần tâm liên tục 40 ms; đang xác nhận bám lại | Điều khiển PID với Base PWM tăng dần trong 150 ms; giới hạn correction 1B, không đảo chiều bánh do correction |
 
 - **Cơ chế Pivot Search khi mất line sau cua:**
   - Nếu mất vạch quá $40$ ms sau khi vừa vào cua: Xe quay tại chỗ (Pivot) với $PWM = \pm 85$ (tạo chênh lệch $170$ PWM giữa 2 bánh) về hướng cuối cùng nhìn thấy line.
-  - Bắt lại line: Yêu cầu $3$ khung hình liên tiếp tin cậy (bắt bằng mắt giữa hoặc cặp mắt liền kề). Khâu vi phân $D$ được giữ bằng $0$ trong $4$ chu kỳ đầu và tốc độ dốc dần từ PWM 65 lên để chống giật xe.
-  - Timeout an toàn: Nếu quay tìm line quá $2.0$ giây (`LINE_SEARCH_TIMEOUT_MS = 2000`) mà không thấy line $\rightarrow$ Chuyển về `LINE_CASE_LOST_LINE` và dừng xe hoàn toàn.
+  - **SEARCH xác nhận lại line:** phải thấy line hẹp (1–6 mắt đen), gần tâm (|error| ≤ 22), có ít nhất một mắt ở vùng tâm 6–9, liên tục **40 ms**. Vạch ngang rộng / các mắt ngoài đơn lẻ không làm thoát SEARCH; khi có ứng viên hợp lệ, xe tạm dừng PWM để kiểm tra.
+  - **REACQUIRE_SETTLE (Case 11):** chạy theo PID tốc độ thấp, Base phục hồi từ tối đa 65 theo thời gian **150 ms** và theo bộ giảm tốc do sai số. Giới hạn correction tạm thời **1B** (NORMAL_PID vẫn **2B**). Nếu tín hiệu không đáng tin liên tục **40 ms**, quay lại SEARCH; không chạy thẳng qua vạch rộng trong giai đoạn phục hồi.
+  - **Timeout an toàn:** mỗi đợt SEARCH tối đa **2000 ms**; toàn bộ phiên phục hồi (kể cả SEARCH → SETTLE → SEARCH lặp) tối đa **2500 ms**. Timeout chốt dừng động cơ cho đến khi người dùng STOP rồi START/AUTO lại.
+  - **Giới hạn:** bản này chưa tăng PWM SEARCH (vẫn ±85), chưa can thiệp bộ điều khiển tốc độ kín encoder và chưa thay định dạng khung telemetry SPP 72 byte; dùng lệnh `STATUS` để xem `case=11` khi phục hồi.
 - **Chốt đích toàn đen:** Chỉ mask cảm biến `0xFFFF` mới bắt đầu xác nhận đích. Bất kỳ mắt nào đọc trắng đều xóa bộ đếm thời gian; đủ 50 ms liên tục thì chốt `finishLineLatched`, dừng động cơ và kết thúc AUTO. Vạch giao cắt rộng với 11–15 mắt đen vẫn được xử lý như `LINE_CASE_CROSS_LINE`.
 
 ### 3.6. Phân hệ Truyền thông Bluetooth Classic SPP & Định dạng Telemetry ([bt_telemetry.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/bt_telemetry.cpp) & [bt_telemetry.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/bt_telemetry.h))
