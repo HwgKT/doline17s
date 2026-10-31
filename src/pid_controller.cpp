@@ -227,6 +227,7 @@ static void beginRecoverySearch(TurnState direction, uint32_t now) {
         recoveryStartedMs = now;
     }
     ++confirmedLosses;
+    lastTurnDirection = direction;
     turnState = searchStateFor(direction);
     searchStartedMs = now;
     searchCandidateActive = false;
@@ -425,6 +426,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
     if (settlingActive) {
         if (isCenteredNarrowLine(mask, position, blackCount)) {
+            // Any intermittent dropout restarts the full continuous settle time.
+            if (settleInvalidSinceMs != 0) settleStartedMs = now;
             settleInvalidSinceMs = 0;
             missing = false;
             if ((uint32_t)(now - settleStartedMs) >= REACQUIRE_SETTLE_MS) {
