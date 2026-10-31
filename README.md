@@ -45,8 +45,8 @@ Hệ thống điều khiển xe dò line tốc độ cao sử dụng vi điều 
 
 ### 3. Nút nhấn.
 
-| **Nút Calib** | `GPIO 34` | Bấm lần 1 để lấy trắng; chờ hoàn tất, bấm lần 2 để lấy đen |
-| **Nút Start** | `GPIO35`  | Nút nhấn vật lý kích hoạt start     |
+| **Nút START** | `GPIO34` | Nhấn một lần để chạy AUTO trên MAP firmware đã chọn; chống dội 50 ms, chỉ nhận cạnh nhấn |
+| **GPIO35** | Không dùng | Không cần nút START riêng |
 
 ### 4. Động cơ & Driver (LEDC PWM 8-bit, 1000Hz)
 | Chân Driver | Chân ESP32 | Kênh PWM LEDC | Chiều quay |
@@ -150,8 +150,8 @@ pio run -t monitor
 
 ## Hiệu chuẩn 16 mắt — mainv4 Bluetooth Classic
 
-1. Đặt đủ 16 mắt lên cùng một mặt **trắng** đồng nhất, giữ nguyên chiều cao, gửi `CAL_WHITE` (hoặc bấm nút CALIB một lần), chờ `CAL_WHITE_DONE`.
-2. Chuyển đủ 16 mắt sang cùng một mặt **đen** đồng nhất, gửi `CAL_BLACK` (hoặc bấm nút CALIB lần hai sau bước trắng), chờ `CAL_OK_SAVED`.
+1. Đặt đủ 16 mắt lên cùng một mặt **trắng** đồng nhất, giữ nguyên chiều cao, gửi `CAL_WHITE` qua Python App / SPP, chờ `CAL_WHITE_DONE`.
+2. Chuyển đủ 16 mắt sang cùng một mặt **đen** đồng nhất, gửi `CAL_BLACK` qua Python App / SPP, chờ `CAL_OK_SAVED`.
 3. `CAL_FAILED` có nghĩa là độ tương phản của ít nhất một mắt < 150 ADC, nhiễu quá lớn, hoặc không ghi được NVS; dữ liệu hợp lệ cũ được giữ nguyên.
 4. Gửi `CAL_DUMP` để đọc 16 mức white/black được lưu và ngưỡng riêng (40% độ tương phản) của từng mắt; app Python `robot_debug.py` tự truy vấn NVS sau khi kết nối.
 5. Nếu ESP32 mất nguồn, firmware tự tải lại profile NVS hợp lệ. Cực tính phần cứng cố định: **ADC đen > ADC trắng**; `INV` không còn đảo cực.
