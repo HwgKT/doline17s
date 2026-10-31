@@ -309,6 +309,10 @@ bool pid_set_high_speed_peak(int16_t pwm) {
 }
 int16_t pid_get_high_speed_peak(void) { return highSpeedPeakPwm; }
 int32_t pid_get_run_encoder_progress(void) { return runEncoderProgress(); }
+void pid_get_run_encoder_origins(int32_t* left, int32_t* right) {
+    if (left) *left = runEncoderOriginL;
+    if (right) *right = runEncoderOriginR;
+}
 void pid_get_gap_window(int32_t* begin, int32_t* end) {
     const GapWindow w = selectedMap >= 1 && selectedMap <= 3
                       ? GAP_WINDOWS[selectedMap - 1] : GapWindow{0, 0};
