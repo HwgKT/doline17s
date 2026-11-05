@@ -734,14 +734,40 @@ class App(tk.Tk):
         self.log(f"Đã chọn MAP {map_id}; các lượt START kế tiếp lưu trong logs/map_{map_id:02d}/")
         self.update_control_buttons()
 
+    def get_start_blockers(self):
+        """Return every unmet START prerequisite without bypassing safety checks."""
+        blockers = []
+        connected = self.reader is not None and self.reader.is_alive()
+
+        if not connected:
+            blockers.append("Chưa kết nối Bluetooth SPP")
+        if self.selected_map is None:
+            blockers.append("Chưa chọn MAP 1/2/3")
+        if self.estop_latched is None:
+            blockers.append("Chưa nhận STATUS xác nhận E-STOP từ ESP32")
+        elif self.estop_latched:
+            blockers.append("E-STOP đang khóa")
+        if self.estop_pending:
+            blockers.append("Đang chờ phản hồi E-STOP")
+        if self.start_pending:
+            blockers.append("Lệnh START trước chưa được xác nhận")
+        if self.auto_running:
+            blockers.append("Robot đang ở chế độ AUTO")
+        if self.stop_ack_deadline is not None:
+            blockers.append("Lệnh STOP chưa hoàn tất")
+        if self.run_csv.active is not None:
+            blockers.append("Lượt ghi CSV trước chưa kết thúc")
+        if not self.calibration_ok:
+            blockers.append("Chưa xác nhận calibration 16 mắt")
+        if any(value is None for value in self.cal_thresholds):
+            blockers.append("Chưa nhận đủ 16 ngưỡng cảm biến")
+        return blockers
+
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
-        can_start = (connected and self.estop_latched is False
-                     and not self.estop_pending and not self.start_pending
-                     and not self.auto_running and self.run_csv.active is None
-                     and self.calibration_ok and self.selected_map is not None
-                     and all(v is not None for v in self.cal_thresholds))
-        self.start_btn.configure(state="normal" if can_start else "disabled")
+        # Keep START clickable to explain blockers; start_line() does not
+        # create logs or send AUTO until every prerequisite is satisfied.
+        self.start_btn.configure(state="normal", bg=GREEN)
         self.stop_btn.configure(state="normal" if connected else "disabled")
         locked = (self.run_csv.active is not None or self.auto_running
                   or self.start_pending or self.stop_ack_deadline is not None)
@@ -791,19 +817,24 @@ class App(tk.Tk):
             self.run_txt_file = None
 
     def start_line(self):
-        if self.selected_map is None:
-            self.log("Hãy chọn MAP 1, MAP 2 hoặc MAP 3 trước khi START.")
+        blockers = self.get_start_blockers()
+        if blockers:
+            message = "KHÔNG THỂ START:\n- " + "\n- ".join(blockers)
+            self.log(message)
+            self.control_state.set(message)
+            self.control_state_label.configure(fg=AMBER)
+
+            # Re-query missing status/calibration to help recover after
+            # reconnect or an acknowledgement lost over Bluetooth SPP.
+            if self.reader is not None and self.reader.is_alive():
+                if self.estop_latched is None or self.start_pending:
+                    self.send_command("STATUS")
+                if not self.calibration_ok or any(
+                        value is None for value in self.cal_thresholds):
+                    self.send_command("CAL_DUMP")
             return
-        if self.estop_latched is not False or self.auto_running or self.start_pending:
-            self.log("Chưa thể START: AUTO đang chạy hoặc firmware bị khóa.")
-            return
-        if self.reader is None or not self.reader.is_alive():
-            self.log("Chưa kết nối Bluetooth SPP.")
-            return
-        if not self.calibration_ok or any(v is None for v in self.cal_thresholds):
-            self.log("Chưa nhận đủ 16 ngưỡng TH từ ESP32; gửi lại CAL_DUMP.")
-            self.send_command("CAL_DUMP")
-            return
+
+        self.log("START: Điều kiện hợp lệ; chuẩn bị CSV/TXT và gửi AUTO.")
         try:
             calib = (self.cal_min, self.cal_max)
             recorder = self.run_csv.begin(
