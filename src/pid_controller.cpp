@@ -511,8 +511,7 @@ void pid_line_follow_step(void) {
     } else if (currentCase == LINE_CASE_NORMAL_PID && good) {
         const float err = pos;
 
-        // Non-linear P gain: ramps up quadratically as error increases.
-        // This makes the robot react gently near center but aggressively near edges.
+        // Linear proportional term for the PID-only baseline.
         const float p = pidConfig.Kp * err;
 
         // Integral with anti-windup: tighter clamp + decay when error crosses zero
