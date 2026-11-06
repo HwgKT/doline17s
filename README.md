@@ -21,7 +21,7 @@ PWM_L=operatorname{sat}(BASE+u),qquad
 PWM_R=operatorname{sat}(BASE-u)
 ]
 
-Trong đó `BASE` được giữ cố định ở các chu kỳ PID bình thường; PID chỉ tạo chênh lệch tốc độ giữa hai bánh. Lệnh PWM từng bánh được giới hạn trong khoảng `[-255,255]`. Khi một bánh bão hòa, tổng PWM hai bánh có thể không còn bằng (2\,BASE).
+Trong đó `BASE` được giữ cố định trong suốt một lượt AUTO; firmware từ chối lệnh đổi BASE khi xe đang chạy. PID chỉ tạo chênh lệch tốc độ giữa hai bánh. Lệnh PWM từng bánh được giới hạn trong khoảng `[-255,255]`. Khi một bánh bão hòa, tổng PWM hai bánh có thể không còn bằng (2\,BASE).
 
 P đã được chuyển về dạng tuyến tính `Kp * error`; I vẫn có giới hạn tích phân và suy giảm khi sai số đổi dấu; D vẫn dùng lọc thông thấp để hạn chế nhiễu.
 
