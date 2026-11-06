@@ -322,6 +322,9 @@ void command(const String &raw) {
     pid_set_tunings(kp,ki,kd);showPid();return;
   }
   if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
+    if(pid_is_auto_mode()){
+      reply("ERR: BASE_REQUIRES_STOPPED");return;
+    }
     int v;int sep=s.indexOf(':');
     if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
     pid_set_base_speed(v);manualSpeed=(uint8_t)v;
