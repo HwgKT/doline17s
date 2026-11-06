@@ -158,9 +158,8 @@ void command(const String &raw) {
   if(s=="HS_PEAK"){
     char b[160];
     snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
-      pid_get_high_speed_peak(),pid_get_base_speed(),
-      (long)pid_get_high_speed_brake_start());
+      "HS_PEAK: PWM=%d BASE=%d RAMP_END=0 BRAKE_START=0 BRAKE_END=0 HOLD_PWM=0 HOLD_MIN_END=0 PID_ONLY=1",
+      pid_get_high_speed_peak(),pid_get_base_speed());
     reply(b);return;
   }
   if(s.startsWith("HS_PEAK:")){
@@ -171,7 +170,7 @@ void command(const String &raw) {
     const String rawPwm=s.substring(8);
     if(!parseSpeed(rawPwm,value)||value<100 ||
        !pid_set_high_speed_peak((int16_t)value)){
-      reply("ERR: HS_PEAK_RANGE_100_TO_255_AND_GE_BASE");return;
+      reply("ERR: HS_PEAK_RANGE_100_TO_255");return;
     }
     command("HS_PEAK");return;
   }
@@ -270,10 +269,10 @@ void command(const String &raw) {
     reply(runInfo);
     char rampEvent[160];
     snprintf(rampEvent,sizeof(rampEvent),
-      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+      "PID_ONLY: ACTIVE map=%u runEnc=0 base=%d peak_metadata=%d t_ms=%lu",
       (unsigned)pid_get_selected_map(),pid_get_base_speed(),
-      pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
-      (unsigned long)millis());
+      pid_get_high_speed_peak(),
+       (unsigned long)millis());
     reply(rampEvent);
     return;
   }
@@ -325,9 +324,6 @@ void command(const String &raw) {
   if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
     int v;int sep=s.indexOf(':');
     if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
-    // A BASE above HS_PEAK makes the trapezoid undefined. Reject instead
-    // of silently turning a supposedly lower peak into a higher target.
-    if(v>pid_get_high_speed_peak()){reply("ERR: BASE_GT_HS_PEAK");return;}
     pid_set_base_speed(v);manualSpeed=(uint8_t)v;
     reply(String("SPEED SET: ")+v);return;
   }
