@@ -78,6 +78,8 @@ int main(void) {
     }
     pid_init(2.2f,0,0,120);
     pid_set_auto_mode(true);
+    pid_set_base_speed(200); // runtime BASE changes are ignored during AUTO
+    assert(pid_get_base_speed()==120);
     pid_line_follow_step();
     assert(leftPwm==0 && rightPwm==0);
 
