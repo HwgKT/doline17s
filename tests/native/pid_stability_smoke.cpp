@@ -285,6 +285,11 @@ int main(void) {
     // 6) Disabling AUTO immediately stops both motors.
     pid_set_auto_mode(false);
     assert(leftPwm==0 && rightPwm==0);
+    // Legacy HS controls remain callable but cannot activate a speed profile.
+    assert(pid_get_high_speed_stage()==0);
+    assert(pid_get_high_speed_brake_start()==0);
+    assert(pid_set_high_speed_peak(255));
+    assert(pid_get_high_speed_peak()==255);
     puts("PASS: fixed-base PID, line acquire/loss, dropout recovery, corner steering and finish stop");
     return 0;
 }
