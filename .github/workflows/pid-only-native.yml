@@ -1,0 +1,34 @@
+name: PID-only native and ESP32 build
+
+on:
+  push:
+    branches: [mainPID]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/native/**'
+      - 'platformio.ini'
+      - '.github/workflows/pid-only-native.yml'
+  workflow_dispatch:
+
+jobs:
+  native-pid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native PID smoke
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Itests/native -Iinclude \
+            src/pid_controller.cpp tests/native/pid_stability_smoke.cpp \
+            -o /tmp/pid_only_smoke
+      - name: Run native PID smoke
+        run: /tmp/pid_only_smoke
+
+  esp32-firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install PlatformIO
+        run: python3 -m pip install --user platformio
+      - name: Compile ESP32 Classic SPP firmware
+        run: python3 -m platformio run -e esp32dev
