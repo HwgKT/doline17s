@@ -41,8 +41,8 @@ uint16_t sensor_get_line_bits(void) {
 }
 static int16_t leftPwm=0,rightPwm=0;
 void motor_set_speeds(int16_t left,int16_t right) {
-    assert(left>=-220 && right>=-220);
-    assert(left<=220 && right<=220);
+    assert(left>=-255 && right>=-255);
+    assert(left<=255 && right<=255);
     if(left<0 || right<0) {
         const LineCase_t current=pid_get_current_case();
         assert(current==LINE_CASE_SHARP_LEFT || current==LINE_CASE_SHARP_RIGHT ||
@@ -152,9 +152,8 @@ int main(void) {
     stepMs(14);
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
     assert(leftPwm>0 && rightPwm<0);
-    assert(leftPwm==220 && rightPwm>=-220 && rightPwm<0);
-    assert(rightPwm<=-150);
-    assert(leftPwm-rightPwm>=370);
+    assert(leftPwm==255 && rightPwm==-45);
+    assert(leftPwm-rightPwm==300);
 
     // Keep the arc through a brief line gap; then pivot to search.
     allWhite();
@@ -200,7 +199,7 @@ int main(void) {
     assert(pid_get_current_case()==LINE_CASE_SHARP_LEFT);
     stepMs(2);
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
-    assert(leftPwm==84 && rightPwm==84);
+    assert(leftPwm==120 && rightPwm==120);
 
     // A pivot search that finds no line stops safely after two seconds.
     onlyEye(0,2000);
@@ -215,8 +214,8 @@ int main(void) {
     assert(pid_get_current_case()==LINE_CASE_LOST_LINE);
     assert(leftPwm==0 && rightPwm==0);
 
-    // The speed governor follows line error directly, without a timed
-    // post-reacquisition acceleration ramp.
+    // PID-only mode keeps the forward BASE fixed while steering changes
+    // the left/right differential command.
     pid_set_auto_mode(false);
     setPattern("0000000110000000");
     pid_set_auto_mode(true);
@@ -228,7 +227,8 @@ int main(void) {
     onlyEye(10,1700);
     stepMs(20);
     const int16_t cornerPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
-    assert(cornerPwm < centeredPwm && cornerPwm >= 80 && cornerPwm <= 95);
+    assert(cornerPwm > centeredPwm);
+    assert(leftPwm + rightPwm == 240);
 
     setPattern("0000000110000000");
     stepMs(10);
@@ -239,13 +239,13 @@ int main(void) {
     setPattern("1111111111111100");
     stepMs(50);
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
-    assert(leftPwm==84 && rightPwm==84);
+    assert(leftPwm==120 && rightPwm==120);
 
     // 15/16 black is a wide crossing, NOT a finish marker (even for >3 frames).
     setPattern("1111111111111110");
     stepMs(10);
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
-    assert(leftPwm==84 && rightPwm==84);
+    assert(leftPwm==120 && rightPwm==120);
 
     // One full-black sample cannot stop; any non-full sample resets the count.
     setPattern("1111111111111111");
@@ -259,7 +259,7 @@ int main(void) {
     setPattern("1111111111111111");
     stepMs(4);
     assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
-    assert(leftPwm==84 && rightPwm==84);
+    assert(leftPwm==120 && rightPwm==120);
 
     // The third consecutive full-black PID sample latches the finish stop.
     stepMs(2);
@@ -270,8 +270,7 @@ int main(void) {
     assert(pid_get_current_case()==LINE_CASE_STOPPED);
     assert(leftPwm==0 && rightPwm==0);
 
-    // Outer sensors reduce forward speed before centroid error reaches the
-    // normal governor limit.
+    // Outer sensors affect the measured line position, not the forward BASE.
     pid_set_auto_mode(false);
     pid_init(0.0f,0.0f,0.0f,120);
     setPattern("0000000110000000");
@@ -281,11 +280,11 @@ int main(void) {
     setPattern("0000000110000001");
     stepMs(2);
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
-    assert(leftPwm==72 && rightPwm==72);
+    assert(leftPwm==120 && rightPwm==120);
 
     // 6) Disabling AUTO immediately stops both motors.
     pid_set_auto_mode(false);
     assert(leftPwm==0 && rightPwm==0);
-    puts("PASS: line acquire/loss, startup straight grace, PID corner tracking, reverse-wheel steering, pivot search, speed governor and finish stop");
+    puts("PASS: fixed-base PID, line acquire/loss, dropout recovery, corner steering and finish stop");
     return 0;
 }
