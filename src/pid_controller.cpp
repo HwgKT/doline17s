@@ -190,6 +190,8 @@ void pid_set_tunings(float kp, float ki, float kd) {
     pidConfig.Kd = kd;
 }
 void pid_set_base_speed(int16_t speed) {
+    // BASE must remain constant for the duration of an AUTO PID run.
+    if (autoMode) return;
     pidConfig.baseSpeed = speed < 0 ? 0 : (speed > 255 ? 255 : speed);
 }
 void pid_set_auto_mode(bool enabled) {
