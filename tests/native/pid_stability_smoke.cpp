@@ -101,7 +101,7 @@ int main(void) {
     allWhite();
     stepMs(60);
     assert(pid_get_current_case()==LINE_CASE_STARTUP_COAST);
-    assert(leftPwm==65 && rightPwm==65);
+    assert(leftPwm==95 && rightPwm==95);
     onlyEye(8,1700);
     stepMs(12);
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
@@ -120,7 +120,7 @@ int main(void) {
     assert(leftPwm==85 && rightPwm==-85);
     assert(pid_get_confirmed_line_loss_count()==1);
 
-    // 4) Pivot search requires stable line evidence, then soft-starts PID.
+    // 4) Pivot search requires stable line evidence, then resumes fixed-base PID.
     pid_set_tunings(2.2f,0.0f,2.0f);
     onlyEye(8,1600);
     stepMs(2);
@@ -132,7 +132,7 @@ int main(void) {
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
     assert(pid_line_is_confirmed());
     assert(pid_get_line_reacquisition_count()==1);
-    assert(leftPwm>0 && rightPwm>0 && leftPwm<=65 && rightPwm<=65);
+    assert(leftPwm==131 && rightPwm==109);
     assert(pid_get_term_d()==0.0f);
     setPattern("0000000000110000");
     stepMs(6);
