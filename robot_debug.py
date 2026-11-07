@@ -208,6 +208,7 @@ class App(tk.Tk):
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
             value="HS: MAP 1 từ 10k tick | chờ ESP32 xác nhận")
+        self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -278,6 +279,8 @@ class App(tk.Tk):
                    font=("Consolas", 9, "bold")).pack(anchor="w", padx=8, pady=(1, 0))
         self.label(diag_bar, textvariable=self.high_speed_status, fg=AMBER, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
+        self.label(diag_bar, textvariable=self.route_status, fg=CYAN, bg=PANEL,
+                   font=("Consolas", 8, "bold")).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
 
@@ -710,6 +713,7 @@ class App(tk.Tk):
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
         self.send_command("HS_PEAK")
+        self.send_command("ROUTE_LOCK")
         self.send_command("PID")
         self.send_command("STREAM:" + self.stream_rate.get())
 
@@ -731,6 +735,7 @@ class App(tk.Tk):
         self.encoder_reset_pending = False
         self.encoder_reset_pending_at = None
         self.hs_peak_feedback.set("Chưa kết nối ESP32 — HS chưa xác nhận")
+        self.route_status.set("ROUTE: mất kết nối ESP32")
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
         self.estop_latched = None
