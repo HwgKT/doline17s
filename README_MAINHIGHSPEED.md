@@ -123,8 +123,9 @@ from the GPIO34 button. Otherwise the firmware returns
 run log and displays an explanation, without starting motion.
 
 To avoid stopping immediately at the start, the finish detector is **disarmed**
-when AUTO begins. The robot first advances over the starting pad using its
-ordinary CROSS_LINE handling. It only **arms FINISH** after at least 30 ms
+when AUTO begins. The robot first advances straight over the 16/16-black starting pad at
+its selected MAP's BASE PWM; other wide crossings retain the original
+70% BASE CROSS_LINE speed. It only **arms FINISH** after at least 30 ms
 of continuous narrow centered line evidence: 1..10 black eyes, at least
 one of central eyes S6..S9, and calculated line position within +/-22.
 It logs `FINISH_ARMED: LEFT_START_PAD` over SPP. Subsequent **16/16 black**
