@@ -73,6 +73,14 @@ uint8_t pid_get_high_speed_stage(void);
 // Adjustable peak PWM before START (100-255), must not be below BASE.
 bool pid_set_high_speed_peak(int16_t pwm);
 int16_t pid_get_high_speed_peak(void);
+// Map 01 aligned-start route lock: straight, semicircle, right, straight.
+// 0=OFF, 1=STRAIGHT_1, 2=SEMICIRCLE, 3=RIGHT_TURN, 4=STRAIGHT_2, 5=FAULT.
+// Before START: ROUTE_LOCK:0 disables if the robot starts at another pose.
+bool pid_set_map1_route_lock(bool enabled);
+bool pid_get_map1_route_lock(void);
+uint8_t pid_get_map1_route_stage(void);
+uint8_t pid_get_map1_route_fault_code(void);
+uint16_t pid_get_map1_selected_line_mask(void);
 // MAP 1 late speed scheduler threshold; 0 means inactive.
 int32_t pid_get_map1_late_boost_start(void);
 // Dynamic brake start: 1800 for peak 100..229; 1600 for 230..239; 1400 for 240..255.

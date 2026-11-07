@@ -1,4 +1,5 @@
 #include "pid_controller.h"
+#include "map1_route_lock.h"
 #include "encoder.h"
 #include "sensor.h"
 #include "motor.h"
@@ -144,6 +145,9 @@ float map1ScheduledBase = 130.0f;
 uint32_t map1LastUnsafeMs = 0;
 uint32_t map1CenteredSinceMs = 0;
 bool map1BoostActive = false;
+// Map 01 route lock assumes a repeatable START pose; enabled by default.
+bool map1RouteLockEnabled = true;
+map1route::Tracker map1Route;
 int32_t runEncoderOriginL = 0, runEncoderOriginR = 0;
 bool gapActive = false;
 uint32_t gapStartMs = 0;
@@ -267,6 +271,8 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 // for all accelerations instead of trusting encoder progress alone.
 static float map1CappedBase(int32_t progress) {
     float base = (float)pidConfig.baseSpeed;
+    if (map1Route.active)
+        base = map1Route.baseCap(progress, base);
     if (progress >= MAP1_SLOW_START_ENC && progress < MAP1_SLOW_END_ENC) {
         const float cap = progress >= MAP1_SLOW_TIGHT_START_ENC &&
                           progress < MAP1_SLOW_TIGHT_END_ENC
@@ -362,6 +368,7 @@ static void resetLineTracking() {
     map1LastUnsafeMs = millis();
     map1CenteredSinceMs = 0;
     map1BoostActive = false;
+    map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -450,6 +457,18 @@ void pid_set_auto_mode(bool enabled) {
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
+bool pid_set_map1_route_lock(bool enabled) {
+    if (autoMode) return false;
+    map1RouteLockEnabled = enabled;
+    map1Route.begin(false);
+    return true;
+}
+bool pid_get_map1_route_lock(void) { return map1RouteLockEnabled; }
+uint8_t pid_get_map1_route_stage(void) { return (uint8_t)map1Route.stage; }
+uint8_t pid_get_map1_route_fault_code(void) { return (uint8_t)map1Route.fault; }
+uint16_t pid_get_map1_selected_line_mask(void) {
+    return map1Route.selectedMask;
+}
 bool pid_select_map(uint8_t mapId) {
     if (autoMode || mapId < 1 || mapId > 3) return false;
     // Apply the track defaults only when changing MAP, not when the Python
@@ -507,6 +526,24 @@ bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount) {
         }
     }
     *outBlackCount = blackCount;
+    const uint16_t physicalMask = sensor_get_line_bits();
+    map1Route.selectedMask = physicalMask;
+    if (map1Route.active && finishDetectionArmed &&
+        blackCount > 1 && blackCount <= 10 && strength > 0) {
+        uint16_t samples[N_SENSORS];
+        for (uint8_t i=0; i<N_SENSORS; ++i)
+            samples[i] = sensor_get_calibrated(i);
+        float selectedPosition = 0.0f;
+        uint8_t selectedCount = 0;
+        if (map1Route.chooseCluster(physicalMask, samples,
+                                    lastKnownPosition, map1MaxProgress,
+                                    selectedPosition, selectedCount)) {
+            *outPosition = selectedPosition;
+            *outBlackCount = selectedCount;
+            lastKnownPosition = selectedPosition;
+            return true;
+        }
+    }
     if (blackCount > 0 && strength > 0) {
         *outPosition = weighted / (float)strength;
         lastKnownPosition = *outPosition;
@@ -814,12 +851,38 @@ void pid_line_follow_step(void) {
     if (!autoMode) return;
     float pos = 0;
     uint8_t blackCount = 0;
+    if (selectedMap == 1) {
+        const int32_t progress = runEncoderProgress();
+        if (progress > map1MaxProgress) map1MaxProgress = progress;
+    }
     const bool good = pid_calculate_position(&pos, &blackCount);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
+    if (map1Route.active && currentCase != LINE_CASE_STOPPED) {
+        const bool validRouteLine =
+            finishDetectionArmed && lineLocked &&
+            blackCount > 0 && blackCount <= 10;
+        map1Route.observe(map1MaxProgress, pos, validRouteLine,
+                          currentCase == LINE_CASE_NORMAL_PID, millis());
+        // The FIRST all-white gap in the semicircle must search RIGHT.
+        // Never turn merely because the encoder reached a threshold.
+        if (map1Route.firstRightSearchWindow(map1MaxProgress) &&
+            sensor_get_line_bits() == 0U && isSearchTurn()) {
+            if (turnState != SEARCH_RIGHT) {
+                turnState = SEARCH_RIGHT;
+                searchStartedMs = millis();
+            }
+            currentCase = LINE_CASE_SHARP_RIGHT;
+            if ((uint32_t)(millis()-searchStartedMs) >= 250U)
+                map1Route.fail(map1route::FIRST_SEARCH_TIMEOUT);
+        }
+    }
+    if (map1Route.stage == map1route::FAULT) {
+        currentCase = LINE_CASE_STOPPED;
+        motor_stop();
+        return;
+    }
     if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1) {
-        const int32_t progress = runEncoderProgress();
-        if (progress > map1MaxProgress) map1MaxProgress = progress;
         if (currentCase != LINE_CASE_NORMAL_PID || !good) {
             map1BoostActive = false;
             map1CenteredSinceMs = 0;
@@ -842,7 +905,10 @@ void pid_line_follow_step(void) {
             const int16_t searchPwm = searchPwmForCurrentTurn();
             motor_set_speeds(-searchPwm, searchPwm);
         } else {
-            const int16_t outer = sharpTurnPwm();
+            const int16_t outer = map1Route.active
+                ? (int16_t)fminf((float)sharpTurnPwm(),
+                                map1Route.wheelCap(map1MaxProgress))
+                : sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(inner, outer);
         }
@@ -851,7 +917,10 @@ void pid_line_follow_step(void) {
         if (turnState == SEARCH_RIGHT) {
             motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
-            const int16_t outer = sharpTurnPwm();
+            const int16_t outer = map1Route.active
+                ? (int16_t)fminf((float)sharpTurnPwm(),
+                                map1Route.wheelCap(map1MaxProgress))
+                : sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
@@ -982,6 +1051,9 @@ void pid_line_follow_step(void) {
                 ? MAP1_RISK_WHEEL_LIMIT : MAP1_CORNER_WHEEL_LIMIT;
             steeringPeakLimit = fminf(steeringPeakLimit, wheelLimit);
         }
+        if (map1Route.active)
+            steeringPeakLimit = fminf(steeringPeakLimit,
+                                      map1Route.wheelCap(map1MaxProgress));
         limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
         motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {

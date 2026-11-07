@@ -76,6 +76,8 @@ int main(void) {
     }
     pid_init(1.60f, 0.0f, 0.80f, 140);
     assert(pid_select_map(1));
+    // Isolate the high-speed profile test: it jumps directly from 0 to 10k.
+    assert(pid_set_map1_route_lock(false));
     pid_set_base_speed(140);
     assert(pid_set_high_speed_peak(220));
     assert(pid_get_map1_late_boost_start() == 10000);
