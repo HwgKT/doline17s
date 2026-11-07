@@ -19,9 +19,8 @@ constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t CAL_WHITE_LED_BLINK_MS=40; // fast, GPIO2 toggle interval
 constexpr uint32_t CAL_BLACK_LED_BLINK_MS=90; // slower, GPIO2 toggle interval
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
-// GPIO34 START accepts one or more black sensors among the six central
-// eyes S5..S10. This widens the allowable placement around the line.
-constexpr uint16_t BUTTON34_START_CENTER_MASK=0x07E0U;
+// Both the START pad and FINISH pad are 16/16 BLACK.
+// The AUTO command validates the start condition for both GUI and GPIO34.
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
@@ -255,6 +254,11 @@ void command(const String &raw) {
     if(pid_get_selected_map()==0){
       reply("ERR: MAP_NOT_SELECTED");return;
     }
+    // A run must begin on the all-black START square. This common guard
+    // applies to GUI AUTO:1/2/3 as well as the physical GPIO34 button.
+    if(sensor_get_line_bits()!=0xFFFFU){
+      reply("ERR: START_REQUIRES_ALL_BLACK_16");return;
+    }
     manualActive=false;
     pid_set_auto_mode(true);
     reply("MODE: AUTO PID");
@@ -447,23 +451,10 @@ void loop() {
     }else if(button34Phase==BUTTON34_BLACK_CAPTURING){
       reply("ERR: BUTTON34_WAIT_CAL_BLACK_DONE");
     }else{
-      // Preserve previous placement rule: any of central S5..S10 is enough,
-      // but full 16/16 black indicates bad calibration / instant finish.
-      if(calibrationReady && !sensor_is_calibrating() && sensor_adc_ready()){
-        const uint16_t bits=sensor_get_line_bits();
-        if(bits==0xFFFFU){
-          reply("ERR: BUTTON34_ALL_BLACK_16_CHECK_CALIBRATION");
-        }else if((bits & BUTTON34_START_CENTER_MASK)==0U){
-          reply("ERR: BUTTON34_NO_CENTER_LINE_S5_TO_S10");
-        }else{
-          reply("BUTTON34: START_REQUEST");
-          command("AUTO");
-          if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
-        }
-      }else{
-        // AUTO command keeps the existing ADC/CAL/ESTOP guards.
-        command("AUTO");
-      }
+      // Reuse the same AUTO validation as the GUI (including 16/16 black).
+      reply("BUTTON34: START_REQUEST");
+      command("AUTO");
+      if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
     }
   }
   const bool wasCalibrating=sensor_is_calibrating();
@@ -496,7 +487,11 @@ void loop() {
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
+    const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
+    if(!wasFinishArmed && pid_finish_detection_armed()){
+      reply("FINISH_ARMED: LEFT_START_PAD");
+    }
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
