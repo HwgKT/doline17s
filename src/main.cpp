@@ -121,11 +121,11 @@ void command(const String &raw) {
     const float sec=dt?dt*1e-6f:1.0f;
     const BtTxStats tx=btGetTxStats();
     int32_t encL=0,encR=0;encoder_get_counts(&encL,&encR);
-    char b[290];
+    char b[360];
     snprintf(b,sizeof(b),
       "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
       "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
-      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u peak=%d",
+      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u peak=%d route=%u rf=%u clu=%04X",
       btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
       loopCount/sec,pidCount/sec,
       (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
@@ -137,7 +137,10 @@ void command(const String &raw) {
       (unsigned long)pid_get_confirmed_line_loss_count(),
       (unsigned long)pid_get_line_reacquisition_count(),
       (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
-      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak());
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak(),
+      (unsigned)pid_get_map1_route_stage(),
+      (unsigned)pid_get_map1_route_fault_code(),
+      (unsigned)pid_get_map1_selected_line_mask());
     lastDiagUs=t;loopCount=pidCount=txCount=0;
     lastTxStats=tx;skippedSlots=0;
     reply(b);return;
