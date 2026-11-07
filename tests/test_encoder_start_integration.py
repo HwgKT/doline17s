@@ -9,6 +9,14 @@ PID = (ROOT / "src" / "pid_controller.cpp").read_text(encoding="utf-8")
 MAIN = (ROOT / "src" / "main.cpp").read_text(encoding="utf-8")
 
 class EncoderStartIntegrationTests(unittest.TestCase):
+
+    def test_reset_has_ack_and_timeout_recovery(self):
+        self.assertIn('self.encoder_reset_pending_at = time.monotonic()', GUI)
+        self.assertIn('elif message == "ENC_RESET: OK":', GUI)
+        self.assertIn('elif message == "ERR: ENC_RESET_REQUIRES_STOPPED":', GUI)
+        self.assertIn('now - self.encoder_reset_pending_at >= 3.0', GUI)
+        self.assertIn('self.encoder_reset_pending_at = None', GUI)
+
     def test_encoder_button_above_scope(self):
         self.assertIn('self.reset_encoder_btn = ttk.Button(', GUI)
         self.assertIn('command=self.reset_encoder', GUI)

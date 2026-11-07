@@ -184,6 +184,7 @@ class App(tk.Tk):
         self.prev = None
         self.wheel_speed = [0.0, 0.0]
         self.encoder_reset_pending = False
+        self.encoder_reset_pending_at = None
         self.frames = 0
         self.last_rx_total = 0
         self.last_csv_total = 0
@@ -667,6 +668,8 @@ class App(tk.Tk):
             self.log(str(exc))
             return
         self.reader.start()
+        self.encoder_reset_pending = False
+        self.encoder_reset_pending_at = None
         self.hs_brake_start = 1800
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
@@ -725,6 +728,8 @@ class App(tk.Tk):
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
+        self.encoder_reset_pending = False
+        self.encoder_reset_pending_at = None
         self.hs_peak_feedback.set("Chưa kết nối ESP32 — HS chưa xác nhận")
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
@@ -774,9 +779,11 @@ class App(tk.Tk):
             self.log("Reset ENC chỉ thực hiện khi robot đã dừng, không START/STOP đang chờ.")
             return False
         self.encoder_reset_pending = True
+        self.encoder_reset_pending_at = time.monotonic()
         self.update_control_buttons()
         if not self.send_command("ENC_RESET"):
             self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
             self.update_control_buttons()
             return False
         return True
@@ -1202,6 +1209,7 @@ class App(tk.Tk):
         elif message == "ENC_RESET: OK":
             # Only the ESP32 acknowledgement confirms that counts were reset.
             self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
             self.prev = None
             self.wheel_speed = [0.0, 0.0]
             for key in ("encL", "encR", "spdL", "spdR"):
@@ -1212,6 +1220,7 @@ class App(tk.Tk):
             self.send_command("ENC")  # Verify actual L/R counters after ACK.
         elif message == "ERR: ENC_RESET_REQUIRES_STOPPED":
             self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
             self.update_control_buttons()
             self.log("ESP32 từ chối reset encoder: xe vẫn đang chạy.")
         elif message == "MODE: AUTO PID":
@@ -1517,6 +1526,13 @@ class App(tk.Tk):
             self.log(f"HS_PEAK={expected}: timeout xác nhận, chưa coi là đã áp dụng.")
             self.update_control_buttons()
             self.send_command("HS_PEAK")
+        if (self.encoder_reset_pending and self.encoder_reset_pending_at is not None
+                and now - self.encoder_reset_pending_at >= 3.0):
+            self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
+            self.log("Reset ENC: chưa nhận ACK từ ESP32, kiểm tra lại bằng lệnh ENC.")
+            self.update_control_buttons()
+            self.send_command("ENC")
         if now - self.rate_time >= 1:
             interval = now - self.rate_time
             total = self.reader.frames_rx if self.reader else self.last_rx_total
