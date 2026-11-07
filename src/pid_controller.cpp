@@ -128,6 +128,8 @@ constexpr int32_t MAP1_FINISH_APPROACH_ENC = 16000;
 constexpr float MAP1_CORNER_BASE_PWM = 115.0f;
 constexpr float MAP1_RISK_BASE_PWM = 105.0f;
 constexpr float MAP1_FINISH_BASE_PWM = 125.0f;
+constexpr float MAP1_CORNER_WHEEL_LIMIT = 185.0f;
+constexpr float MAP1_RISK_WHEEL_LIMIT = 170.0f;
 constexpr float MAP1_BOOST_CENTER_ERROR = 12.0f;
 constexpr float MAP1_BOOST_CANCEL_ERROR = 25.0f;
 constexpr uint32_t MAP1_BOOST_CONFIRM_MS = 50;
@@ -918,8 +920,19 @@ void pid_line_follow_step(void) {
                   0.0f),
             1.0f);
         const float steeringSeverity = fmaxf(outerErrorRatio, edgeSeverity);
-        const float steeringPeakLimit = base +
+        float steeringPeakLimit = base +
             ((float)pidConfig.maxSpeed - base) * steeringSeverity;
+        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 &&
+            map1MaxProgress >= MAP1_SLOW_START_ENC &&
+            map1MaxProgress < MAP1_SLOW_END_ENC) {
+            // Prevent high P/D steering commands from bypassing the
+            // low BASE cap with a +/-255 PWM spike near the 5k-6k turns.
+            const float wheelLimit =
+                map1MaxProgress >= MAP1_SLOW_TIGHT_START_ENC &&
+                map1MaxProgress < MAP1_SLOW_TIGHT_END_ENC
+                ? MAP1_RISK_WHEEL_LIMIT : MAP1_CORNER_WHEEL_LIMIT;
+            steeringPeakLimit = fminf(steeringPeakLimit, wheelLimit);
+        }
         limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
         motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {

@@ -6,9 +6,10 @@
 > PID steering, the error/outer-eye speed governor, SEARCH and all-black
 > START/FINISH logic remain unchanged.
 >
-> - 4,800–6,900 relative encoder ticks: cap BASE at 115 PWM; 5,600–6,200
->   is capped at 105 PWM. After SEARCH in that cluster, cap forward PWM at
->   105 for 80 ms.
+> - 4,800–6,900 relative encoder ticks: cap BASE at 115 PWM and each
+>   NORMAL_PID wheel command to 185 PWM; 5,600–6,200 caps BASE at 105
+>   and each NORMAL_PID wheel command at 170 PWM. After SEARCH in that
+>   cluster, cap forward PWM at 105 for 80 ms. SEARCH remains ±85 PWM.
 > - From 10,000 ticks, the Python HS_PEAK slider sets the **target BASE**.
 >   After a centered adjacent-sensor line for 50 ms and 80 ms cooldown
 >   following SEARCH/turn, BASE accelerates at up to +250 PWM/s.
