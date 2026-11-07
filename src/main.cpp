@@ -270,7 +270,8 @@ void command(const String &raw) {
     reply(runInfo);
     char rampEvent[160];
     snprintf(rampEvent,sizeof(rampEvent),
-      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+      "HS_STAGE %s map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+      pid_get_high_speed_stage()==0 ? "OFF" : "RAMP",
       (unsigned)pid_get_selected_map(),pid_get_base_speed(),
       pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
       (unsigned long)millis());
