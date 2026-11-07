@@ -538,6 +538,7 @@ void loop() {
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t oldRouteStage=pid_get_map1_route_stage();
     const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
     if(!wasFinishArmed && pid_finish_detection_armed()){
@@ -546,6 +547,8 @@ void loop() {
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t newRouteStage=pid_get_map1_route_stage();
+    const uint8_t newRouteFault=pid_get_map1_route_fault_code();
     // A latched finish or PID stop must end AUTO, otherwise Python remains
     // in AUTO while both PWM outputs are zero and START stays locked.
     // Snapshot the stop reason BEFORE safeStop() clears PID state.
@@ -556,15 +559,38 @@ void loop() {
       safeStop();
       // Drop queued pre-stop telemetry before announcing terminal state.
       btDropPendingTelemetry();
-      char stopEvent[128];
+      if(newRouteFault!=0U){
+        char faultEvent[120];
+        snprintf(faultEvent,sizeof(faultEvent),
+          "ROUTE_FAULT code=%u map=%u runEnc=%ld t_ms=%lu",
+          (unsigned)newRouteFault,(unsigned)stopMap,
+          (long)stopEnc,(unsigned long)millis());
+        reply(faultEvent);
+      }
+      char stopEvent[150];
       snprintf(stopEvent,sizeof(stopEvent),
-        "%s map=%u runEnc=%ld t_ms=%lu",
+        "%s map=%u runEnc=%ld route_fault=%u t_ms=%lu",
         fullBlackFinish ? "AUTO_FINISHED: FULL_BLACK_3" :
-                          "AUTO_STOPPED: PID_STOPPED",
-        (unsigned)stopMap,(long)stopEnc,(unsigned long)millis());
+        newRouteFault ? "AUTO_STOPPED: ROUTE_FAULT" :
+                        "AUTO_STOPPED: PID_STOPPED",
+        (unsigned)stopMap,(long)stopEnc,(unsigned)newRouteFault,
+        (unsigned long)millis());
       reply(stopEvent);
     }
-    if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
+    if(newCase!=LINE_CASE_STOPPED && newRouteStage!=oldRouteStage &&
+       newRouteStage>0U && newRouteStage<5U){
+      static const char* const routeNames[]={
+        "OFF","STRAIGHT_1","SEMICIRCLE","RIGHT_TURN","STRAIGHT_2"
+      };
+      char routeEvent[130];
+      snprintf(routeEvent,sizeof(routeEvent),
+        "ROUTE_STAGE %s map=1 runEnc=%ld t_ms=%lu",
+        routeNames[newRouteStage],(long)pid_get_run_encoder_progress(),
+        (unsigned long)millis());
+      reply(routeEvent);
+    }
+    if(newCase!=LINE_CASE_STOPPED &&
+       newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
       static const char* const labels[]={
         "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD",
         "WAIT_LINE","BOOST"
