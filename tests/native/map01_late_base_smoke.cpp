@@ -117,8 +117,10 @@ int main(void) {
     assert(pid_get_current_case() == LINE_CASE_STOPPED);
     assert(pwmLeft == 0 && pwmRight == 0);
 
-    // Reboot scenario: a single central sensor is sufficient for BOOST.
+    // A fresh AUTO captures its own encoder origin; reset the test fixture.
+    // One central sensor alone should allow a confirmed-line BOOST.
     pid_set_auto_mode(false);
+    leftTicks = rightTicks = 0;
     setEyes(7);
     pid_set_auto_mode(true);
     stepMs(140);
