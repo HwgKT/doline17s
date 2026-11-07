@@ -810,7 +810,12 @@ void pid_line_follow_step(void) {
         motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
-        const int16_t speed = clampPwm((float)pidConfig.baseSpeed * 0.7f);
+        // On the all-black START pad, use BASE to ensure forward motion.
+        // Other wide intersections retain the original 70% BASE crossing.
+        const bool initialBlackPad =
+            !finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU;
+        const float crossingFactor = initialBlackPad ? 1.0f : 0.7f;
+        const int16_t speed = clampPwm((float)pidConfig.baseSpeed * crossingFactor);
         motor_set_speeds(speed, speed);
     } else if (currentCase == LINE_CASE_GAP_BRIDGE) {
         motor_set_speeds(gapHoldPwm, gapHoldPwm);
