@@ -80,7 +80,7 @@ int main() {
     pid_set_auto_mode(true);
     stepMs(100);
     assert(pid_get_current_case() == LINE_CASE_CROSS_LINE);
-    assert(leftPwm > 0 && rightPwm > 0);
+    assert(leftPwm == 130 && rightPwm == 130);
     assert(!pid_finish_line_latched());
     assert(!pid_finish_detection_armed());
 
