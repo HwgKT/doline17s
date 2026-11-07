@@ -31,6 +31,13 @@ constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 // Finish requires ALL 16 sensors to see black on 3 consecutive PID samples.
 constexpr uint8_t FULL_LINE_MIN_SENSORS = N_SENSORS;
 constexpr uint8_t FINISH_CONFIRM_FRAMES = 3;
+// The robot starts on an all-black pad. Do not recognize an all-black FINISH
+// until a narrow, centered line has been seen continuously after leaving it.
+// This is time/sensor based: no encoder distance or speed dependence.
+constexpr uint8_t START_PAD_EXIT_MAX_BLACK = 10;
+constexpr uint16_t START_PAD_CENTER_MASK = 0x03C0U; // central eyes S6..S9
+constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
+constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
 constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -166,6 +173,9 @@ uint8_t reacquireSpeedFrames = 0;
 bool turnMissing = false;
 bool startupLossActive = false;
 bool finishLineLatched = false;
+bool finishDetectionArmed = false;
+bool startPadExitCandidate = false;
+uint32_t startPadExitSinceMs = 0;
 uint8_t fullLineFrames = 0;
 
 bool lineLocked = false, previouslyLocked = false;
@@ -245,6 +255,9 @@ static void resetLineTracking() {
     turnMissing = false;
     startupLossActive = false;
     finishLineLatched = false;
+    finishDetectionArmed = false;
+    startPadExitCandidate = false;
+    startPadExitSinceMs = 0;
     fullLineFrames = 0;
     lastDashedCorrection = 0;
     governedForwardSpeed = 0.0f;
@@ -422,7 +435,31 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
-    if (bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
+    // START and FINISH are both 16/16 black. Arm the finish detector only
+    // after the robot has actually transitioned onto a narrow centered line.
+    // Require a stable 30 ms transition to reject partial-black startup noise.
+    if (!finishDetectionArmed) {
+        const bool narrowCenteredTrack =
+            blackCount > 0 && blackCount <= START_PAD_EXIT_MAX_BLACK &&
+            (mask & START_PAD_CENTER_MASK) != 0U &&
+            fabsf(position) <= START_PAD_CENTER_TOLERANCE;
+        if (narrowCenteredTrack) {
+            if (!startPadExitCandidate) {
+                startPadExitCandidate = true;
+                startPadExitSinceMs = now;
+            } else if (uint32_t(now - startPadExitSinceMs) >= START_PAD_EXIT_CONFIRM_MS) {
+                finishDetectionArmed = true;
+                startPadExitCandidate = false;
+            }
+        } else {
+            startPadExitCandidate = false;
+        }
+        fullLineFrames = 0;
+    }
+    // Before arming, the full-black START pad is treated as a crossing and
+    // drives forward instead of latching STOP. At the finish, stop after
+    // three consecutive all-black PID samples, as before.
+    if (finishDetectionArmed && bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
         if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
         if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {
             finishLineLatched = true;
@@ -802,6 +839,7 @@ void pid_line_follow_step(void) {
 LineCase_t pid_get_current_case(void) { return currentCase; }
 bool pid_line_is_confirmed(void) { return lineLocked; }
 bool pid_finish_line_latched(void) { return finishLineLatched; }
+bool pid_finish_detection_armed(void) { return finishDetectionArmed; }
 uint32_t pid_get_confirmed_line_loss_count(void) { return confirmedLosses; }
 uint32_t pid_get_line_reacquisition_count(void) { return reacquisitions; }
 
