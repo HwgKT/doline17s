@@ -124,15 +124,14 @@ constexpr int32_t MAP1_SLOW_TIGHT_START_ENC = 5600;
 constexpr int32_t MAP1_SLOW_TIGHT_END_ENC = 6200;
 constexpr int32_t MAP1_SLOW_END_ENC = 6900;
 constexpr int32_t MAP1_LATE_BOOST_START_ENC = 10000;
-constexpr int32_t MAP1_FINISH_APPROACH_ENC = 16000;
 constexpr float MAP1_CORNER_BASE_PWM = 115.0f;
 constexpr float MAP1_RISK_BASE_PWM = 105.0f;
-constexpr float MAP1_FINISH_BASE_PWM = 125.0f;
 constexpr float MAP1_CORNER_WHEEL_LIMIT = 185.0f;
 constexpr float MAP1_RISK_WHEEL_LIMIT = 170.0f;
-constexpr float MAP1_BOOST_CENTER_ERROR = 12.0f;
-constexpr float MAP1_BOOST_CANCEL_ERROR = 25.0f;
-constexpr uint32_t MAP1_BOOST_CONFIRM_MS = 50;
+constexpr float MAP1_BOOST_CENTER_ERROR = 20.0f;  // centered enough to enter BOOST
+constexpr float MAP1_BOOST_SINGLE_EYE_ERROR = 15.0f; // lone center eye is valid
+constexpr float MAP1_BOOST_CANCEL_ERROR = 40.0f;  // sharp deviation cancels
+constexpr uint32_t MAP1_BOOST_CONFIRM_MS = 40;    // uninterrupted good line
 constexpr uint32_t MAP1_REACQUIRE_HOLD_MS = 80;
 constexpr float MAP1_BASE_RISE_PWM_PER_SEC = 250.0f;
 constexpr float MAP1_BASE_FALL_PWM_PER_SEC = 500.0f;
@@ -268,8 +267,6 @@ static float map1CappedBase(int32_t progress) {
                           ? MAP1_RISK_BASE_PWM : MAP1_CORNER_BASE_PWM;
         base = fminf(base, cap);
     }
-    if (progress >= MAP1_FINISH_APPROACH_ENC)
-        base = fminf(base, MAP1_FINISH_BASE_PWM);
     return base;
 }
 
@@ -277,15 +274,22 @@ static float map1UpdateScheduledBase(int32_t progress, float absErr,
                                      uint8_t blackCount, uint16_t mask, float dt) {
     const uint32_t now = millis();
     float target = map1CappedBase(progress);
+    // A narrow line may be seen by a single central sensor. Requiring
+    // two simultaneous black eyes can block BOOST indefinitely on that track.
     const bool adjacentLine = blackCount >= 2 && hasAdjacentLineSensors(mask);
-    if (progress >= MAP1_LATE_BOOST_START_ENC &&
-        progress < MAP1_FINISH_APPROACH_ENC) {
-        if (map1BoostActive && (!adjacentLine || absErr >= MAP1_BOOST_CANCEL_ERROR)) {
+    const bool centeredSingleEye =
+        blackCount == 1 && absErr <= MAP1_BOOST_SINGLE_EYE_ERROR;
+    const bool validLine = adjacentLine || centeredSingleEye;
+    // The late boost remains eligible right up to full-black FINISH.
+    // There is no longer any fixed BASE reduction at encoder 16000.
+    if (progress >= MAP1_LATE_BOOST_START_ENC) {
+        if (map1BoostActive && (!lineLocked || !validLine ||
+                               absErr >= MAP1_BOOST_CANCEL_ERROR)) {
             map1BoostActive = false;
             map1CenteredSinceMs = 0;
             map1LastUnsafeMs = now;
         }
-        const bool centered = lineLocked && adjacentLine &&
+        const bool centered = lineLocked && validLine &&
                               absErr <= MAP1_BOOST_CENTER_ERROR;
         if (!map1BoostActive) {
             if (centered &&

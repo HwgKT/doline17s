@@ -11,11 +11,15 @@
 >   and each NORMAL_PID wheel command at 170 PWM. After SEARCH in that
 >   cluster, cap forward PWM at 105 for 80 ms. SEARCH remains ±85 PWM.
 > - From 10,000 ticks, the Python HS_PEAK slider sets the **target BASE**.
->   After a centered adjacent-sensor line for 50 ms and 80 ms cooldown
->   following SEARCH/turn, BASE accelerates at up to +250 PWM/s.
->   Cancel boost on line loss or abs(error) >= 25 and decelerate at
->   up to -500 PWM/s.
-> - From 16,000 ticks, cap BASE at 125 near the finish.
+>   Activate only after a confirmed line remains centered (abs(error) <= 20)
+>   for 40 ms and at least 80 ms have passed since SEARCH/turn. A valid
+>   line means >=2 adjacent black sensors, or exactly one center eye with
+>   abs(error) <= 15. Ramp +250 PWM/s to the target; if line is lost, the
+>   sensor pattern is invalid, or abs(error) >= 40, cancel BOOST and
+>   ramp down at -500 PWM/s.
+> - **No fixed speed reduction near the finish**: BOOST may continue
+>   past 16,000 ticks until the original full-black FINISH detector stops
+>   the motors. This changes neither the START/FINISH detectors nor SEARCH.
 > - MAP 2/3 remain in PID-only mode by default.
 >
 > Firmware readback: `HS_PEAK: PWM=... START_ENC=10000 MODE=MAP1_LATE_BASE`.
