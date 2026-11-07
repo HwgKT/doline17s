@@ -73,6 +73,8 @@ uint8_t pid_get_high_speed_stage(void);
 // Adjustable peak PWM before START (100-255), must not be below BASE.
 bool pid_set_high_speed_peak(int16_t pwm);
 int16_t pid_get_high_speed_peak(void);
+// MAP 1 late speed scheduler threshold; 0 means inactive.
+int32_t pid_get_map1_late_boost_start(void);
 // Dynamic brake start: 1800 for peak 100..229; 1600 for 230..239; 1400 for 240..255.
 // Encoder ticks are relative to the current AUTO origin on all MAPs.
 int32_t pid_get_high_speed_brake_start(void);

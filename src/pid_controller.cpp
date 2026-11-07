@@ -118,6 +118,27 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
+// MAP 01 late-BASE scheduler; the legacy first-straight HS profile remains OFF.
+constexpr int32_t MAP1_SLOW_START_ENC = 4800;
+constexpr int32_t MAP1_SLOW_TIGHT_START_ENC = 5600;
+constexpr int32_t MAP1_SLOW_TIGHT_END_ENC = 6200;
+constexpr int32_t MAP1_SLOW_END_ENC = 6900;
+constexpr int32_t MAP1_LATE_BOOST_START_ENC = 10000;
+constexpr int32_t MAP1_FINISH_APPROACH_ENC = 16000;
+constexpr float MAP1_CORNER_BASE_PWM = 115.0f;
+constexpr float MAP1_RISK_BASE_PWM = 105.0f;
+constexpr float MAP1_FINISH_BASE_PWM = 125.0f;
+constexpr float MAP1_BOOST_CENTER_ERROR = 12.0f;
+constexpr float MAP1_BOOST_CANCEL_ERROR = 25.0f;
+constexpr uint32_t MAP1_BOOST_CONFIRM_MS = 50;
+constexpr uint32_t MAP1_REACQUIRE_HOLD_MS = 80;
+constexpr float MAP1_BASE_RISE_PWM_PER_SEC = 250.0f;
+constexpr float MAP1_BASE_FALL_PWM_PER_SEC = 500.0f;
+int32_t map1MaxProgress = 0;
+float map1ScheduledBase = 130.0f;
+uint32_t map1LastUnsafeMs = 0;
+uint32_t map1CenteredSinceMs = 0;
+bool map1BoostActive = false;
 int32_t runEncoderOriginL = 0, runEncoderOriginR = 0;
 bool gapActive = false;
 uint32_t gapStartMs = 0;
@@ -223,9 +244,9 @@ static void limitMotorCommandPeak(float& left, float& right, float limit) {
         right *= scale;
     }
 }
-static float updateForwardSpeed(float absErr) {
+static float updateForwardSpeed(float absErr, float requestedBase) {
     const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-    float targetSpeed = (float)pidConfig.baseSpeed *
+    float targetSpeed = requestedBase *
         (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
     const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
         ? pidConfig.baseSpeed : 45);
@@ -233,6 +254,61 @@ static float updateForwardSpeed(float absErr) {
     if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
     governedForwardSpeed = targetSpeed;
     return governedForwardSpeed;
+}
+
+// Encoder averages can drift during SEARCH pivots; require line confirmation
+// for all accelerations instead of trusting encoder progress alone.
+static float map1CappedBase(int32_t progress) {
+    float base = (float)pidConfig.baseSpeed;
+    if (progress >= MAP1_SLOW_START_ENC && progress < MAP1_SLOW_END_ENC) {
+        const float cap = progress >= MAP1_SLOW_TIGHT_START_ENC &&
+                          progress < MAP1_SLOW_TIGHT_END_ENC
+                          ? MAP1_RISK_BASE_PWM : MAP1_CORNER_BASE_PWM;
+        base = fminf(base, cap);
+    }
+    if (progress >= MAP1_FINISH_APPROACH_ENC)
+        base = fminf(base, MAP1_FINISH_BASE_PWM);
+    return base;
+}
+
+static float map1UpdateScheduledBase(int32_t progress, float absErr,
+                                     uint8_t blackCount, uint16_t mask, float dt) {
+    const uint32_t now = millis();
+    float target = map1CappedBase(progress);
+    const bool adjacentLine = blackCount >= 2 && hasAdjacentLineSensors(mask);
+    if (progress >= MAP1_LATE_BOOST_START_ENC &&
+        progress < MAP1_FINISH_APPROACH_ENC) {
+        if (map1BoostActive && (!adjacentLine || absErr >= MAP1_BOOST_CANCEL_ERROR)) {
+            map1BoostActive = false;
+            map1CenteredSinceMs = 0;
+            map1LastUnsafeMs = now;
+        }
+        const bool centered = lineLocked && adjacentLine &&
+                              absErr <= MAP1_BOOST_CENTER_ERROR;
+        if (!map1BoostActive) {
+            if (centered &&
+                (uint32_t)(now - map1LastUnsafeMs) >= MAP1_REACQUIRE_HOLD_MS) {
+                if (map1CenteredSinceMs == 0) map1CenteredSinceMs = now;
+                else if ((uint32_t)(now - map1CenteredSinceMs) >=
+                         MAP1_BOOST_CONFIRM_MS) map1BoostActive = true;
+            } else {
+                map1CenteredSinceMs = 0;
+            }
+        }
+        if (map1BoostActive) target = (float)highSpeedPeakPwm;
+    } else {
+        map1BoostActive = false;
+        map1CenteredSinceMs = 0;
+    }
+    // Gradual acceleration / faster deceleration of the forward BASE only.
+    const float rate = target > map1ScheduledBase
+                     ? MAP1_BASE_RISE_PWM_PER_SEC : MAP1_BASE_FALL_PWM_PER_SEC;
+    const float limit = rate * fminf(dt, 0.02f);
+    const float delta = target - map1ScheduledBase;
+    if (delta > limit) map1ScheduledBase += limit;
+    else if (delta < -limit) map1ScheduledBase -= limit;
+    else map1ScheduledBase = target;
+    return map1ScheduledBase;
 }
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
@@ -267,6 +343,11 @@ static void resetLineTracking() {
     highSpeedStage = HS_DISABLED;
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
+    map1MaxProgress = 0;
+    map1ScheduledBase = (float)pidConfig.baseSpeed;
+    map1LastUnsafeMs = millis();
+    map1CenteredSinceMs = 0;
+    map1BoostActive = false;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -327,6 +408,7 @@ void pid_set_tunings(float kp, float ki, float kd) {
 }
 void pid_set_base_speed(int16_t speed) {
     pidConfig.baseSpeed = speed < 0 ? 0 : (speed > 255 ? 255 : speed);
+    if (!autoMode) map1ScheduledBase = (float)pidConfig.baseSpeed;
 }
 void pid_set_auto_mode(bool enabled) {
     autoMode = enabled;
@@ -354,7 +436,16 @@ bool pid_select_map(uint8_t mapId) {
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
-uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
+uint8_t pid_get_high_speed_stage(void) {
+    if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 && autoMode &&
+        map1MaxProgress >= MAP1_LATE_BOOST_START_ENC)
+        return map1BoostActive ? 8U : 7U; // WAIT_LINE / BOOST
+    return (uint8_t)highSpeedStage;
+}
+int32_t pid_get_map1_late_boost_start(void) {
+    return (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
+        ? MAP1_LATE_BOOST_START_ENC : 0;
+}
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
         return false;
@@ -676,6 +767,17 @@ void pid_line_follow_step(void) {
     const bool good = pid_calculate_position(&pos, &blackCount);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
+    if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1) {
+        const int32_t progress = runEncoderProgress();
+        if (progress > map1MaxProgress) map1MaxProgress = progress;
+        if (currentCase != LINE_CASE_NORMAL_PID || !good) {
+            map1BoostActive = false;
+            map1CenteredSinceMs = 0;
+            map1LastUnsafeMs = millis();
+            map1ScheduledBase = fminf(map1ScheduledBase,
+                                     map1CappedBase(map1MaxProgress));
+        }
+    }
     const uint32_t nowUs = micros();
     const float measuredDt = (float)(nowUs - lastComputeTimeUs) * 1e-6f;
     const bool dtValid = measuredDt > 0 && measuredDt <= 0.1f;
@@ -738,7 +840,12 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        float base = updateForwardSpeed(absErr);
+        const uint16_t sensorMask = sensor_get_line_bits();
+        float requestedBase = (float)pidConfig.baseSpeed;
+        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
+            requestedBase = map1UpdateScheduledBase(
+                map1MaxProgress, absErr, blackCount, sensorMask, dt);
+        float base = updateForwardSpeed(absErr, requestedBase);
         // Replace only the forward-speed target on the first straight. Keep
         // existing PID steering, error governor, outer-eye limits, and SEARCH.
         // For BASE:120, command envelope is 120 -> 255 -> 120.
@@ -763,7 +870,6 @@ void pid_line_follow_step(void) {
                 if (base > pidConfig.maxSpeed) base = pidConfig.maxSpeed;
                 governedForwardSpeed = base;
         }
-        const uint16_t sensorMask = sensor_get_line_bits();
         const float edgeSeverity = outerSensorSeverity(sensorMask);
         if (edgeSeverity > 0.0f) {
             const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
@@ -785,6 +891,14 @@ void pid_line_follow_step(void) {
                     rampProgress;
             if (rampSpeed < base) base = rampSpeed;
             --reacquireSpeedFrames;
+        }
+        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 &&
+            map1MaxProgress >= MAP1_SLOW_START_ENC &&
+            map1MaxProgress < MAP1_SLOW_END_ENC &&
+            (uint32_t)(millis() - map1LastUnsafeMs) < MAP1_REACQUIRE_HOLD_MS) {
+            // Stay slow for 80 ms after reacquiring the 5k-6k corner cluster.
+            base = fminf(base, MAP1_RISK_BASE_PWM);
+            governedForwardSpeed = base;
         }
         const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
         float correction = lastCorrection;

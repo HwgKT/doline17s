@@ -1,15 +1,25 @@
 # mainHighSpeed — early braking and corner HOLD on the first straight (experimental)
 
-> **mainHighSpeedv2 temporary PID-only mode (2026-11-07):** In this branch,
-> the encoder-driven RAMP/CRUISE/BRAKE/HOLD PWM profile and encoder-positioned
-> GAP_BRIDGE windows are disabled at compile time. Both wheels are commanded
-> by the existing PID steering, error/outer-eye speed governor, and the
-> ordinary time-based dashed-line, turn, and search behavior. Encoder counts
-> are still logged; they no longer select a PWM profile or GAP window.
-> MAP 1/2/3 continue to set their respective BASE defaults, and the Python
-> GUI remains unchanged. HS_PEAK controls remain visible for compatibility,
-> but adjusting HS_PEAK has no effect on motor speed in PID-only mode.
-> On START, the firmware emits `HS_STAGE OFF`; `DIAG` reports `hs=0`.
+> **mainHighSpeedv2 – MAP 01 late-BASE profile (2026-11-07):**
+> The old first-straight RAMP/CRUISE/BRAKE/HOLD and GAP_BRIDGE windows remain
+> disabled by default. MAP 01 now has a separate BASE scheduler, while normal
+> PID steering, the error/outer-eye speed governor, SEARCH and all-black
+> START/FINISH logic remain unchanged.
+>
+> - 4,800–6,900 relative encoder ticks: cap BASE at 115 PWM; 5,600–6,200
+>   is capped at 105 PWM. After SEARCH in that cluster, cap forward PWM at
+>   105 for 80 ms.
+> - From 10,000 ticks, the Python HS_PEAK slider sets the **target BASE**.
+>   After a centered adjacent-sensor line for 50 ms and 80 ms cooldown
+>   following SEARCH/turn, BASE accelerates at up to +250 PWM/s.
+>   Cancel boost on line loss or abs(error) >= 25 and decelerate at
+>   up to -500 PWM/s.
+> - From 16,000 ticks, cap BASE at 125 near the finish.
+> - MAP 2/3 remain in PID-only mode by default.
+>
+> Firmware readback: `HS_PEAK: PWM=... START_ENC=10000 MODE=MAP1_LATE_BASE`.
+> Live transitions: `HS_STAGE WAIT_LINE` and `HS_STAGE BOOST`.
+> The Python app preserves the same `HS_PEAK:n` command/ACK protocol.
 > 
 > **Restore later:** Add `-DDOLINE_ENABLE_ENCODER_SPEED_PROFILE=1` to
 > `build_flags` of the esp32dev environment in `platformio.ini` and rebuild.

@@ -163,6 +163,22 @@ class PeakUiTest(unittest.TestCase):
         )
         self.assertIn("HS: COMPLETE", ui.high_speed_status.get())
 
+    def test_map1_late_speed_readback_and_stage(self):
+        ui = FakeApp()
+        App.on_text(ui,
+                    "HS_PEAK: PWM=220 BASE=120 START_ENC=10000 MODE=MAP1_LATE_BASE")
+        self.assertTrue(ui.hs_late_mode)
+        self.assertEqual(ui.hs_late_start, 10000)
+        self.assertIn("MAP 1 ENC≥10000", ui.high_speed_status.get())
+        App.on_text(ui, "HS_STAGE WAIT_LINE map=1 runEnc=10020 base=120 peak=220 start=10000")
+        self.assertIn("HS: WAIT_LINE", ui.high_speed_status.get())
+        App.on_text(ui, "HS_STAGE BOOST map=1 runEnc=11400 base=120 peak=220 start=10000")
+        self.assertIn("HS: BOOST", ui.high_speed_status.get())
+        App.on_text(ui,
+                    "DIAG: bt=1 auto=1 loop=620.0Hz pid=620.0Hz "
+                    "sent=100.0Hz hs=8 runEnc=11440 peak=220")
+        self.assertIn("HS: BOOST", ui.high_speed_status.get())
+
     def test_base_apply_rejects_larger_than_confirmed_peak(self):
         ui = FakeApp()
         ui.hs_peak_confirmed = 180

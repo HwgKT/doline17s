@@ -156,10 +156,17 @@ void command(const String &raw) {
   if(s=="PID"){showPid();return;}
   if(s=="HS_PEAK"){
     char b[160];
-    snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
-      pid_get_high_speed_peak(),pid_get_base_speed(),
-      (long)pid_get_high_speed_brake_start());
+    if(pid_get_map1_late_boost_start()>0){
+      snprintf(b,sizeof(b),
+        "HS_PEAK: PWM=%d BASE=%d START_ENC=%ld MODE=MAP1_LATE_BASE",
+        pid_get_high_speed_peak(),pid_get_base_speed(),
+        (long)pid_get_map1_late_boost_start());
+    }else{
+      snprintf(b,sizeof(b),
+        "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
+        pid_get_high_speed_peak(),pid_get_base_speed(),
+        (long)pid_get_high_speed_brake_start());
+    }
     reply(b);return;
   }
   if(s.startsWith("HS_PEAK:")){
@@ -273,12 +280,19 @@ void command(const String &raw) {
        (unsigned long)millis());
     reply(runInfo);
     char rampEvent[160];
-    snprintf(rampEvent,sizeof(rampEvent),
-      "HS_STAGE %s map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
-      pid_get_high_speed_stage()==0 ? "OFF" : "RAMP",
-      (unsigned)pid_get_selected_map(),pid_get_base_speed(),
-      pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
-      (unsigned long)millis());
+    if(pid_get_map1_late_boost_start()>0){
+      snprintf(rampEvent,sizeof(rampEvent),
+        "HS_STAGE OFF map=1 runEnc=0 base=%d peak=%d start=%ld t_ms=%lu",
+        pid_get_base_speed(),pid_get_high_speed_peak(),
+        (long)pid_get_map1_late_boost_start(),(unsigned long)millis());
+    }else{
+      snprintf(rampEvent,sizeof(rampEvent),
+        "HS_STAGE %s map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+        pid_get_high_speed_stage()==0 ? "OFF" : "RAMP",
+        (unsigned)pid_get_selected_map(),pid_get_base_speed(),
+        pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
+        (unsigned long)millis());
+    }
     reply(rampEvent);
     return;
   }
@@ -515,16 +529,25 @@ void loop() {
     }
     if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
       static const char* const labels[]={
-        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD"
+        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD",
+        "WAIT_LINE","BOOST"
       };
-      if(newHighSpeedStage<7U){
+      if(newHighSpeedStage<9U){
         char b[160];
-        snprintf(b,sizeof(b),
-          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
-          labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
-          (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
-          pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
-          (unsigned long)millis());
+        if(pid_get_map1_late_boost_start()>0){
+          snprintf(b,sizeof(b),
+            "HS_STAGE %s map=1 runEnc=%ld base=%d peak=%d start=%ld t_ms=%lu",
+            labels[newHighSpeedStage],(long)pid_get_run_encoder_progress(),
+            pid_get_base_speed(),pid_get_high_speed_peak(),
+            (long)pid_get_map1_late_boost_start(),(unsigned long)millis());
+        }else{
+          snprintf(b,sizeof(b),
+            "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+            labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
+            (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
+            pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
+            (unsigned long)millis());
+        }
         reply(b);
       }
     }

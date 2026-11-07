@@ -194,7 +194,9 @@ class App(tk.Tk):
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
         self.high_speed_peak = 220  # Expected startup default; read back from firmware.
-        self.hs_brake_start = 1800  # Read back actual threshold for Peak >= 230.
+        self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
+        self.hs_late_start = 10000
+        self.hs_late_mode = False
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
@@ -203,7 +205,7 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: -- | BRAKE 1800 (<230), 1600 (230–239), 1400 (240–255) → 2300 | HOLD 110")
+            value="HS: MAP 1 từ 10k tick | chờ ESP32 xác nhận")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -436,10 +438,10 @@ class App(tk.Tk):
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # HS_PEAK changes the first straight only, independently of Base.
+        # MAP 1: HS_PEAK sets target BASE after 10k; others keep legacy HS.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK", bg=PANEL,
+        self.label(hs_row, "HS_PEAK (10k+)", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.label(hs_row, textvariable=self.hs_peak_value_text,
                    bg=PANEL, fg=CYAN, font=("Consolas", 9),
@@ -665,7 +667,7 @@ class App(tk.Tk):
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
         self.hs_peak_value_text.set("— / 255")
-        self.hs_peak_feedback.set("Đang đọc HS_PEAK từ ESP32...")
+        self.hs_peak_feedback.set("Đang đọc HS_PEAK (BASE sau 10k) từ ESP32...")
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
@@ -1216,11 +1218,14 @@ class App(tk.Tk):
                 confirmed = int(peak_match.group(1))
                 if 100 <= confirmed <= 255:
                     self.high_speed_peak = confirmed
-                    # Prefer the actual BRAKE_START echoed by firmware.
+                    # MAP 1 uses START_ENC; other maps use legacy BRAKE_START.
+                    late_match = re.search(r"\bSTART_ENC=(\d+)\b", message)
+                    self.hs_late_mode = late_match is not None
+                    if late_match:
+                        self.hs_late_start = int(late_match.group(1))
                     start_match = re.search(r"\bBRAKE_START=(\d+)\b", message)
-                    self.hs_brake_start = (
-                        int(start_match.group(1)) if start_match
-                        else (1400 if confirmed >= 240 else 1600 if confirmed >= 230 else 1800))
+                    if start_match:
+                        self.hs_brake_start = int(start_match.group(1))
                     self.hs_peak_confirmed = confirmed
                     expected = self.hs_peak_pending
                     if expected is None or expected == confirmed:
@@ -1237,8 +1242,12 @@ class App(tk.Tk):
                     else:
                         self.hs_peak_feedback.set(
                             f"ESP32 báo {confirmed}; chờ xác nhận PWM {expected}")
-                    self.high_speed_status.set(
-                        f"HS: READY | PEAK={confirmed} | BRAKE={self.hs_brake_start}-2300 | HOLD=110")
+                    if self.hs_late_mode:
+                        self.high_speed_status.set(
+                            f"HS: READY | MAP 1 ENC≥{self.hs_late_start} | BASE đích={confirmed}")
+                    else:
+                        self.high_speed_status.set(
+                            f"HS: READY | PEAK={confirmed} | BRAKE={self.hs_brake_start}-2300 | HOLD=110")
                     self.update_control_buttons()
         elif message.startswith("ERR: HS_PEAK_"):
             if self.hs_peak_pending is not None:
@@ -1256,22 +1265,33 @@ class App(tk.Tk):
             if peak:
                 self.high_speed_peak = int(peak.group(1))
             start = re.search(r"\bbrake=(\d+)\b", message)
-            self.hs_brake_start = (int(start.group(1)) if start
-                                   else (1400 if self.high_speed_peak >= 240 else 1600 if self.high_speed_peak >= 230 else 1800))
+            if start:
+                self.hs_brake_start = int(start.group(1))
+            late_start = re.search(r"\bstart=(\d+)\b", message)
+            if late_start:
+                self.hs_late_start = int(late_start.group(1))
+                self.hs_late_mode = True
             stage = re.search(r"HS_STAGE (\w+)", message)
             tick = re.search(r"\brunEnc=(-?\d+)", message)
             if stage:
-                self.high_speed_status.set(
-                    f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
-                )
+                if late_start or stage.group(1) in ("WAIT_LINE", "BOOST"):
+                    self.high_speed_status.set(
+                        f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
+                        f"| tăng BASE sau {self.hs_late_start} | PEAK={self.high_speed_peak}"
+                    )
+                else:
+                    self.high_speed_status.set(
+                        f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
+                        f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
+                    )
         elif message.startswith("DIAG:"):
             peak = re.search(r"\bpeak=(\d+)\b", message)
             if peak:
                 value = int(peak.group(1))
                 if 100 <= value <= 255:
                     self.high_speed_peak = value
-                    self.hs_brake_start = 1400 if value >= 240 else 1600 if value >= 230 else 1800
+                    if not getattr(self, "hs_late_mode", False):
+                        self.hs_brake_start = 1400 if value >= 240 else 1600 if value >= 230 else 1800
                     # DIAG is telemetry, not an ACK for a pending HS write.
                     if self.hs_peak_pending is None:
                         self.hs_peak_confirmed = value
@@ -1281,13 +1301,22 @@ class App(tk.Tk):
             hs = re.search(r"\bhs=(\d+)\b", message)
             tick = re.search(r"\brunEnc=(-?\d+)\b", message)
             if hs:
-                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE", "ABORTED", "HOLD")
+                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE",
+                         "ABORTED", "HOLD", "WAIT_LINE", "BOOST")
                 state = int(hs.group(1))
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
-                self.high_speed_status.set(
-                    f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
-                )
+                if state in (7, 8) or (
+                        getattr(self, "hs_late_mode", False)
+                        and getattr(self, "selected_map", None) == 1):
+                    self.high_speed_status.set(
+                        f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
+                        f"| 10k+ BASE→{self.high_speed_peak}"
+                    )
+                else:
+                    self.high_speed_status.set(
+                        f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
+                        f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
+                    )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
             sent = re.search(r"\bsent=(\d+(?:\.\d+)?)Hz\b", message)
