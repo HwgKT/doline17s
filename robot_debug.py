@@ -1261,6 +1261,40 @@ class App(tk.Tk):
                 self.set_auto_running(False)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
                 self.update_control_buttons()
+        elif message.startswith("ROUTE_LOCK: ENABLED="):
+            enabled = re.search(r"\bENABLED=(\d)\b", message)
+            route_map = re.search(r"\bMAP=(\d)\b", message)
+            if enabled:
+                map_label = route_map.group(1) if route_map else "?"
+                status = "BẬT" if enabled.group(1) == "1" else "TẮT"
+                self.route_status.set(
+                    f"ROUTE: khóa={status} | Map hiện tại={map_label} | "
+                    "thẳng → nửa vòng → phải → thẳng")
+        elif message.startswith("ROUTE_STAGE "):
+            stage = re.search(r"ROUTE_STAGE (\w+)", message)
+            tick = re.search(r"\brunEnc=(-?\d+)\b", message)
+            if stage:
+                self.route_status.set(
+                    f"ROUTE: {stage.group(1)} | ENC="
+                    f"{tick.group(1) if tick else '--'} | MAP 01")
+        elif message.startswith("ROUTE_FAULT "):
+            code = re.search(r"\bcode=(\d+)\b", message)
+            reasons = {
+                1: "SEARCH cua nửa vòng vượt 250 ms",
+                2: "Thiếu tín hiệu xác nhận cung nửa vòng",
+                3: "Chưa xác nhận được đoạn thẳng sau rẽ phải",
+            }
+            fault_code = int(code.group(1)) if code else -1
+            info = reasons.get(fault_code, "Lỗi lộ trình không xác định")
+            self.route_status.set(f"ROUTE: FAULT #{fault_code} — {info}")
+            self.control_state.set(f"ROUTE FAULT — {info}")
+            self.control_state_label.configure(fg=ROSE)
+        elif message.startswith("ERR: ROUTE_LOCK_"):
+            self.route_status.set(f"ROUTE: ESP32 từ chối — {message}")
+        elif message.startswith("AUTO_STOPPED: ROUTE_FAULT"):
+            self.confirm_stopped(message)
+            self.control_state.set("ROUTE FAULT — xe dừng an toàn; xem ROUTE ở trên.")
+            self.control_state_label.configure(fg=ROSE)
         elif message.startswith("HS_PEAK: PWM="):
             peak_match = re.search(r"\bPWM=(\d+)\b", message)
             if peak_match:
@@ -1334,6 +1368,18 @@ class App(tk.Tk):
                         f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
                     )
         elif message.startswith("DIAG:"):
+            route_stage = re.search(r"\broute=(\d+)\b", message)
+            route_fault = re.search(r"\brf=(\d+)\b", message)
+            route_tick = re.search(r"\brunEnc=(-?\d+)\b", message)
+            if route_stage and int(route_stage.group(1)) in (1, 2, 3, 4):
+                names = ("OFF", "STRAIGHT_1", "SEMICIRCLE",
+                         "RIGHT_TURN", "STRAIGHT_2", "FAULT")
+                self.route_status.set(
+                    f"ROUTE: {names[int(route_stage.group(1))]} | "
+                    f"ENC={route_tick.group(1) if route_tick else '--'}")
+            if route_fault and int(route_fault.group(1)) != 0:
+                self.route_status.set(
+                    f"ROUTE: FAULT #{route_fault.group(1)} | xem log TXT")
             peak = re.search(r"\bpeak=(\d+)\b", message)
             if peak:
                 value = int(peak.group(1))
