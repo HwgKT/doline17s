@@ -24,6 +24,8 @@ struct Tracker {
     bool sawLeftApex = false;
     uint32_t centeredSinceMs = 0;
     uint16_t selectedMask = 0;
+    bool firstSearchActive = false;
+    uint32_t firstSearchStartedMs = 0;
 
     void begin(bool enable) {
         active = enable;
@@ -32,6 +34,8 @@ struct Tracker {
         sawLeftApex = false;
         centeredSinceMs = 0;
         selectedMask = 0;
+        firstSearchActive = false;
+        firstSearchStartedMs = 0;
     }
     void fail(FaultCode code) {
         fault = code;
@@ -72,8 +76,27 @@ struct Tracker {
         default: break;
         }
     }
+    // Keep the 250ms bound even if wheel encoder drift moves beyond 800.
+    // Do not reset the timer for a single noisy eye while SEARCH is active.
+    void monitorFirstSearch(int32_t ticks, bool isSearching,
+                            bool physicalWhite, uint32_t nowMs) {
+        if (!active || stage != SEMICIRCLE) {
+            firstSearchActive = false;
+            return;
+        }
+        if (firstSearchActive) {
+            if (!isSearching) firstSearchActive = false;
+            else if ((uint32_t)(nowMs-firstSearchStartedMs) >= 250U)
+                fail(FIRST_SEARCH_TIMEOUT);
+        } else if (isSearching && physicalWhite &&
+                   ticks >= 540 && ticks <= 800) {
+            firstSearchActive = true;
+            firstSearchStartedMs = nowMs;
+        }
+    }
     bool firstRightSearchWindow(int32_t ticks) const {
-        return active && stage == SEMICIRCLE && ticks >= 540 && ticks <= 800;
+        return active && stage == SEMICIRCLE &&
+               (firstSearchActive || (ticks >= 540 && ticks <= 800));
     }
     float baseCap(int32_t ticks, float normalBase) const {
         if (!active) return normalBase;

@@ -54,6 +54,14 @@ int main() {
     t.observe(1930,25,true,true,400);
     assert(t.stage == map1route::FAULT);
     assert(t.fault == map1route::MISSING_RIGHT_EXIT);
+    // SEARCH timeout survives encoder drift beyond the 540..800 window.
+    t.begin(true);
+    t.observe(260, 0, true, true, 100);
+    t.monitorFirstSearch(650, true, true, 200);
+    assert(t.firstSearchActive);
+    t.monitorFirstSearch(900, true, false, 460);
+    assert(t.stage == map1route::FAULT);
+    assert(t.fault == map1route::FIRST_SEARCH_TIMEOUT);
     // Disabled mode does not change map 2/3 PID behavior.
     t.begin(false);
     t.observe(2000, 60, false, false, 500);

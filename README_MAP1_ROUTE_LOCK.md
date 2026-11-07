@@ -19,7 +19,9 @@ The phase 600–700 from logs was a *rightward SEARCH* during the semicircle,
 not a separate mandatory intersection turn. Only while the physical sensor
 mask is all WHITE and SEARCH is already active in [540,800] does route lock
 force SEARCH_RIGHT with PWM (85,-85); there is **no blind pivot by encoder**.
-A search lasting >=250ms in that window stops AUTO (code 1).
+A search beginning in that window and lasting >=250ms stops AUTO (code 1),
+even when encoder drift carries progress past 800 or a single noisy sensor
+frame occurs during SEARCH.
 
 Other safety stop codes:
 - code 2: cannot confirm arc / subsequent rightward cue by tick 1,680

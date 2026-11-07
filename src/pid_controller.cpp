@@ -864,17 +864,18 @@ void pid_line_follow_step(void) {
             blackCount > 0 && blackCount <= 10;
         map1Route.observe(map1MaxProgress, pos, validRouteLine,
                           currentCase == LINE_CASE_NORMAL_PID, millis());
-        // The FIRST all-white gap in the semicircle must search RIGHT.
-        // Never turn merely because the encoder reached a threshold.
+        const bool white = sensor_get_line_bits() == 0U;
+        map1Route.monitorFirstSearch(map1MaxProgress, isSearchTurn(),
+                                     white, millis());
+        // FIRST all-white gap inside the semicircle: choose RIGHT, never
+        // pivot blindly based on ticks alone.
         if (map1Route.firstRightSearchWindow(map1MaxProgress) &&
-            sensor_get_line_bits() == 0U && isSearchTurn()) {
+            white && isSearchTurn()) {
             if (turnState != SEARCH_RIGHT) {
                 turnState = SEARCH_RIGHT;
                 searchStartedMs = millis();
             }
             currentCase = LINE_CASE_SHARP_RIGHT;
-            if ((uint32_t)(millis()-searchStartedMs) >= 250U)
-                map1Route.fail(map1route::FIRST_SEARCH_TIMEOUT);
         }
     }
     if (map1Route.stage == map1route::FAULT) {
