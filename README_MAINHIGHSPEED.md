@@ -128,29 +128,26 @@ Review encoder speed near runEnc=2300/2550/2600, time to `HS_STAGE HOLD` and `CO
 **MAP 1 caveat:** its GAP window (1500–2100) overlaps the early BRAKE. While `GAP_BRIDGE` is active, the firmware holds the last forward PWM; the requested linear ramp resumes after line reacquisition. Starting BRAKE earlier does not guarantee immediate mechanical deceleration during white gaps.
 
 
-## All-black START -> line -> all-black FINISH (mainHighSpeedv2)
+## Start from any surface -> find line -> all-black FINISH (mainHighSpeedv2)
 
-In this branch, both the START area and the FINISH area are **all-black pads**.
-The robot **requires all 16 calibrated sensors to read black on START**,
-whether AUTO is requested from Python/terminal (`AUTO:1/2/3`, `START`) or
-from the GPIO34 button. Otherwise the firmware returns
-`ERR: START_REQUIRES_ALL_BLACK_16`; the Python app closes a newly opened
-run log and displays an explanation, without starting motion.
+The robot now **accepts START on WHITE, a narrow BLACK line, or a full
+16/16-BLACK pad**, from Python (`AUTO:1/2/3`), terminal (`START`) or
+the GPIO34 physical button. The old `ERR: START_REQUIRES_ALL_BLACK_16`
+restriction has been removed. Calibration, ADC-readiness, E-STOP and
+other AUTO interlocks are unchanged.
 
-To avoid stopping immediately at the start, the finish detector is **disarmed**
-when AUTO begins. The robot first advances straight over the 16/16-black
-starting pad at the selected MAP's BASE PWM. On a broad pad edge (11..15
-black sensors) it still drives straight using the existing CROSS_LINE speed.
-On white or an unconfirmed partial line it coasts straight at up to 95 PWM,
-**without PID steering or SEARCH**, until a narrow centered line persists
-for at least 30 ms: 1..10 black eyes, at least one center eye S6..S9,
-and calculated line position within +/-22. Only then does it enter PID
-with reset derivative history and **arm FINISH**. If no line is confirmed
-within 5 seconds after first departing the full-black pad, AUTO stops safely.
-It logs `FINISH_ARMED: LEFT_START_PAD` over SPP. Subsequent **16/16 black**
-for three consecutive PID cycles latches STOP with the existing
-`AUTO_FINISHED: FULL_BLACK_3` event. No encoder progress, elapsed race
-distance, or high-speed PWM profile is used to arm/detect the finish.
+FINISH is initially **disarmed**. If starting on 16/16-BLACK, the robot
+drives straight at the selected BASE; broad patterns with 11..15 black
+sensors use the existing straight CROSS_LINE speed. On WHITE or
+an unconfirmed narrow/off-center line, it coasts straight at up to 95 PWM
+without PID steering or SEARCH. A narrow centered line must persist for
+30 ms (1..10 black eyes, >=1 central eye S6..S9, position within +/-22);
+only then does normal PID steering begin and FINISH arm. The transition
+resets derivative history. If no centered line is confirmed within
+5 seconds after first seeing a non-full-black pattern, AUTO safely stops.
+It logs `FINISH_ARMED: LINE_CONFIRMED` over SPP. Thereafter **16/16 BLACK**
+for 3 consecutive controller samples stops the robot with
+`AUTO_FINISHED: FULL_BLACK_3`. No encoder distance is used to arm FINISH.
 
 **Physical caution:** The controller cuts PWM upon detecting the destination;
 it does not actively brake to a precise location, so the robot can coast
@@ -178,7 +175,7 @@ The **single physical button on GPIO34** follows a deterministic sequence after 
 
 1. **First press — CAL_WHITE:** Place all 16 eyes on uniform WHITE before pressing. The firmware stops the motors, captures 128 ADC frames, and blinks the onboard GPIO2 LED **rapidly (40 ms per toggle) during the 128-frame acquisition only**. At `CAL_WHITE_DONE`, GPIO2 turns **OFF** and stays off until the second press.
 2. **Second press — CAL_BLACK:** Place all 16 eyes on uniform BLACK, then press. The firmware captures 128 ADC frames and blinks GPIO2 **more slowly (90 ms per toggle) during the 128-frame acquisition only**. At `CAL_OK_SAVED` (NVS profile stored), GPIO2 turns **OFF** and stays off until START.
-3. **Third press — START:** Position the robot fully on the black START square so **all 16 sensors see black**. The firmware rejects any other pattern and keeps the motors stopped. The AUTO handler keeps its existing ADC, calibration, E-STOP and running-state checks. On successful START, GPIO2 resumes its normal Bluetooth indication. The initial 16/16 black pad is ignored by the FINISH detector until the robot has left it and re-acquired a narrow centered line.
+3. **Third press — START:** The robot may start on WHITE, a narrow LINE, or a full-black START square. AUTO still checks ADC, calibration, E-STOP and running-state interlocks. On successful START, GPIO2 resumes its normal Bluetooth indication. FINISH remains disarmed until the robot has confirmed a narrow centered line for 30 ms; if no line appears within 5 seconds after non-full-black is seen, AUTO stops.
 
 Pressing again after a completed run starts another run without needing to recalibrate. To restart calibration manually, send `CAL_WHITE` through the app; a successful `CAL_WHITE` resets the physical button sequence to BLACK next, and `CAL_BLACK` advances to START only after `CAL_OK_SAVED`. If black calibration fails, the physical button sequence returns to WHITE first. A premature press during the 128-frame acquisition is refused and does not advance the stage.
 

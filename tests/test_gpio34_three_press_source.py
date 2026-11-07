@@ -54,9 +54,9 @@ class GPIO34ThreePressSourceTests(unittest.TestCase):
         self.assertIn("ledWrite(phase==BUTTON34_WHITE_CAPTURING ||", MAIN)
         self.assertIn("setButton34Phase(BUTTON34_START_REUSE)", MAIN)
 
-    def test_start_requires_16_black_and_finish_is_armed_after_departure(self):
-        self.assertIn("if(sensor_get_line_bits()!=0xFFFFU)", MAIN)
-        self.assertIn("ERR: START_REQUIRES_ALL_BLACK_16", MAIN)
+    def test_start_accepts_any_pattern_and_finish_arms_only_on_line(self):
+        self.assertNotIn("if(sensor_get_line_bits()!=0xFFFFU)", MAIN)
+        self.assertNotIn("ERR: START_REQUIRES_ALL_BLACK_16", MAIN)
         self.assertIn('command("AUTO");', MAIN)
         self.assertNotIn("BUTTON34_ALL_BLACK_16_CHECK_CALIBRATION", MAIN)
         self.assertNotIn("BUTTON34_START_CENTER_MASK", MAIN)
@@ -66,7 +66,7 @@ class GPIO34ThreePressSourceTests(unittest.TestCase):
         self.assertIn("if (finishDetectionArmed && bitCount16(mask) == FULL_LINE_MIN_SENSORS)", PID)
         self.assertIn("FINISH_CONFIRM_FRAMES = 3", PID)
         self.assertIn("FULL_LINE_MIN_SENSORS = N_SENSORS", PID)
-        self.assertIn("FINISH_ARMED: LEFT_START_PAD", MAIN)
+        self.assertIn("FINISH_ARMED: LINE_CONFIRMED", MAIN)
 
 
 if __name__ == "__main__":

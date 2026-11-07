@@ -19,8 +19,8 @@ constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t CAL_WHITE_LED_BLINK_MS=40; // fast, GPIO2 toggle interval
 constexpr uint32_t CAL_BLACK_LED_BLINK_MS=90; // slower, GPIO2 toggle interval
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
-// Both the START pad and FINISH pad are 16/16 BLACK.
-// The AUTO command validates the start condition for both GUI and GPIO34.
+// FINISH is a 16/16 BLACK pad. START may occur on BLACK, WHITE or a line.
+// Both GUI and GPIO34 share the same AUTO safety/validation checks.
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
@@ -267,11 +267,9 @@ void command(const String &raw) {
     if(pid_get_selected_map()==0){
       reply("ERR: MAP_NOT_SELECTED");return;
     }
-    // A run must begin on the all-black START square. This common guard
-    // applies to GUI AUTO:1/2/3 as well as the physical GPIO34 button.
-    if(sensor_get_line_bits()!=0xFFFFU){
-      reply("ERR: START_REQUIRES_ALL_BLACK_16");return;
-    }
+    // Start is permitted from BLACK, WHITE, or a narrow line.
+    // PID initially coasts straight until the center line is confirmed;
+    // the full-black FINISH detector remains disarmed during acquisition.
     manualActive=false;
     pid_set_auto_mode(true);
     reply("MODE: AUTO PID");
@@ -471,7 +469,7 @@ void loop() {
     }else if(button34Phase==BUTTON34_BLACK_CAPTURING){
       reply("ERR: BUTTON34_WAIT_CAL_BLACK_DONE");
     }else{
-      // Reuse the same AUTO validation as the GUI (including 16/16 black).
+      // Reuse the same AUTO validation as the GUI (no black-pad requirement).
       reply("BUTTON34: START_REQUEST");
       command("AUTO");
       if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
@@ -510,7 +508,7 @@ void loop() {
     const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
     if(!wasFinishArmed && pid_finish_detection_armed()){
-      reply("FINISH_ARMED: LEFT_START_PAD");
+      reply("FINISH_ARMED: LINE_CONFIRMED");
     }
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();

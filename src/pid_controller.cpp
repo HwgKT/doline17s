@@ -31,9 +31,9 @@ constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 // Finish requires ALL 16 sensors to see black on 3 consecutive PID samples.
 constexpr uint8_t FULL_LINE_MIN_SENSORS = N_SENSORS;
 constexpr uint8_t FINISH_CONFIRM_FRAMES = 3;
-// The robot starts on an all-black pad. Do not recognize an all-black FINISH
-// until a narrow, centered line has been seen continuously after leaving it.
-// This is time/sensor based: no encoder distance or speed dependence.
+// START can be on WHITE, a narrow line, or an all-black pad. Never treat
+// any 16/16-black detection as FINISH until a narrow, centered track has
+// been confirmed continuously after START. No encoder distance is assumed.
 constexpr uint8_t START_PAD_EXIT_MAX_BLACK = 10;
 constexpr uint16_t START_PAD_CENTER_MASK = 0x03C0U; // central eyes S6..S9
 constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
@@ -536,10 +536,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
-    // The run STARTS on 16/16 black (validated by main.cpp). Until a narrow
-    // central line has been continuously confirmed, drive STRAIGHT rather
-    // than feeding partial-pad edges into PID or entering SEARCH.
-    // Only after confirmation do we arm the 16/16-black FINISH detector.
+    // START is accepted with ANY calibrated pattern: WHITE, LINE or BLACK.
+    // Until the narrow centered line is confirmed, drive STRAIGHT instead
+    // of steering prematurely with partial-pad edges or entering SEARCH.
+    // Arm the 16/16-black FINISH detector only after confirmation.
     if (!finishDetectionArmed) {
         if (mask != 0xFFFFU && !startPadDepartureSeen) {
             startPadDepartureSeen = true;
@@ -571,8 +571,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
         fullLineFrames = 0;
         if (!finishDetectionArmed) {
-            // The robot may coast across a white gap at the pad edge, but
-            // must not drive indefinitely if the expected line never appears.
+            // A white/off-center start may coast while finding the track,
+            // but must not drive indefinitely if no valid line appears.
             if (startPadDepartureSeen &&
                 uint32_t(now - startPadDepartureMs) >= STARTUP_LOSS_GRACE_MS)
                 return LINE_CASE_STOPPED;

@@ -1231,7 +1231,7 @@ class App(tk.Tk):
             self.start_pending = False
             self.start_confirmed = True
             self.set_auto_running(True)
-            self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
+            self.control_state.set("AUTO ĐANG CHẠY — đi thẳng tìm line rồi chuyển PID.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
         elif message in ("ERR: MAP_NOT_SELECTED", "ERR: MAP_USE_1_2_3",
@@ -1242,15 +1242,6 @@ class App(tk.Tk):
                 self.control_state.set("Firmware từ chối START/MAP: " + message)
                 self.control_state_label.configure(fg=AMBER)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
-                self.update_control_buttons()
-        elif message == "ERR: START_REQUIRES_ALL_BLACK_16":
-            if self.start_pending and not self.start_confirmed:
-                self.start_pending = False
-                self.set_auto_running(False)
-                self.control_state.set(
-                    "Hãy đặt cả 16 mắt lên ô đen xuất phát rồi START lại.")
-                self.control_state_label.configure(fg=AMBER)
-                self.finish_run_csv("AUTO BỊ TỪ CHỐI: CHƯA Ở Ô ĐEN XUẤT PHÁT")
                 self.update_control_buttons()
         elif message.startswith("ERR: CALIB_REQUIRED_OR_PENDING"):
             self.start_pending = False

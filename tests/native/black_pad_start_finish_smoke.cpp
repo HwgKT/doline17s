@@ -159,6 +159,46 @@ int main() {
     assert(pid_get_current_case() == LINE_CASE_STOPPED);
     assert(leftPwm == 0 && rightPwm == 0);
 
-    puts("PASS: straight pad departure, centered line PID, full-black FINISH, timeout STOP");
+    // START directly on WHITE must move forward rather than be rejected.
+    pid_set_auto_mode(false);
+    setMask(0x0000U);
+    pid_set_auto_mode(true);
+    stepMs(100);
+    assert(pid_get_current_case() == LINE_CASE_STARTUP_COAST);
+    assert(leftPwm == rightPwm && leftPwm > 0);
+    assert(!pid_finish_detection_armed());
+
+    // When the centered track arrives, go straight during confirmation
+    // and then hand off to normal PID (without another START request).
+    setMask(0x0180U);
+    stepMs(28);
+    assert(!pid_finish_detection_armed());
+    assert(pid_get_current_case() == LINE_CASE_STARTUP_COAST);
+    stepMs(6);
+    assert(pid_finish_detection_armed());
+    assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
+    setMask(0xFFFFU);
+    stepMs(6);
+    assert(pid_finish_line_latched());
+    assert(leftPwm == 0 && rightPwm == 0);
+
+    // START directly on the centered LINE must also enter PID after 30ms.
+    pid_set_auto_mode(false);
+    setMask(0x0180U);
+    pid_set_auto_mode(true);
+    stepMs(36);
+    assert(pid_finish_detection_armed());
+    assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
+
+    // START on white without any line must time out and STOP safely.
+    pid_set_auto_mode(false);
+    setMask(0x0000U);
+    pid_set_auto_mode(true);
+    stepMs(5100);
+    assert(pid_get_current_case() == LINE_CASE_STOPPED);
+    assert(leftPwm == 0 && rightPwm == 0);
+    assert(!pid_finish_detection_armed());
+
+    puts("PASS: free START, straight search, centered line PID, black FINISH, timeout STOP");
     return 0;
 }

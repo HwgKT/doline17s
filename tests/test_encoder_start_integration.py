@@ -31,9 +31,11 @@ class EncoderStartIntegrationTests(unittest.TestCase):
         self.assertIn('self.prev = None', GUI)
         self.assertIn('self.send_command("ENC")', GUI)
 
-    def test_start_always_requires_all_black(self):
-        self.assertIn('if(sensor_get_line_bits()!=0xFFFFU)', MAIN)
-        self.assertIn('ERR: START_REQUIRES_ALL_BLACK_16', MAIN)
+    def test_start_from_any_calibrated_surface(self):
+        self.assertNotIn('if(sensor_get_line_bits()!=0xFFFFU)', MAIN)
+        self.assertNotIn('ERR: START_REQUIRES_ALL_BLACK_16', MAIN)
+        self.assertIn('pid_set_auto_mode(true);', MAIN)
+        self.assertIn('ERR: CALIB_REQUIRED_OR_PENDING', MAIN)
 
     def test_start_coasts_without_pid_until_center_lock(self):
         self.assertIn('START_PAD_EXIT_CONFIRM_MS = 30', PID)
