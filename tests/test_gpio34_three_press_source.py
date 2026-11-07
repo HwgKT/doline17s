@@ -54,15 +54,19 @@ class GPIO34ThreePressSourceTests(unittest.TestCase):
         self.assertIn("ledWrite(phase==BUTTON34_WHITE_CAPTURING ||", MAIN)
         self.assertIn("setButton34Phase(BUTTON34_START_REUSE)", MAIN)
 
-    def test_start_guard_and_finish_detection_unchanged(self):
-        self.assertIn("BUTTON34_START_CENTER_MASK=0x07E0U", MAIN)
-        self.assertIn("(bits & BUTTON34_START_CENTER_MASK)==0U", MAIN)
-        self.assertIn("bits==0xFFFFU", MAIN)
+    def test_start_requires_16_black_and_finish_is_armed_after_departure(self):
+        self.assertIn("if(sensor_get_line_bits()!=0xFFFFU)", MAIN)
+        self.assertIn("ERR: START_REQUIRES_ALL_BLACK_16", MAIN)
         self.assertIn('command("AUTO");', MAIN)
+        self.assertNotIn("BUTTON34_ALL_BLACK_16_CHECK_CALIBRATION", MAIN)
+        self.assertNotIn("BUTTON34_START_CENTER_MASK", MAIN)
+        self.assertIn("START_PAD_EXIT_CONFIRM_MS = 30", PID)
+        self.assertIn("finishDetectionArmed = false;", PID)
+        self.assertIn("startPadExitCandidate", PID)
+        self.assertIn("if (finishDetectionArmed && bitCount16(mask) == FULL_LINE_MIN_SENSORS)", PID)
         self.assertIn("FINISH_CONFIRM_FRAMES = 3", PID)
         self.assertIn("FULL_LINE_MIN_SENSORS = N_SENSORS", PID)
-        self.assertIn("HS_CORNER_HOLD_PWM = 110.0f", PID)
-        self.assertIn("HS_VERY_EARLY_BRAKE_START_ENC = 1400", PID)
+        self.assertIn("FINISH_ARMED: LEFT_START_PAD", MAIN)
 
 
 if __name__ == "__main__":
