@@ -38,6 +38,15 @@ constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 // Named-track dashed-line coast. Encoder positions are relative to AUTO start.
 // These are provisional windows extracted from the 2026-10-31 map logs.
+// TEMPORARY PID-only test mode for mainHighSpeedv2 (default OFF).
+// When disabled, neither the encoder-triggered high-speed PWM envelope nor
+// the encoder-position GAP windows can change the motor commands.
+// Encoder readings remain available for logging/diagnostics.
+// Set -DDOLINE_ENABLE_ENCODER_SPEED_PROFILE=1 to restore original behavior.
+#ifndef DOLINE_ENABLE_ENCODER_SPEED_PROFILE
+#define DOLINE_ENABLE_ENCODER_SPEED_PROFILE 0
+#endif
+constexpr bool ENCODER_SPEED_PROFILE_ENABLED = DOLINE_ENABLE_ENCODER_SPEED_PROFILE != 0;
 constexpr uint32_t GAP_TIMEOUT_MS = 100;
 // First straight trapezoid in relative motor-encoder ticks.
 // An experimental open-loop PWM envelope, not closed-loop wheel velocity.
@@ -315,7 +324,7 @@ void pid_set_auto_mode(bool enabled) {
     autoStartedMs = millis();
     if (enabled) {
         encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
-        highSpeedStage = selectedMap >= 1 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED;
+        highSpeedStage = ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED;
     }
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
@@ -384,7 +393,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint16_t mask = sensor_get_line_bits();
     // Stage uses monotonic maximum forward progress, not time or raw encoder
     // sum; wheel reversal during SEARCH must not reactivate earlier zones.
-    if (selectedMap >= 1 && selectedMap <= 3 && !highSpeedAborted) {
+    if (ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 && !highSpeedAborted) {
         const int32_t progress = runEncoderProgress();
         if (progress > highSpeedMaxProgress) highSpeedMaxProgress = progress;
         if (isSearchTurn() && highSpeedMaxProgress < HS_BRAKE_END_ENC) {
@@ -451,8 +460,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
     }
 
-    if (blackCount == 0 && turnState == TURN_NONE && lineLocked &&
-        !startupLossActive && selectedMap >= 1 && selectedMap <= 3) {
+    if (ENCODER_SPEED_PROFILE_ENABLED && blackCount == 0 &&
+        turnState == TURN_NONE && lineLocked && !startupLossActive &&
+        selectedMap >= 1 && selectedMap <= 3) {
         const int32_t progress = runEncoderProgress();
         const GapWindow w = GAP_WINDOWS[selectedMap - 1];
         if (progress >= w.begin && progress <= w.end) {
@@ -704,7 +714,7 @@ void pid_line_follow_step(void) {
         // Do not drop the low-speed target merely because TURN_RIGHT was
         // detected: NORMAL_PID can continue steering through the corner.
         // Dedicated sharp-turn/search cases retain their pivot commands.
-        if (highSpeedStraight || highSpeedDecelOrHold) {
+        if (ENCODER_SPEED_PROFILE_ENABLED && (highSpeedStraight || highSpeedDecelOrHold)) {
                 const float profile = highSpeedForwardTarget(
                     highSpeedMaxProgress, (float)pidConfig.baseSpeed);
                 const float errorRatio = fminf(
