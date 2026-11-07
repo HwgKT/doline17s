@@ -195,6 +195,12 @@ void command(const String &raw) {
     reply(b);return;
   }
   if(s=="ENC_RESET"||s=="RESET_ENCODER"){
+    // Resetting absolute counts in AUTO would corrupt runEnc (and the
+    // 10k BOOST scheduler). Also require both motor outputs at rest.
+    if(pid_is_auto_mode()||manualActive||
+       motor_get_left_speed()!=0||motor_get_right_speed()!=0){
+      reply("ERR: ENC_RESET_REQUIRES_STOPPED");return;
+    }
     encoder_reset_counts();
     reply("ENC_RESET: OK");return;
   }

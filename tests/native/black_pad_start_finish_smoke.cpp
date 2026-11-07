@@ -90,10 +90,25 @@ int main() {
     assert(!pid_finish_detection_armed());
     assert(pid_get_current_case() == LINE_CASE_CROSS_LINE);
 
+    // A white gap at START must coast STRAIGHT, not spin in SEARCH.
+    setMask(0x0000U);
+    stepMs(40);
+    assert(!pid_finish_detection_armed());
+    assert(pid_get_current_case() == LINE_CASE_STARTUP_COAST);
+    assert(leftPwm == rightPwm && leftPwm > 0);
+
+    // An off-center partial line must also coast STRAIGHT; no premature PID.
+    setMask(0x0003U);
+    stepMs(30);
+    assert(!pid_finish_detection_armed());
+    assert(pid_get_current_case() == LINE_CASE_STARTUP_COAST);
+    assert(leftPwm == rightPwm && leftPwm > 0);
+
     // A short narrow-line glitch is insufficient to arm the finish.
     setMask(0x0180U); // both central sensors see black
     stepMs(10);
     assert(!pid_finish_detection_armed());
+    assert(pid_get_current_case() == LINE_CASE_STARTUP_COAST);
     setMask(0xFFFFU);
     stepMs(6);
     assert(!pid_finish_detection_armed());
@@ -138,6 +153,12 @@ int main() {
     assert(!pid_finish_line_latched());
     assert(pid_get_current_case() == LINE_CASE_CROSS_LINE);
 
-    puts("PASS: all-black START ignored, departure arms FINISH, 16/16 black STOP latched");
+    // Missing the line after leaving the pad must eventually STOP safely.
+    setMask(0x0000U);
+    stepMs(5010);
+    assert(pid_get_current_case() == LINE_CASE_STOPPED);
+    assert(leftPwm == 0 && rightPwm == 0);
+
+    puts("PASS: straight pad departure, centered line PID, full-black FINISH, timeout STOP");
     return 0;
 }

@@ -197,6 +197,8 @@ bool startupLossActive = false;
 bool finishLineLatched = false;
 bool finishDetectionArmed = false;
 bool startPadExitCandidate = false;
+bool startPadDepartureSeen = false;
+uint32_t startPadDepartureMs = 0;
 uint32_t startPadExitSinceMs = 0;
 uint8_t fullLineFrames = 0;
 
@@ -339,6 +341,8 @@ static void resetLineTracking() {
     finishLineLatched = false;
     finishDetectionArmed = false;
     startPadExitCandidate = false;
+    startPadDepartureSeen = false;
+    startPadDepartureMs = 0;
     startPadExitSinceMs = 0;
     fullLineFrames = 0;
     lastDashedCorrection = 0;
@@ -532,10 +536,15 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
-    // START and FINISH are both 16/16 black. Arm the finish detector only
-    // after the robot has actually transitioned onto a narrow centered line.
-    // Require a stable 30 ms transition to reject partial-black startup noise.
+    // The run STARTS on 16/16 black (validated by main.cpp). Until a narrow
+    // central line has been continuously confirmed, drive STRAIGHT rather
+    // than feeding partial-pad edges into PID or entering SEARCH.
+    // Only after confirmation do we arm the 16/16-black FINISH detector.
     if (!finishDetectionArmed) {
+        if (mask != 0xFFFFU && !startPadDepartureSeen) {
+            startPadDepartureSeen = true;
+            startPadDepartureMs = now;
+        }
         const bool narrowCenteredTrack =
             blackCount > 0 && blackCount <= START_PAD_EXIT_MAX_BLACK &&
             (mask & START_PAD_CENTER_MASK) != 0U &&
@@ -547,15 +556,34 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             } else if (uint32_t(now - startPadExitSinceMs) >= START_PAD_EXIT_CONFIRM_MS) {
                 finishDetectionArmed = true;
                 startPadExitCandidate = false;
+                // Hand over to PID with fresh state, not a remembered START
+                // pad position or a derivative spike.
+                lineLocked = true;
+                previouslyLocked = true;
+                acquiring = missing = false;
+                startupLossActive = false;
+                turnState = TURN_NONE;
+                clearPidState();
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
             }
         } else {
             startPadExitCandidate = false;
         }
         fullLineFrames = 0;
+        if (!finishDetectionArmed) {
+            // The robot may coast across a white gap at the pad edge, but
+            // must not drive indefinitely if the expected line never appears.
+            if (startPadDepartureSeen &&
+                uint32_t(now - startPadDepartureMs) >= STARTUP_LOSS_GRACE_MS)
+                return LINE_CASE_STOPPED;
+            // Both the full-black pad and broad edge patterns go straight.
+            // All other patterns coast straight until the center line locks.
+            return blackCount >= 11 ? LINE_CASE_CROSS_LINE
+                                    : LINE_CASE_STARTUP_COAST;
+        }
     }
-    // Before arming, the full-black START pad is treated as a crossing and
-    // drives forward instead of latching STOP. At the finish, stop after
-    // three consecutive all-black PID samples, as before.
+    // FINISH is now armed: 16/16 black for three consecutive PID samples
+    // stops the robot, using the existing finish logic.
     if (finishDetectionArmed && bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
         if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
         if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {

@@ -183,6 +183,7 @@ class App(tk.Tk):
         self.stream_rate = tk.StringVar(value="100")
         self.prev = None
         self.wheel_speed = [0.0, 0.0]
+        self.encoder_reset_pending = False
         self.frames = 0
         self.last_rx_total = 0
         self.last_csv_total = 0
@@ -368,6 +369,15 @@ class App(tk.Tk):
         self.label(left, textvariable=self.logic_var, fg=CYAN,
                    font=("Consolas", 10, "bold")).pack(anchor="w", pady=(0, 8))
 
+        # Encoder reset must be visible WITHOUT scrolling below the Scope.
+        encoder_header = tk.Frame(left, bg=BG)
+        encoder_header.pack(fill="x", pady=(3, 0))
+        self.label(encoder_header, "Encoder / tốc độ / PID", fg=MUTED).pack(
+            side="left", padx=(2, 0))
+        self.reset_encoder_btn = ttk.Button(
+            encoder_header, text="Reset ENC", width=11,
+            command=self.reset_encoder)
+        self.reset_encoder_btn.pack(side="right", padx=(0, 4))
         metrics = tk.Frame(left, bg=PANEL)
         metrics.pack(fill="x", pady=4)
         names = [("encL", "Encoder L"), ("encR", "Encoder R"),
@@ -387,10 +397,6 @@ class App(tk.Tk):
         self.label(left, "Scope: PWM trái / PWM phải / PID out", fg=MUTED).pack(anchor="w", pady=(11, 3))
         self.scope = tk.Canvas(left, bg=PANEL, width=570, height=165, highlightthickness=0)
         self.scope.pack(fill="x")
-        encoder_actions = tk.Frame(left, bg=BG)
-        encoder_actions.pack(fill="x", pady=5)
-        ttk.Button(encoder_actions, text="Reset ENC",
-                   command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
         self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
                    fg=MUTED).pack(anchor="w")
 
@@ -749,15 +755,31 @@ class App(tk.Tk):
         try:
             self.reader.send(command)
             self.log(f"TX > {command}")
-            if command.upper() in ("ENC_RESET", "RESET_ENCODER"):
-                # Discard the old tick/time baseline before computing speed.
-                self.prev = None
-                self.wheel_speed = [0.0, 0.0]
             return True
         except (serial.SerialException, OSError) as exc:
             self.log(f"Lỗi gửi: {exc}")
             self.disconnect()
             return False
+
+    def _can_reset_encoder(self):
+        return (self.reader is not None and self.reader.is_alive()
+                and not self.encoder_reset_pending
+                and not self.auto_running and not self.start_pending
+                and self.stop_ack_deadline is None
+                and not self.stop_verify_pending
+                and self.run_csv.active is None)
+
+    def reset_encoder(self):
+        if not self._can_reset_encoder():
+            self.log("Reset ENC chỉ thực hiện khi robot đã dừng, không START/STOP đang chờ.")
+            return False
+        self.encoder_reset_pending = True
+        self.update_control_buttons()
+        if not self.send_command("ENC_RESET"):
+            self.encoder_reset_pending = False
+            self.update_control_buttons()
+            return False
+        return True
 
     def send_terminal(self):
         cmd = self.cmd_var.get().strip()
@@ -911,6 +933,9 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        if hasattr(self, "reset_encoder_btn"):
+            self.reset_encoder_btn.configure(
+                state="normal" if self._can_reset_encoder() else "disabled")
         if hasattr(self, "hs_peak_widgets"):
             editable = self._can_edit_hs_peak() and self.hs_peak_pending is None
             for widget in self.hs_peak_widgets:
@@ -1174,6 +1199,21 @@ class App(tk.Tk):
             self.control_state.set("Đã mở khóa E-STOP — động cơ vẫn dừng.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
+        elif message == "ENC_RESET: OK":
+            # Only the ESP32 acknowledgement confirms that counts were reset.
+            self.encoder_reset_pending = False
+            self.prev = None
+            self.wheel_speed = [0.0, 0.0]
+            for key in ("encL", "encR", "spdL", "spdR"):
+                if key in self.values:
+                    self.values[key].set("0")
+            self.update_control_buttons()
+            self.log("Đã reset encoder trên ESP32 (ACK).")
+            self.send_command("ENC")  # Verify actual L/R counters after ACK.
+        elif message == "ERR: ENC_RESET_REQUIRES_STOPPED":
+            self.encoder_reset_pending = False
+            self.update_control_buttons()
+            self.log("ESP32 từ chối reset encoder: xe vẫn đang chạy.")
         elif message == "MODE: AUTO PID":
             self.start_pending = False
             self.start_confirmed = True

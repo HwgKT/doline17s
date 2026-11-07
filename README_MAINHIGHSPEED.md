@@ -138,11 +138,15 @@ from the GPIO34 button. Otherwise the firmware returns
 run log and displays an explanation, without starting motion.
 
 To avoid stopping immediately at the start, the finish detector is **disarmed**
-when AUTO begins. The robot first advances straight over the 16/16-black starting pad at
-its selected MAP's BASE PWM; other wide crossings retain the original
-70% BASE CROSS_LINE speed. It only **arms FINISH** after at least 30 ms
-of continuous narrow centered line evidence: 1..10 black eyes, at least
-one of central eyes S6..S9, and calculated line position within +/-22.
+when AUTO begins. The robot first advances straight over the 16/16-black
+starting pad at the selected MAP's BASE PWM. On a broad pad edge (11..15
+black sensors) it still drives straight using the existing CROSS_LINE speed.
+On white or an unconfirmed partial line it coasts straight at up to 95 PWM,
+**without PID steering or SEARCH**, until a narrow centered line persists
+for at least 30 ms: 1..10 black eyes, at least one center eye S6..S9,
+and calculated line position within +/-22. Only then does it enter PID
+with reset derivative history and **arm FINISH**. If no line is confirmed
+within 5 seconds after first departing the full-black pad, AUTO stops safely.
 It logs `FINISH_ARMED: LEFT_START_PAD` over SPP. Subsequent **16/16 black**
 for three consecutive PID cycles latches STOP with the existing
 `AUTO_FINISHED: FULL_BLACK_3` event. No encoder progress, elapsed race
@@ -159,6 +163,14 @@ Native behavior test:
 g++ -std=c++17 -Wall -Wextra -Itests/native -Iinclude src/pid_controller.cpp tests/native/black_pad_start_finish_smoke.cpp -o black_pad_start_finish_smoke
 ./black_pad_start_finish_smoke
 ```
+
+**Reset encoder in the GUI:** The `Reset ENC` button is now in the encoder
+metrics header above the Scope, so it remains visible on smaller screens.
+It sends `ENC_RESET` and waits for the `ENC_RESET: OK` acknowledgement
+before resetting the app's speed baseline. The firmware rejects resets
+while AUTO or motor movement is active with
+`ERR: ENC_RESET_REQUIRES_STOPPED`, protecting `runEnc` and the 10k BOOST
+threshold. After a successful reset the app requests `ENC` for readback.
 
 ## GPIO34 three-press CAL / START workflow
 
