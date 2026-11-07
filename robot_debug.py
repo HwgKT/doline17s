@@ -924,6 +924,7 @@ class App(tk.Tk):
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
+                     and not self.encoder_reset_pending
                      and not self.estop_pending and not self.start_pending
                      and not self.auto_running and self.run_csv.active is None
                      and self.stop_ack_deadline is None
@@ -996,6 +997,9 @@ class App(tk.Tk):
             self.run_txt_file = None
 
     def start_line(self):
+        if self.encoder_reset_pending:
+            self.log("Đang chờ ACK reset encoder; chưa gửi START.")
+            return
         if self.selected_map is None:
             self.log("Hãy chọn MAP 1, MAP 2 hoặc MAP 3 trước khi START.")
             return
