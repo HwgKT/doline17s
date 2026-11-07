@@ -1,4 +1,9 @@
-# mainHighSpeed — early braking and corner HOLD on the first straight (experimental)
+# mainHighSpeedv2 — PID, Map 01 Route Lock and HS_PEAK
+
+> Map 01 now has an aligned-START route-lock FSM for the first ~2,000
+> encoder ticks. See [Map 01 Route Lock](README_MAP1_ROUTE_LOCK.md)
+> for the state sequence, fault codes and SPP controls.
+> Map 02/03, the 10k late-BASE boost and full-black FINISH are preserved.
 
 > **mainHighSpeedv2 – MAP 01 late-BASE profile (2026-11-07):**
 > The old first-straight RAMP/CRUISE/BRAKE/HOLD and GAP_BRIDGE windows remain
