@@ -1,5 +1,25 @@
 # mainHighSpeed — early braking and corner HOLD on the first straight (experimental)
 
+> **mainHighSpeedv2 temporary PID-only mode (2026-11-07):** In this branch,
+> the encoder-driven RAMP/CRUISE/BRAKE/HOLD PWM profile and encoder-positioned
+> GAP_BRIDGE windows are disabled at compile time. Both wheels are commanded
+> by the existing PID steering, error/outer-eye speed governor, and the
+> ordinary time-based dashed-line, turn, and search behavior. Encoder counts
+> are still logged; they no longer select a PWM profile or GAP window.
+> MAP 1/2/3 continue to set their respective BASE defaults, and the Python
+> GUI remains unchanged. HS_PEAK controls remain visible for compatibility,
+> but adjusting HS_PEAK has no effect on motor speed in PID-only mode.
+> On START, the firmware emits `HS_STAGE OFF`; `DIAG` reports `hs=0`.
+> 
+> **Restore later:** Add `-DDOLINE_ENABLE_ENCODER_SPEED_PROFILE=1` to
+> `build_flags` of the esp32dev environment in `platformio.ini` and rebuild.
+> Without this flag (the default), encoder-based changes stay off.
+> The original `mainHighSpeed` branch is not modified.
+>
+> Old high-speed/GAP native tests can be run with the flag enabled, e.g.:
+> `g++ -std=c++17 -DDOLINE_ENABLE_ENCODER_SPEED_PROFILE=1 -Itests/native -Iinclude src/pid_controller.cpp tests/native/gap_bridge_smoke.cpp -o gap_bridge_smoke`
+
+
 Base branch: `linedutdoan`. The stable `mainv10` and the `linedutdoan` branches are not modified by this experiment.
 
 ## 1. Profile, relative encoder counts, safety
