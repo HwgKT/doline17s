@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -157,6 +157,29 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  if(s=="ROUTE_LOCK"){
+    char b[128];
+    snprintf(b,sizeof(b),
+      "ROUTE_LOCK: ENABLED=%u MAP=%u STATE=%u FAULT=%u",
+      (unsigned)(pid_get_map1_route_lock()?1:0),
+      (unsigned)pid_get_selected_map(),
+      (unsigned)pid_get_map1_route_stage(),
+      (unsigned)pid_get_map1_route_fault_code());
+    reply(b);return;
+  }
+  if(s.startsWith("ROUTE_LOCK:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: ROUTE_LOCK_REQUIRES_STOPPED");return;
+    }
+    const String arg=s.substring(11);
+    if(arg!="0"&&arg!="1"){
+      reply("ERR: ROUTE_LOCK_USE_0_OR_1");return;
+    }
+    pid_set_map1_route_lock(arg=="1");
+    reply(String("ROUTE_LOCK: ENABLED=")+(pid_get_map1_route_lock()?1:0)+
+          " MAP="+pid_get_selected_map()+" STATE=0 FAULT=0");
+    return;
+  }
   if(s=="HS_PEAK"){
     char b[160];
     if(pid_get_map1_late_boost_start()>0){
@@ -301,6 +324,13 @@ void command(const String &raw) {
         (unsigned long)millis());
     }
     reply(rampEvent);
+    if(pid_get_selected_map()==1 && pid_get_map1_route_lock()){
+      char routeEvent[110];
+      snprintf(routeEvent,sizeof(routeEvent),
+        "ROUTE_STAGE STRAIGHT_1 map=1 runEnc=0 t_ms=%lu",
+        (unsigned long)millis());
+      reply(routeEvent);
+    }
     return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
