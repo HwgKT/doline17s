@@ -40,6 +40,10 @@ constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
 constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
 constexpr int16_t LINE_SEARCH_PWM = 85;
+// MAP 1 experiment: faster pivot only at the long left corner near 1,311 ticks.
+constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 95;
+constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
+constexpr int32_t MAP1_LEFT_SEARCH_TEST_END_ENC = 1700;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
@@ -386,6 +390,18 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
 }
 static bool isSearchTurn() {
     return turnState == SEARCH_LEFT || turnState == SEARCH_RIGHT;
+}
+// Keep the default SEARCH PWM for all other turns and maps.
+// Use relative run encoder progress so the window is consistent across AUTO runs.
+static int16_t searchPwmForCurrentTurn() {
+    if (selectedMap == 1 && turnState == SEARCH_LEFT) {
+        const int32_t progress = runEncoderProgress();
+        if (progress >= MAP1_LEFT_SEARCH_TEST_START_ENC &&
+            progress <= MAP1_LEFT_SEARCH_TEST_END_ENC) {
+            return MAP1_LEFT_SEARCH_TEST_PWM;
+        }
+    }
+    return LINE_SEARCH_PWM;
 }
 static bool isLeftTurn() {
     return turnState == TURN_LEFT || turnState == SEARCH_LEFT;
@@ -823,7 +839,8 @@ void pid_line_follow_step(void) {
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
-            motor_set_speeds(-LINE_SEARCH_PWM, LINE_SEARCH_PWM);
+            const int16_t searchPwm = searchPwmForCurrentTurn();
+            motor_set_speeds(-searchPwm, searchPwm);
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
