@@ -128,6 +128,8 @@ constexpr int32_t MAP1_SLOW_START_ENC = 4800;
 constexpr int32_t MAP1_SLOW_TIGHT_START_ENC = 5600;
 constexpr int32_t MAP1_SLOW_TIGHT_END_ENC = 6200;
 constexpr int32_t MAP1_SLOW_END_ENC = 6900;
+constexpr int32_t MAP1_LATE_BASE_START_ENC = 8000;
+constexpr float MAP1_LATE_BASE_PWM = 160.0f; // Minimum forward BASE target from 8k to finish; BOOST can still reach peak.
 constexpr int32_t MAP1_LATE_BOOST_START_ENC = 10000;
 constexpr float MAP1_CORNER_BASE_PWM = 115.0f;
 constexpr float MAP1_RISK_BASE_PWM = 105.0f;
@@ -326,6 +328,10 @@ static float map1CappedBase(int32_t progress) {
     float base = (float)pidConfig.baseSpeed;
     if (map1Route.active)
         base = map1Route.baseCap(progress, base);
+    // Raise the Map 1 BASE target after 8000 ticks, including WAIT_LINE
+    // after late BOOST cancels. Keep speed governor, edge caps and SEARCH.
+    if (progress >= MAP1_LATE_BASE_START_ENC)
+        base = fmaxf(base, MAP1_LATE_BASE_PWM);
     if (progress >= MAP1_SLOW_START_ENC && progress < MAP1_SLOW_END_ENC) {
         const float cap = progress >= MAP1_SLOW_TIGHT_START_ENC &&
                           progress < MAP1_SLOW_TIGHT_END_ENC
