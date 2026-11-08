@@ -164,11 +164,12 @@ static int32_t runEncoderProgress() {
 // PID-only sensor selection for Map 1. Keep physical ADC/line bits unmasked
 // for START, FINISH, SEARCH, corner detection, and Route Lock observations.
 // Encoder origins are captured at AUTO start (pid_set_auto_mode).
-constexpr int32_t MAP1_SENSOR_STAGE2_TICKS = 350;
-constexpr int32_t MAP1_SENSOR_STAGE3_TICKS = 1500;
-constexpr uint16_t MAP1_SENSOR_MASK_STAGE1 = 0x01FFU; // S0..S8
-constexpr uint16_t MAP1_SENSOR_MASK_STAGE2 = 0xFF80U; // S7..S15
-constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU; // S0..S15
+// User-configurable through SENSOR_PROFILE SPP commands while stopped.
+// Values persist across AUTO runs but return to defaults after reboot.
+int32_t map1SensorStage2Ticks = 350;
+int32_t map1SensorStage3Ticks = 1500;
+uint16_t map1SensorStageMasks[3] = {0x01FFU, 0xFF80U, 0xFFFFU};
+constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 
 static int32_t map1SensorTravelTicks() {
@@ -187,11 +188,11 @@ static uint16_t map1PidSensorMask() {
     const int32_t traveled = map1SensorTravelTicks();
     // A pivot or a temporary reversal must not reactivate a previous group.
     if (traveled > map1SensorMaxTicks) map1SensorMaxTicks = traveled;
-    if (map1SensorMaxTicks < MAP1_SENSOR_STAGE2_TICKS)
-        return MAP1_SENSOR_MASK_STAGE1;
-    if (map1SensorMaxTicks < MAP1_SENSOR_STAGE3_TICKS)
-        return MAP1_SENSOR_MASK_STAGE2;
-    return MAP1_SENSOR_MASK_STAGE3;
+    if (map1SensorMaxTicks < map1SensorStage2Ticks)
+        return map1SensorStageMasks[0];
+    if (map1SensorMaxTicks < map1SensorStage3Ticks)
+        return map1SensorStageMasks[1];
+    return map1SensorStageMasks[2];
 }
 
 // Compute only the PID measurement from enabled sensors. The original
@@ -534,6 +535,30 @@ bool pid_select_map(uint8_t mapId) {
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
+
+// Set the Map 1 PID sensor selection profile only while stopped.
+// Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
+bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
+                                 uint16_t mask1, uint16_t mask2, uint16_t mask3) {
+    if (autoMode || stage2 <= 0 || stage3 <= stage2 ||
+        stage3 > 10000000 || !mask1 || !mask2 || !mask3) return false;
+    map1SensorStage2Ticks = stage2;
+    map1SensorStage3Ticks = stage3;
+    map1SensorStageMasks[0] = mask1;
+    map1SensorStageMasks[1] = mask2;
+    map1SensorStageMasks[2] = mask3;
+    return true;
+}
+
+void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
+                                 uint16_t *mask1, uint16_t *mask2,
+                                 uint16_t *mask3) {
+    if (stage2) *stage2 = map1SensorStage2Ticks;
+    if (stage3) *stage3 = map1SensorStage3Ticks;
+    if (mask1) *mask1 = map1SensorStageMasks[0];
+    if (mask2) *mask2 = map1SensorStageMasks[1];
+    if (mask3) *mask3 = map1SensorStageMasks[2];
+}
 uint8_t pid_get_high_speed_stage(void) {
     if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 && autoMode &&
         map1MaxProgress >= MAP1_LATE_BOOST_START_ENC)
