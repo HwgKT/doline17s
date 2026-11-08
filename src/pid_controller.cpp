@@ -146,7 +146,7 @@ uint32_t map1LastUnsafeMs = 0;
 uint32_t map1CenteredSinceMs = 0;
 bool map1BoostActive = false;
 // Map 01 route lock assumes a repeatable START pose; enabled by default.
-bool map1RouteLockEnabled = true;
+bool map1RouteLockEnabled = false; // Temporarily disabled by default for PID/sensor-mask testing; ROUTE_LOCK:1 to enable.
 map1route::Tracker map1Route;
 int32_t runEncoderOriginL = 0, runEncoderOriginR = 0;
 bool gapActive = false;
