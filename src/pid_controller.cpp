@@ -160,6 +160,58 @@ static int32_t runEncoderProgress() {
                         ((int64_t)right - runEncoderOriginR);
     return (int32_t)(sum / 2);
 }
+
+// PID-only sensor selection for Map 1. Keep physical ADC/line bits unmasked
+// for START, FINISH, SEARCH, corner detection, and Route Lock observations.
+// Encoder origins are captured at AUTO start (pid_set_auto_mode).
+constexpr int32_t MAP1_SENSOR_STAGE2_TICKS = 350;
+constexpr int32_t MAP1_SENSOR_STAGE3_TICKS = 1500;
+constexpr uint16_t MAP1_SENSOR_MASK_STAGE1 = 0x01FFU; // S0..S8
+constexpr uint16_t MAP1_SENSOR_MASK_STAGE2 = 0xFF80U; // S7..S15
+constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU; // S0..S15
+int32_t map1SensorMaxTicks = 0;
+
+static int32_t map1SensorTravelTicks() {
+    int32_t left = 0, right = 0;
+    encoder_get_counts(&left, &right);
+    int64_t dl = (int64_t)left - runEncoderOriginL;
+    int64_t dr = (int64_t)right - runEncoderOriginR;
+    if (dl < 0) dl = -dl;
+    if (dr < 0) dr = -dr;
+    const int64_t average = (dl + dr) / 2;
+    return average > INT32_MAX ? INT32_MAX : (int32_t)average;
+}
+
+static uint16_t map1PidSensorMask() {
+    if (selectedMap != 1 || !autoMode) return MAP1_SENSOR_MASK_STAGE3;
+    const int32_t traveled = map1SensorTravelTicks();
+    // A pivot or a temporary reversal must not reactivate a previous group.
+    if (traveled > map1SensorMaxTicks) map1SensorMaxTicks = traveled;
+    if (map1SensorMaxTicks < MAP1_SENSOR_STAGE2_TICKS)
+        return MAP1_SENSOR_MASK_STAGE1;
+    if (map1SensorMaxTicks < MAP1_SENSOR_STAGE3_TICKS)
+        return MAP1_SENSOR_MASK_STAGE2;
+    return MAP1_SENSOR_MASK_STAGE3;
+}
+
+// Compute only the PID measurement from enabled sensors. The original
+// SENSOR_WEIGHTS coordinates and physical centre S7/S8 remain unchanged.
+// No subset renumbering, gain change, PID reset, or ADC read suppression.
+static bool calculateMaskedPidPosition(uint16_t allowedMask, float *outPosition) {
+    if (!outPosition || !calibrationReady) return false;
+    const uint16_t visible = sensor_get_line_bits() & allowedMask;
+    float weighted = 0.0f;
+    uint32_t strength = 0;
+    for (uint8_t i = 0; i < N_SENSORS; ++i) {
+        if (!(visible & (uint16_t(1U) << i))) continue;
+        const uint16_t calibrated = sensor_get_calibrated(i);
+        weighted += (float)calibrated * SENSOR_WEIGHTS[i];
+        strength += calibrated;
+    }
+    if (strength == 0) return false; // Do not fabricate PID evidence.
+    *outPosition = weighted / (float)strength;
+    return true;
+}
 constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
 
 // A sharp turn is entered only when the centroid reaches the outer region.
@@ -364,6 +416,7 @@ static void resetLineTracking() {
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
+    map1SensorMaxTicks = 0;
     map1ScheduledBase = (float)pidConfig.baseSpeed;
     map1LastUnsafeMs = millis();
     map1CenteredSinceMs = 0;
@@ -856,6 +909,14 @@ void pid_line_follow_step(void) {
         if (progress > map1MaxProgress) map1MaxProgress = progress;
     }
     const bool good = pid_calculate_position(&pos, &blackCount);
+    // Physical position/blackCount continue to drive all existing FSM cases.
+    // Only the NORMAL_PID steering error uses the encoder-selected subset.
+    const uint16_t pidSensorMask = map1PidSensorMask();
+    float pidPosition = pos;
+    const bool pidMeasurementGood =
+        pidSensorMask == MAP1_SENSOR_MASK_STAGE3
+            ? good
+            : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
     if (map1Route.active && currentCase != LINE_CASE_STOPPED) {
@@ -884,7 +945,7 @@ void pid_line_follow_step(void) {
         return;
     }
     if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1) {
-        if (currentCase != LINE_CASE_NORMAL_PID || !good) {
+        if (currentCase != LINE_CASE_NORMAL_PID || !pidMeasurementGood) {
             map1BoostActive = false;
             map1CenteredSinceMs = 0;
             map1LastUnsafeMs = millis();
@@ -925,8 +986,8 @@ void pid_line_follow_step(void) {
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
-    } else if (currentCase == LINE_CASE_NORMAL_PID && good) {
-        const float err = pos;
+    } else if (currentCase == LINE_CASE_NORMAL_PID && pidMeasurementGood) {
+        const float err = pidPosition;
         const float absErr = fabsf(err);
 
         // Non-linear P gain: ramps up quadratically as error increases.
