@@ -1302,7 +1302,7 @@ class App(tk.Tk):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
         sensor_profile_match = re.fullmatch(
-            r"SENSOR_PROFILE T1=(\\d+) T2=(\\d+) M1=([0-9A-Fa-f]{4}) "
+            r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
         if sensor_profile_match:
             a, b = (int(sensor_profile_match.group(i)) for i in (1, 2))
