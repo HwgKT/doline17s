@@ -238,7 +238,7 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 // Explicit counter-rotation helps reduce translational momentum versus the
 // normal sharp-turn curve (both wheels forward). Tune conservatively first.
 constexpr int16_t EDGE_ONLY_TURN_OUTER_PWM = 100;
-constexpr int16_t EDGE_ONLY_TURN_INNER_REVERSE_PWM = 40;
+constexpr int16_t EDGE_ONLY_TURN_INNER_REVERSE_PWM = 100;
 constexpr uint16_t EDGE_ONLY_LEFT_MASK = 0x000FU;
 constexpr uint16_t EDGE_ONLY_RIGHT_MASK = 0xF000U;
 
@@ -267,14 +267,14 @@ constexpr uint32_t WIDE_TIMEOUT_MS = 700, WIDE_RECOVERY_HOLD_MS = 40;
 constexpr float WIDE_RECOVERY_START_PWM = 90.0f;
 constexpr float WIDE_RECOVERY_RAMP_PWM_PER_SEC = 250.0f;
 // Wheel feedback applies ONLY during WIDE_TURN / WIDE_RECENTER.
-// The first motor command uses the existing (-40,+100)/(+100,-40) unchanged.
+// First motor command is (-100,+100)/(+100,-100); later PWM may be encoder-adjusted.
 // Encoder speed is sampled every 20 ms; never wait for a speed threshold.
 constexpr uint32_t WIDE_ENCODER_SAMPLE_MS = 20;
 constexpr float WIDE_INNER_FORWARD_ALLOW_TPS = 250.0f;
 constexpr float WIDE_OUTER_FORWARD_LIMIT_TPS = 900.0f;
 constexpr float WIDE_INNER_BRAKE_GAIN = 0.035f;
 constexpr float WIDE_OUTER_LIMIT_GAIN = 0.035f;
-constexpr int16_t WIDE_INNER_REVERSE_MAX_PWM = 70;
+constexpr int16_t WIDE_INNER_REVERSE_MAX_PWM = 130;
 constexpr int16_t WIDE_OUTER_MIN_PWM = 65;
 uint32_t wideEncoderSampleMs = 0;
 int32_t wideEncoderPrevL = 0, wideEncoderPrevR = 0;
