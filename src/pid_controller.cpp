@@ -3,6 +3,7 @@
 #include "encoder.h"
 #include "sensor.h"
 #include "motor.h"
+#include "spp_debug.h"
 #include <Arduino.h>
 #include <math.h>
 
@@ -265,6 +266,23 @@ constexpr uint32_t WIDE_MIN_TURN_MS = 80, WIDE_CENTER_CONFIRM_MS = 30;
 constexpr uint32_t WIDE_TIMEOUT_MS = 700, WIDE_RECOVERY_HOLD_MS = 40;
 constexpr float WIDE_RECOVERY_START_PWM = 90.0f;
 constexpr float WIDE_RECOVERY_RAMP_PWM_PER_SEC = 250.0f;
+// Wheel feedback applies ONLY during WIDE_TURN / WIDE_RECENTER.
+// The first motor command uses the existing (-40,+100)/(+100,-40) unchanged.
+// Encoder speed is sampled every 20 ms; never wait for a speed threshold.
+constexpr uint32_t WIDE_ENCODER_SAMPLE_MS = 20;
+constexpr float WIDE_INNER_FORWARD_ALLOW_TPS = 250.0f;
+constexpr float WIDE_OUTER_FORWARD_LIMIT_TPS = 900.0f;
+constexpr float WIDE_INNER_BRAKE_GAIN = 0.035f;
+constexpr float WIDE_OUTER_LIMIT_GAIN = 0.035f;
+constexpr int16_t WIDE_INNER_REVERSE_MAX_PWM = 70;
+constexpr int16_t WIDE_OUTER_MIN_PWM = 65;
+uint32_t wideEncoderSampleMs = 0;
+int32_t wideEncoderPrevL = 0, wideEncoderPrevR = 0;
+float wideEncoderSpeedL = 0.0f, wideEncoderSpeedR = 0.0f;
+bool wideEncoderSpeedReady = false, wideEncoderAdjustmentLogged = false;
+int16_t wideInnerReversePwm = EDGE_ONLY_TURN_INNER_REVERSE_PWM;
+int16_t wideOuterPwm = EDGE_ONLY_TURN_OUTER_PWM;
+uint16_t wideEncoderAdjustSamples = 0;
 TurnState turnState = TURN_NONE;
 TurnState lastTurnDirection = TURN_RIGHT;
 uint32_t turnStartedMs = 0;
@@ -433,6 +451,13 @@ static void resetLineTracking() {
     wideCandidateMs = wideStartedMs = wideCenteredMs = 0;
     wideNarrowMs = wideRecoveryMs = 0;
     wideHadNarrow = wideLeftCenter = false;
+    wideEncoderSampleMs = 0;
+    wideEncoderPrevL = wideEncoderPrevR = 0;
+    wideEncoderSpeedL = wideEncoderSpeedR = 0;
+    wideEncoderSpeedReady = wideEncoderAdjustmentLogged = false;
+    wideInnerReversePwm = EDGE_ONLY_TURN_INNER_REVERSE_PWM;
+    wideOuterPwm = EDGE_ONLY_TURN_OUTER_PWM;
+    wideEncoderAdjustSamples = 0;
     lastTurnDirection = TURN_RIGHT;
     turnStartedMs = 0;
     searchStartedMs = 0;
@@ -503,6 +528,74 @@ static TurnState detectEdgeOnlyTurn(uint16_t physicalMask, uint16_t enabledMask)
     // Ambiguous simultaneous outer clusters: do not guess a direction.
     if (left == right) return TURN_NONE;
     return left ? TURN_LEFT : TURN_RIGHT;
+}
+static void beginWideEncoderFeedback(uint32_t nowMs) {
+    encoder_get_counts(&wideEncoderPrevL, &wideEncoderPrevR);
+    wideEncoderSampleMs = nowMs;
+    wideEncoderSpeedL = wideEncoderSpeedR = 0.0f;
+    wideEncoderSpeedReady = wideEncoderAdjustmentLogged = false;
+    wideInnerReversePwm = EDGE_ONLY_TURN_INNER_REVERSE_PWM;
+    wideOuterPwm = EDGE_ONLY_TURN_OUTER_PWM;
+    wideEncoderAdjustSamples = 0;
+}
+static void commandWideTurn(TurnState direction) {
+    const uint32_t nowMs = millis();
+    const uint32_t elapsedMs = (uint32_t)(nowMs - wideEncoderSampleMs);
+    if (elapsedMs >= WIDE_ENCODER_SAMPLE_MS && elapsedMs < 200U) {
+        int32_t left, right;
+        encoder_get_counts(&left, &right);
+        const float scale = 1000.0f / (float)elapsedMs;
+        const float rawL = (float)((int64_t)left - wideEncoderPrevL) * scale;
+        const float rawR = (float)((int64_t)right - wideEncoderPrevR) * scale;
+        wideEncoderPrevL = left;
+        wideEncoderPrevR = right;
+        wideEncoderSampleMs = nowMs;
+        // Filter noisy 20ms encoder deltas; no change to the initial PWM.
+        if (!wideEncoderSpeedReady) {
+            wideEncoderSpeedL = rawL;
+            wideEncoderSpeedR = rawR;
+            wideEncoderSpeedReady = true;
+        } else {
+            wideEncoderSpeedL = 0.4f * rawL + 0.6f * wideEncoderSpeedL;
+            wideEncoderSpeedR = 0.4f * rawR + 0.6f * wideEncoderSpeedR;
+        }
+        const float innerForward = fmaxf(0.0f, direction == TURN_LEFT
+                                         ? wideEncoderSpeedL : wideEncoderSpeedR);
+        const float outerForward = fmaxf(0.0f, direction == TURN_LEFT
+                                         ? wideEncoderSpeedR : wideEncoderSpeedL);
+        const float brakeExtra = fminf(
+            (float)(WIDE_INNER_REVERSE_MAX_PWM - EDGE_ONLY_TURN_INNER_REVERSE_PWM),
+            fmaxf(0.0f, innerForward - WIDE_INNER_FORWARD_ALLOW_TPS)
+                * WIDE_INNER_BRAKE_GAIN);
+        const float outerReduction = fminf(
+            (float)(EDGE_ONLY_TURN_OUTER_PWM - WIDE_OUTER_MIN_PWM),
+            fmaxf(0.0f, outerForward - WIDE_OUTER_FORWARD_LIMIT_TPS)
+                * WIDE_OUTER_LIMIT_GAIN);
+        wideInnerReversePwm =
+            (int16_t)(EDGE_ONLY_TURN_INNER_REVERSE_PWM + brakeExtra);
+        wideOuterPwm =
+            (int16_t)(EDGE_ONLY_TURN_OUTER_PWM - outerReduction);
+        if (wideInnerReversePwm > EDGE_ONLY_TURN_INNER_REVERSE_PWM ||
+            wideOuterPwm < EDGE_ONLY_TURN_OUTER_PWM) {
+            if (wideEncoderAdjustSamples < UINT16_MAX) ++wideEncoderAdjustSamples;
+            if (!wideEncoderAdjustmentLogged) {
+                sppLogPrintf(
+                    "WIDE_CTRL dir=%s encL_tps=%.0f encR_tps=%.0f pwmInner=%d pwmOuter=%d runEnc=%ld",
+                    direction == TURN_LEFT ? "LEFT" : "RIGHT",
+                    wideEncoderSpeedL, wideEncoderSpeedR,
+                    (int)wideInnerReversePwm, (int)wideOuterPwm,
+                    (long)runEncoderProgress());
+                wideEncoderAdjustmentLogged = true;
+            }
+        }
+    } else if (elapsedMs >= 200U) {
+        // A stalled control loop invalidates the old speed sample.
+        beginWideEncoderFeedback(nowMs);
+    }
+    if (direction == TURN_LEFT)
+        motor_set_speeds(-wideInnerReversePwm, wideOuterPwm);
+    else
+        motor_set_speeds(wideOuterPwm, -wideInnerReversePwm);
 }
 static TurnState detectWideCorner(uint16_t bits, uint8_t count) {
     if (count < 4 || count > 8 || !oneContiguousCluster(bits) ||
@@ -857,12 +950,26 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     if (wideCornerEnabled && widePhase != WIDE_IDLE) {
         if (!(mask & 0x03C0U)) wideLeftCenter = true;
         if (widePhase == WIDE_TURN && wideLeftCenter &&
-            (uint32_t)(now - wideStartedMs) >= WIDE_MIN_TURN_MS)
+            (uint32_t)(now - wideStartedMs) >= WIDE_MIN_TURN_MS) {
             widePhase = WIDE_RECENTER;
+            sppLogPrintf(
+                "WIDE_PHASE phase=RECENTER dir=%s runEnc=%ld elapsed=%lu encL_tps=%.0f encR_tps=%.0f",
+                wideDirection == TURN_LEFT ? "LEFT" : "RIGHT",
+                (long)runEncoderProgress(),
+                (unsigned long)(now - wideStartedMs),
+                wideEncoderSpeedL, wideEncoderSpeedR);
+        }
         if (widePhase == WIDE_RECENTER &&
             narrowNewLine(mask, bitCount16(mask), position)) {
             if (!wideCenteredMs) wideCenteredMs = now;
             else if ((uint32_t)(now - wideCenteredMs) >= WIDE_CENTER_CONFIRM_MS) {
+                sppLogPrintf(
+                    "WIDE_EXIT reason=LINE_CONFIRMED dir=%s runEnc=%ld elapsed=%lu adjust=%u pwmInner=%d pwmOuter=%d",
+                    wideDirection == TURN_LEFT ? "LEFT" : "RIGHT",
+                    (long)runEncoderProgress(),
+                    (unsigned long)(now - wideStartedMs),
+                    (unsigned)wideEncoderAdjustSamples,
+                    (int)wideInnerReversePwm, (int)wideOuterPwm);
                 widePhase = WIDE_IDLE;
                 wideDirection = wideCandidate = TURN_NONE;
                 wideCenteredMs = 0;
@@ -878,6 +985,13 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             }
         } else wideCenteredMs = 0;
         if ((uint32_t)(now - wideStartedMs) >= WIDE_TIMEOUT_MS) {
+            sppLogPrintf(
+                "WIDE_EXIT reason=TIMEOUT dir=%s runEnc=%ld elapsed=%lu adjust=%u encL_tps=%.0f encR_tps=%.0f",
+                wideDirection == TURN_LEFT ? "LEFT" : "RIGHT",
+                (long)runEncoderProgress(),
+                (unsigned long)(now - wideStartedMs),
+                (unsigned)wideEncoderAdjustSamples,
+                wideEncoderSpeedL, wideEncoderSpeedR);
             turnState = searchStateFor(wideDirection);
             searchStartedMs = now;
             centeredTurnFrames = 0;
@@ -905,6 +1019,13 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             widePhase = WIDE_TURN;
             wideDirection = wideSeen;
             wideStartedMs = now;
+            beginWideEncoderFeedback(now);
+            sppLogPrintf(
+                "WIDE_ENTER dir=%s runEnc=%ld mask=%04X pwmInner=%d pwmOuter=%d",
+                wideSeen == TURN_LEFT ? "LEFT" : "RIGHT",
+                (long)runEncoderProgress(), (unsigned)mask,
+                (int)EDGE_ONLY_TURN_INNER_REVERSE_PWM,
+                (int)EDGE_ONLY_TURN_OUTER_PWM);
             wideLeftCenter = false;
             wideCenteredMs = 0;
             wideCandidate = TURN_NONE;
@@ -1153,8 +1274,7 @@ void pid_line_follow_step(void) {
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (widePhase != WIDE_IDLE && wideDirection == TURN_LEFT) {
-            motor_set_speeds(-EDGE_ONLY_TURN_INNER_REVERSE_PWM,
-                             EDGE_ONLY_TURN_OUTER_PWM);
+            commandWideTurn(TURN_LEFT);
         } else {
         const bool edgeOnly = detectEdgeOnlyTurn(
             sensor_get_line_bits(), pidSensorMask) == TURN_LEFT;
@@ -1176,8 +1296,7 @@ void pid_line_follow_step(void) {
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
         if (widePhase != WIDE_IDLE && wideDirection == TURN_RIGHT) {
-            motor_set_speeds(EDGE_ONLY_TURN_OUTER_PWM,
-                             -EDGE_ONLY_TURN_INNER_REVERSE_PWM);
+            commandWideTurn(TURN_RIGHT);
         } else {
         const bool edgeOnly = detectEdgeOnlyTurn(
             sensor_get_line_bits(), pidSensorMask) == TURN_RIGHT;
