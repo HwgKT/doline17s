@@ -205,7 +205,7 @@ void printRow(uint8_t mode) {
     sppLogPrintf(
       "[ADC_BENCH_NODISCARD] scan_no_discard_us=%.0f/%.0f "
       "vs_kept_mae=%.2f vs_kept_max=%lu vs_kept_mismatch=%lu/%lu "
-      "near_threshold_mismatch=%lu/%lu (mode8_ref; stationary_only)\\n",
+      "near_threshold_mismatch=%lu/%lu (mode8_ref; stationary_only)\n",
       (double)s.scanSum / scans, (double)s.scanMax,
       (double)s.noDiscardVsKeptAbs / observations,
       (unsigned long)s.noDiscardVsKeptMax,
@@ -215,7 +215,7 @@ void printRow(uint8_t mode) {
     sppLogPrintf(
       "[ADC_BENCH_PAIR] method=%s samples=%u first_vs_second_mae=%.2f "
       "first_vs_second_max=%lu first_vs_second_mismatch=%lu/%lu "
-      "near_threshold_mismatch=%lu/%lu\\n",
+      "near_threshold_mismatch=%lu/%lu\n",
       name, (unsigned)samples,
       s.firstSecondPairs ? (double)s.firstSecondAbs / s.firstSecondPairs : 0.0,
       (unsigned long)s.firstSecondMax,
