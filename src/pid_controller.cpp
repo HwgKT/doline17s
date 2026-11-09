@@ -121,7 +121,7 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1000, 1700}  // MAP 3
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
-constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // MAP 01 late-BASE scheduler; the legacy first-straight HS profile remains OFF.
 constexpr int32_t MAP1_SLOW_START_ENC = 4800;
@@ -170,7 +170,7 @@ static int32_t runEncoderProgress() {
 // Values persist across AUTO runs but return to defaults after reboot.
 int32_t map1SensorStage2Ticks = 350;
 int32_t map1SensorStage3Ticks = 1500;
-uint16_t map1SensorStageMasks[3] = {0x01FFU, 0xFF80U, 0xFFFFU};
+uint16_t map1SensorStageMasks[3] = {0xFFFFU, 0xFFFFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 
@@ -324,60 +324,29 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 
 // Encoder averages can drift during SEARCH pivots; require line confirmation
 // for all accelerations instead of trusting encoder progress alone.
+// Map 1 is a single uninterrupted run. Thresholds are trial values inferred
+// from the endpoint clusters of 30 separate recorded runs (not wheel-PI gains).
+// The line PID continues steering both wheels and all safety/FSM states remain.
+constexpr int32_t MAP1_STAGE2_TICKS = 1850;
+constexpr int32_t MAP1_STAGE3_TICKS = 5900;
+constexpr float MAP1_STAGE1_PWM = 140.0f;
+constexpr float MAP1_STAGE2_PWM = 200.0f;
+constexpr float MAP1_STAGE3_PWM = 255.0f;
+
 static float map1CappedBase(int32_t progress) {
-    float base = (float)pidConfig.baseSpeed;
-    if (map1Route.active)
-        base = map1Route.baseCap(progress, base);
-    // Raise the Map 1 BASE target after 8000 ticks, including WAIT_LINE
-    // after late BOOST cancels. Keep speed governor, edge caps and SEARCH.
-    if (progress >= MAP1_LATE_BASE_START_ENC)
-        base = fmaxf(base, MAP1_LATE_BASE_PWM);
-    if (progress >= MAP1_SLOW_START_ENC && progress < MAP1_SLOW_END_ENC) {
-        const float cap = progress >= MAP1_SLOW_TIGHT_START_ENC &&
-                          progress < MAP1_SLOW_TIGHT_END_ENC
-                          ? MAP1_RISK_BASE_PWM : MAP1_CORNER_BASE_PWM;
-        base = fminf(base, cap);
-    }
-    return base;
+    float target = progress < MAP1_STAGE2_TICKS ? MAP1_STAGE1_PWM
+                 : progress < MAP1_STAGE3_TICKS ? MAP1_STAGE2_PWM
+                 : MAP1_STAGE3_PWM;
+    // Retain the existing opt-in route-lock safety cap.
+    if (map1Route.active) target = map1Route.baseCap(progress, target);
+    return target;
 }
 
 static float map1UpdateScheduledBase(int32_t progress, float absErr,
                                      uint8_t blackCount, uint16_t mask, float dt) {
-    const uint32_t now = millis();
-    float target = map1CappedBase(progress);
-    // A narrow line may be seen by a single central sensor. Requiring
-    // two simultaneous black eyes can block BOOST indefinitely on that track.
-    const bool adjacentLine = blackCount >= 2 && hasAdjacentLineSensors(mask);
-    const bool centeredSingleEye =
-        blackCount == 1 && absErr <= MAP1_BOOST_SINGLE_EYE_ERROR;
-    const bool validLine = adjacentLine || centeredSingleEye;
-    // The late boost remains eligible right up to full-black FINISH.
-    // There is no longer any fixed BASE reduction at encoder 16000.
-    if (progress >= MAP1_LATE_BOOST_START_ENC) {
-        if (map1BoostActive && (!lineLocked || !validLine ||
-                               absErr >= MAP1_BOOST_CANCEL_ERROR)) {
-            map1BoostActive = false;
-            map1CenteredSinceMs = 0;
-            map1LastUnsafeMs = now;
-        }
-        const bool centered = lineLocked && validLine &&
-                              absErr <= MAP1_BOOST_CENTER_ERROR;
-        if (!map1BoostActive) {
-            if (centered &&
-                (uint32_t)(now - map1LastUnsafeMs) >= MAP1_REACQUIRE_HOLD_MS) {
-                if (map1CenteredSinceMs == 0) map1CenteredSinceMs = now;
-                else if ((uint32_t)(now - map1CenteredSinceMs) >=
-                         MAP1_BOOST_CONFIRM_MS) map1BoostActive = true;
-            } else {
-                map1CenteredSinceMs = 0;
-            }
-        }
-        if (map1BoostActive) target = (float)highSpeedPeakPwm;
-    } else {
-        map1BoostActive = false;
-        map1CenteredSinceMs = 0;
-    }
-    // Gradual acceleration / faster deceleration of the forward BASE only.
+    (void)absErr; (void)blackCount; (void)mask;
+    const float target = map1CappedBase(progress);
+    // Smooth transitions; encoder progress is monotonic within each AUTO run.
     const float rate = target > map1ScheduledBase
                      ? MAP1_BASE_RISE_PWM_PER_SEC : MAP1_BASE_FALL_PWM_PER_SEC;
     const float limit = rate * fminf(dt, 0.02f);
@@ -1105,14 +1074,6 @@ void pid_line_follow_step(void) {
             if (rampSpeed < base) base = rampSpeed;
             --reacquireSpeedFrames;
         }
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 &&
-            map1MaxProgress >= MAP1_SLOW_START_ENC &&
-            map1MaxProgress < MAP1_SLOW_END_ENC &&
-            (uint32_t)(millis() - map1LastUnsafeMs) < MAP1_REACQUIRE_HOLD_MS) {
-            // Stay slow for 80 ms after reacquiring the 5k-6k corner cluster.
-            base = fminf(base, MAP1_RISK_BASE_PWM);
-            governedForwardSpeed = base;
-        }
         const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
         float correction = lastCorrection;
         if (correction > correctionLimit) correction = correctionLimit;
@@ -1133,17 +1094,6 @@ void pid_line_follow_step(void) {
         const float steeringSeverity = fmaxf(outerErrorRatio, edgeSeverity);
         float steeringPeakLimit = base +
             ((float)pidConfig.maxSpeed - base) * steeringSeverity;
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 &&
-            map1MaxProgress >= MAP1_SLOW_START_ENC &&
-            map1MaxProgress < MAP1_SLOW_END_ENC) {
-            // Prevent high P/D steering commands from bypassing the
-            // low BASE cap with a +/-255 PWM spike near the 5k-6k turns.
-            const float wheelLimit =
-                map1MaxProgress >= MAP1_SLOW_TIGHT_START_ENC &&
-                map1MaxProgress < MAP1_SLOW_TIGHT_END_ENC
-                ? MAP1_RISK_WHEEL_LIMIT : MAP1_CORNER_WHEEL_LIMIT;
-            steeringPeakLimit = fminf(steeringPeakLimit, wheelLimit);
-        }
         if (map1Route.active)
             steeringPeakLimit = fminf(steeringPeakLimit,
                                       map1Route.wheelCap(map1MaxProgress));
