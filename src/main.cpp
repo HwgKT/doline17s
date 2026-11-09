@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -115,6 +115,27 @@ void command(const String &raw) {
     lastTxUs=micros();
     btDropPendingTelemetry();
     reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
+  }
+  if(s=="ADC_MODE"){
+    reply(String("ADC_MODE: ")+sensor_get_adc_mode()+
+          " method="+sensor_adc_mode()+
+          " (0=DISCARD_FIRST,1=NO_DISCARD; RAM_ONLY)");
+    return;
+  }
+  if(s.startsWith("ADC_MODE:")){
+    const String value=s.substring(9);
+    if(value!="0" && value!="1"){
+      reply("ERR: ADC_MODE_USE_0_OR_1");return;
+    }
+    if(pid_is_auto_mode() || manualActive || sensor_is_calibrating() ||
+       adcBenchActive() || motor_get_left_speed()!=0 || motor_get_right_speed()!=0){
+      reply("ERR: ADC_MODE_REQUIRES_STOPPED");return;
+    }
+    if(!sensor_set_adc_mode((uint8_t)(value=="1"?1:0))){
+      reply("ERR: ADC_MODE_NOT_READY");return;
+    }
+    command("ADC_MODE");
+    return;
   }
   if(s=="DIAG"){
     const uint32_t t=micros(),dt=t-lastDiagUs;
@@ -329,6 +350,8 @@ void command(const String &raw) {
     manualActive=false;
     pid_set_auto_mode(true);
     reply("MODE: AUTO PID");
+    reply(String("ADC_RUN_MODE: ")+sensor_get_adc_mode()+
+          " method="+sensor_adc_mode());
     int32_t runL=0,runR=0;
     pid_get_run_encoder_origins(&runL,&runR); // exactly the PID's AUTO origin
     char runInfo[180];
