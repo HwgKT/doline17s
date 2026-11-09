@@ -215,12 +215,13 @@ static bool calculateMaskedPidPosition(uint16_t allowedMask, float *outPosition)
     *outPosition = weighted / (float)strength;
     return true;
 }
-constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
+// Reduce forward speed earlier on outer-eye detections to limit corner overshoot.
+constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.50f; // previously 0.40
 
 // A sharp turn is entered only when the centroid reaches the outer region.
 // If the line is lost, AUTO pivots in place to search for it.
-constexpr float SHARP_TURN_POSITION = 40.0f;          // was 43 — enter turn earlier
-constexpr float SHARP_TURN_POSITION_WITH_OUTER_EYES = 28.0f; // was 31
+constexpr float SHARP_TURN_POSITION = 35.0f; // previously 40: remember corner direction earlier
+constexpr float SHARP_TURN_POSITION_WITH_OUTER_EYES = 25.0f; // previously 28, only with >=2 outer eyes
 constexpr uint32_t SHARP_TURN_PROFILE_MS = 700;
 constexpr float TURN_CENTERED_POSITION = 22.0f;
 constexpr uint8_t TURN_CENTERED_FRAMES = 2;
@@ -233,8 +234,8 @@ constexpr float TURN_CURVE_END_POSITION = 75.0f;
 constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
 constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
-constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
-constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
+constexpr float SPEED_GOVERNOR_FULL_ERROR = 25.0f; // previously 30: full slowdown sooner
+constexpr float SPEED_GOVERNOR_REDUCTION = 0.50f; // previously 0.45: lower forward speed at large error
 constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
