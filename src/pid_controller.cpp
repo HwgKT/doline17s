@@ -280,6 +280,8 @@ uint32_t wideEncoderSampleMs = 0;
 int32_t wideEncoderPrevL = 0, wideEncoderPrevR = 0;
 float wideEncoderSpeedL = 0.0f, wideEncoderSpeedR = 0.0f;
 bool wideEncoderSpeedReady = false, wideEncoderAdjustmentLogged = false;
+bool wideEnterLogPending = false;
+uint16_t wideEnterMask = 0;
 int16_t wideInnerReversePwm = EDGE_ONLY_TURN_INNER_REVERSE_PWM;
 int16_t wideOuterPwm = EDGE_ONLY_TURN_OUTER_PWM;
 uint16_t wideEncoderAdjustSamples = 0;
@@ -455,6 +457,8 @@ static void resetLineTracking() {
     wideEncoderPrevL = wideEncoderPrevR = 0;
     wideEncoderSpeedL = wideEncoderSpeedR = 0;
     wideEncoderSpeedReady = wideEncoderAdjustmentLogged = false;
+    wideEnterLogPending = false;
+    wideEnterMask = 0;
     wideInnerReversePwm = EDGE_ONLY_TURN_INNER_REVERSE_PWM;
     wideOuterPwm = EDGE_ONLY_TURN_OUTER_PWM;
     wideEncoderAdjustSamples = 0;
@@ -592,10 +596,20 @@ static void commandWideTurn(TurnState direction) {
         // A stalled control loop invalidates the old speed sample.
         beginWideEncoderFeedback(nowMs);
     }
+    // Apply motor PWM before emitting diagnostics: no SPP delay on first response.
     if (direction == TURN_LEFT)
         motor_set_speeds(-wideInnerReversePwm, wideOuterPwm);
     else
         motor_set_speeds(wideOuterPwm, -wideInnerReversePwm);
+    if (wideEnterLogPending) {
+        wideEnterLogPending = false;
+        sppLogPrintf(
+            "WIDE_ENTER dir=%s runEnc=%ld mask=%04X pwmInner=%d pwmOuter=%d",
+            direction == TURN_LEFT ? "LEFT" : "RIGHT",
+            (long)runEncoderProgress(), (unsigned)wideEnterMask,
+            (int)EDGE_ONLY_TURN_INNER_REVERSE_PWM,
+            (int)EDGE_ONLY_TURN_OUTER_PWM);
+    }
 }
 static TurnState detectWideCorner(uint16_t bits, uint8_t count) {
     if (count < 4 || count > 8 || !oneContiguousCluster(bits) ||
@@ -1020,12 +1034,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             wideDirection = wideSeen;
             wideStartedMs = now;
             beginWideEncoderFeedback(now);
-            sppLogPrintf(
-                "WIDE_ENTER dir=%s runEnc=%ld mask=%04X pwmInner=%d pwmOuter=%d",
-                wideSeen == TURN_LEFT ? "LEFT" : "RIGHT",
-                (long)runEncoderProgress(), (unsigned)mask,
-                (int)EDGE_ONLY_TURN_INNER_REVERSE_PWM,
-                (int)EDGE_ONLY_TURN_OUTER_PWM);
+            wideEnterMask = mask;
+            wideEnterLogPending = true;
             wideLeftCenter = false;
             wideCenteredMs = 0;
             wideCandidate = TURN_NONE;
