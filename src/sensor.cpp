@@ -34,8 +34,10 @@ uint32_t frames = 0;
 int lastButtonRead = LOW, buttonState = LOW;
 unsigned long lastButtonChange = 0;
 
-// Fastest of nine hardware-tested modes: IDF_GPIO/1. Keep the original
-// 6-us MUX settling, discarded ADC read and 3-us post-sample wait.
+// Baseline: IDF ADC1 + direct GPIO MUX, 6-us settle, one discarded
+// conversion, one retained conversion, 3-us post-sample wait.
+// Experimental mode only skips the discarded conversion; all other
+// timing, calibration, and safety checks remain unchanged.
 constexpr uint32_t kMuxMask = (1UL << PIN_MUX_S0) |
                               (1UL << PIN_MUX_S1) |
                               (1UL << PIN_MUX_S2) |
@@ -46,6 +48,7 @@ static_assert(PIN_MUX_S0 < 32 && PIN_MUX_S1 < 32 &&
               "Direct MUX GPIO access requires output pins below 32");
 bool fastAdcReady = false;
 uint32_t fastAdcErrors = 0;
+uint8_t adcMode = 0; // RAM-only; default to baseline after reboot.
 
 inline void selectMuxFast(uint8_t ch) {
   const uint32_t setMask = ((ch & 1U) ? (1UL << PIN_MUX_S0) : 0) |
@@ -172,6 +175,7 @@ void sensor_init(void) {
   analogReadResolution(12);
   // Use the same ADC1 settings as the benchmark (12-bit, attenuation 11 dB).
   fastAdcErrors = 0;
+  adcMode = 0; // Always boot into the validated baseline mode.
   const esp_err_t widthResult = adc1_config_width(ADC_WIDTH_BIT_12);
   const esp_err_t attenResult = widthResult == ESP_OK ?
       adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11) : ESP_FAIL;
@@ -193,14 +197,16 @@ uint16_t sensor_read_mux(uint8_t ch) {
   if (!fastAdcReady || ch >= N_SENSORS) return 0;
   selectMuxFast(ch);
   delayMicroseconds(6);
-  const int discard = adc1_get_raw(ADC1_CHANNEL_0);
+  int discard = -1;
+  if (adcMode == 0) discard = adc1_get_raw(ADC1_CHANNEL_0);
   const int raw = adc1_get_raw(ADC1_CHANNEL_0);
   delayMicroseconds(3);
-  if (discard < 0 || discard > 4095 || raw < 0 || raw > 4095) {
+  if ((adcMode == 0 && (discard < 0 || discard > 4095)) ||
+      raw < 0 || raw > 4095) {
     ++fastAdcErrors;
     fastAdcReady = false; // Latch fault: never drive using invalid ADC values.
-    sppLogPrintf("[ADC] READ_FAILED ch=%u discard=%d sample=%d; MOTION INHIBITED\n",
-                  (unsigned)ch, discard, raw);
+    sppLogPrintf("[ADC] READ_FAILED ch=%u adc_mode=%u discard=%d sample=%d; MOTION INHIBITED\n",
+                  (unsigned)ch, (unsigned)adcMode, discard, raw);
     return 0;
   }
   return (uint16_t)raw;
@@ -219,7 +225,15 @@ void sensor_read_all(void) {
   }
 }
 bool sensor_adc_ready(void) { return fastAdcReady; }
-const char *sensor_adc_mode(void) { return "IDF_GPIO_1"; }
+const char *sensor_adc_mode(void) {
+  return adcMode == 0 ? "IDF_GPIO_1" : "IDF_GPIO_NO_DISCARD";
+}
+uint8_t sensor_get_adc_mode(void) { return adcMode; }
+bool sensor_set_adc_mode(uint8_t mode) {
+  if (mode > 1 || !fastAdcReady || isCalibrating) return false;
+  adcMode = mode;
+  return true;
+}
 uint32_t sensor_adc_error_count(void) { return fastAdcErrors; }
 bool sensor_capture_white(void) {
   if (!fastAdcReady || isCalibrating) return false;
