@@ -839,9 +839,22 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
+    // Map 1's first 2000 ticks are a protected route section. Do not
+    // detect, enter, or retain history for the experimental WIDE_CORNER FSM.
+    // Existing sensor masks, ordinary TURN/SEARCH and PID remain untouched.
+    const bool wideCornerEnabled =
+        selectedMap != 1 || map1MaxProgress >= 2000;
+    if (!wideCornerEnabled) {
+        widePhase = WIDE_IDLE;
+        wideDirection = wideCandidate = TURN_NONE;
+        wideCandidateMs = wideStartedMs = wideCenteredMs = 0;
+        wideNarrowMs = wideRecoveryMs = 0;
+        wideHadNarrow = wideLeftCenter = false;
+    }
+
     // Keep a wide 90-degree corner in CASE 2/3 until the old bar was
     // left, a narrow new line is centered for 30ms, or SEARCH timeout.
-    if (widePhase != WIDE_IDLE) {
+    if (wideCornerEnabled && widePhase != WIDE_IDLE) {
         if (!(mask & 0x03C0U)) wideLeftCenter = true;
         if (widePhase == WIDE_TURN && wideLeftCenter &&
             (uint32_t)(now - wideStartedMs) >= WIDE_MIN_TURN_MS)
@@ -878,8 +891,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         return wideDirection == TURN_LEFT ?
             LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
     }
-    const bool narrow = narrowNewLine(mask, bitCount16(mask), position);
-    const TurnState wideSeen = detectWideCorner(mask, bitCount16(mask));
+    const bool narrow = wideCornerEnabled &&
+        narrowNewLine(mask, bitCount16(mask), position);
+    const TurnState wideSeen = wideCornerEnabled
+        ? detectWideCorner(mask, bitCount16(mask)) : TURN_NONE;
     if (finishDetectionArmed && lineLocked && !isSearchTurn() &&
         wideHadNarrow && (uint32_t)(now-wideNarrowMs) <= WIDE_HISTORY_MS &&
         wideSeen != TURN_NONE) {
