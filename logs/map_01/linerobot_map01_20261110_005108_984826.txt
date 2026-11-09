@@ -1,0 +1,22 @@
+[2026-11-10T00:51:08.990+07:00] CSV BẮT ĐẦU: D:\EC\doline17s\logs\map_01\linerobot_map01_20261110_005108_984826.csv
+[2026-11-10T00:51:08.991+07:00] TX > AUTO:1
+[2026-11-10T00:51:09.045+07:00] RX < MODE: AUTO PID
+[2026-11-10T00:51:09.046+07:00] RX < RUN_ORIGIN map=1 encL0=3548 encR0=3123 base=140 peak=220 kp=1.60 ki=0.00 kd=0.80 t_ms=295350
+[2026-11-10T00:51:09.047+07:00] RX < HS_STAGE OFF map=1 runEnc=0 base=140 peak=220 start=10000 t_ms=295351
+[2026-11-10T00:51:09.140+07:00] RX < FINISH_ARMED: LINE_CONFIRMED
+[2026-11-10T00:51:10.617+07:00] TX > DIAG
+[2026-11-10T00:51:10.681+07:00] RX < DIAG: bt=1 auto=1 target=0 loop=631.7Hz pid=510.4Hz queued=0.0Hz sent=0.0Hz drop=0 failed=0 missed=0 pending=0 encL=4670 encR=4255 case=1 line=1 lost=0 reacq=18 map=1 runEnc=1127 hs=0 peak=220 route=0 rf=0 clu=0030
+[2026-11-10T00:51:11.207+07:00] TX > STREAM:0
+DIAG
+PERF
+[2026-11-10T00:51:11.292+07:00] RX < STREAM Hz=0 FRAME_BYTES=72
+[2026-11-10T00:51:11.324+07:00] RX < DIAG: bt=1 auto=1 target=0 loop=627.2Hz pid=627.2Hz queued=0.0Hz sent=0.0Hz drop=0 failed=0 missed=0 pending=0 encL=4987 encR=4604 case=1 line=1 lost=0 reacq=19 map=1 runEnc=1460 hs=0 peak=220 route=0 rf=0 clu=0700
+[2026-11-10T00:51:11.324+07:00] RX < [PERF] adc_us=1510/1645 pid_us=58/285 comm_us=3/2485 tx_us=0/0 busy_us=1528/4204 other_us=6 n=9263
+[2026-11-10T00:51:11.324+07:00] RX < [PERF_LOOP] period_us=1489/1536/4219 jitter_pp_us=2730 peak_observed_hz=671.6 ceiling_busy_hz=654.3 ceiling_adc_hz=662.1 pid_samples=1407 tx_samples=0
+[2026-11-10T00:51:12.644+07:00] TX > DIAG
+[2026-11-10T00:51:12.676+07:00] RX < DIAG: bt=1 auto=1 target=0 loop=629.0Hz pid=629.0Hz queued=0.0Hz sent=0.0Hz drop=0 failed=0 missed=0 pending=0 encL=6350 encR=5371 case=10 line=1 lost=0 reacq=26 map=1 runEnc=2525 hs=0 peak=220 route=0 rf=0 clu=0000
+[2026-11-10T00:51:14.675+07:00] TX > DIAG
+[2026-11-10T00:51:14.739+07:00] RX < DIAG: bt=1 auto=1 target=0 loop=635.5Hz pid=635.5Hz queued=0.0Hz sent=0.0Hz drop=0 failed=0 missed=0 pending=0 encL=6923 encR=6260 case=2 line=1 lost=0 reacq=26 map=1 runEnc=3256 hs=0 peak=220 route=0 rf=0 clu=0000
+[2026-11-10T00:51:15.166+07:00] TX > STOP
+[2026-11-10T00:51:15.213+07:00] RX < MOTOR: STOP
+[2026-11-10T00:51:15.214+07:00] CSV đang chốt (ESP32 ĐÃ XÁC NHẬN DỪNG: MOTOR: STOP): D:\EC\doline17s\logs\map_01\linerobot_map01_20261110_005108_984826.csv
