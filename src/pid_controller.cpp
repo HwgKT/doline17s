@@ -233,6 +233,13 @@ constexpr float TURN_CURVE_START_POSITION = 28.0f;
 constexpr float TURN_CURVE_END_POSITION = 75.0f;
 constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
 constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
+// Edge-only turn: S0..S3 OR S12..S15 detects black, S6..S9 sees no black.
+// Explicit counter-rotation helps reduce translational momentum versus the
+// normal sharp-turn curve (both wheels forward). Tune conservatively first.
+constexpr int16_t EDGE_ONLY_TURN_OUTER_PWM = 100;
+constexpr int16_t EDGE_ONLY_TURN_INNER_REVERSE_PWM = 40;
+constexpr uint16_t EDGE_ONLY_LEFT_MASK = 0x000FU;
+constexpr uint16_t EDGE_ONLY_RIGHT_MASK = 0xF000U;
 
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 25.0f; // previously 30: full slowdown sooner
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.50f; // previously 0.45: lower forward speed at large error
@@ -458,6 +465,17 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
 }
 static bool isSearchTurn() {
     return turnState == SEARCH_LEFT || turnState == SEARCH_RIGHT;
+}
+// Use physical center evidence, and respect intentionally disabled PID eyes
+// for the trigger (particularly the initial encoder-selected sensor windows).
+static TurnState detectEdgeOnlyTurn(uint16_t physicalMask, uint16_t enabledMask) {
+    if ((physicalMask & TURN_CENTER_SENSOR_MASK) != 0U) return TURN_NONE;
+    const uint16_t visible = physicalMask & enabledMask;
+    const bool left = (visible & EDGE_ONLY_LEFT_MASK) != 0U;
+    const bool right = (visible & EDGE_ONLY_RIGHT_MASK) != 0U;
+    // Ambiguous simultaneous outer clusters: do not guess a direction.
+    if (left == right) return TURN_NONE;
+    return left ? TURN_LEFT : TURN_RIGHT;
 }
 // Keep the default SEARCH PWM for all other turns and maps.
 // Use relative run encoder progress so the window is consistent across AUTO runs.
@@ -785,7 +803,25 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
-    // Keep PID steering while a corner remains visible; pivot only after line loss.
+    // Physical 16-eye FSM remains active; intentionally disabled PID eyes
+    // cannot trigger the new edge-only response.
+    const TurnState edgeOnlyTurn = detectEdgeOnlyTurn(mask, map1PidSensorMask());
+    // New edge-only condition takes priority over normal sharp-turn thresholds.
+    // Do not interrupt an ongoing SEARCH pivot with a single noisy outer eye.
+    if (edgeOnlyTurn != TURN_NONE && !isSearchTurn()) {
+        if (turnState != edgeOnlyTurn) {
+            turnState = edgeOnlyTurn;
+            lastTurnDirection = edgeOnlyTurn;
+            turnStartedMs = now;
+            centeredTurnFrames = 0;
+            turnMissing = false;
+            clearPidState();
+        }
+        return edgeOnlyTurn == TURN_LEFT ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+    }
+
+    // Continue ordinary PID while a corner is visible, unless edge-only
+    // detection above requests immediate sharp-turn torque.
     if (turnState != TURN_NONE) {
         if (isSearchTurn()) {
             const bool reliableReacquisition =
@@ -995,7 +1031,12 @@ void pid_line_follow_step(void) {
 
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
-        if (turnState == SEARCH_LEFT) {
+        const bool edgeOnly = detectEdgeOnlyTurn(
+            sensor_get_line_bits(), pidSensorMask) == TURN_LEFT;
+        if (edgeOnly && turnState != SEARCH_LEFT) {
+            motor_set_speeds(-EDGE_ONLY_TURN_INNER_REVERSE_PWM,
+                             EDGE_ONLY_TURN_OUTER_PWM);
+        } else if (turnState == SEARCH_LEFT) {
             const int16_t searchPwm = searchPwmForCurrentTurn();
             motor_set_speeds(-searchPwm, searchPwm);
         } else {
@@ -1008,7 +1049,12 @@ void pid_line_follow_step(void) {
         }
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
-        if (turnState == SEARCH_RIGHT) {
+        const bool edgeOnly = detectEdgeOnlyTurn(
+            sensor_get_line_bits(), pidSensorMask) == TURN_RIGHT;
+        if (edgeOnly && turnState != SEARCH_RIGHT) {
+            motor_set_speeds(EDGE_ONLY_TURN_OUTER_PWM,
+                             -EDGE_ONLY_TURN_INNER_REVERSE_PWM);
+        } else if (turnState == SEARCH_RIGHT) {
             motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
             const int16_t outer = map1Route.active
