@@ -254,6 +254,17 @@ enum TurnState : uint8_t {
     SEARCH_LEFT,
     SEARCH_RIGHT
 };
+enum WidePhase : uint8_t { WIDE_IDLE, WIDE_TURN, WIDE_RECENTER };
+WidePhase widePhase = WIDE_IDLE;
+TurnState wideDirection = TURN_NONE, wideCandidate = TURN_NONE;
+uint32_t wideCandidateMs = 0, wideStartedMs = 0, wideCenteredMs = 0;
+uint32_t wideNarrowMs = 0, wideRecoveryMs = 0;
+bool wideHadNarrow = false, wideLeftCenter = false;
+constexpr uint32_t WIDE_HISTORY_MS = 220, WIDE_CONFIRM_MS = 12;
+constexpr uint32_t WIDE_MIN_TURN_MS = 80, WIDE_CENTER_CONFIRM_MS = 30;
+constexpr uint32_t WIDE_TIMEOUT_MS = 700, WIDE_RECOVERY_HOLD_MS = 40;
+constexpr float WIDE_RECOVERY_START_PWM = 90.0f;
+constexpr float WIDE_RECOVERY_RAMP_PWM_PER_SEC = 250.0f;
 TurnState turnState = TURN_NONE;
 TurnState lastTurnDirection = TURN_RIGHT;
 uint32_t turnStartedMs = 0;
@@ -306,6 +317,17 @@ static float outerSensorSeverity(uint16_t mask) {
         }
     }
     return severity;
+}
+static bool oneContiguousCluster(uint16_t bits) {
+    if (!bits) return false;
+    while (!(bits & 1U)) bits >>= 1;
+    while (bits & 1U) bits >>= 1;
+    return bits == 0U;
+}
+static bool narrowNewLine(uint16_t bits, uint8_t count, float pos) {
+    return count >= 1 && count <= 3 && oneContiguousCluster(bits) &&
+        fabsf(pos) <= 15.0f && (bits & 0x03C0U) != 0U &&
+        (bits & 0xF00FU) == 0U;
 }
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
@@ -406,6 +428,11 @@ static void resetLineTracking() {
     acquireSinceMs = missingSinceMs = 0;
     lastKnownPosition = 0;
     turnState = TURN_NONE;
+    widePhase = WIDE_IDLE;
+    wideDirection = wideCandidate = TURN_NONE;
+    wideCandidateMs = wideStartedMs = wideCenteredMs = 0;
+    wideNarrowMs = wideRecoveryMs = 0;
+    wideHadNarrow = wideLeftCenter = false;
     lastTurnDirection = TURN_RIGHT;
     turnStartedMs = 0;
     searchStartedMs = 0;
@@ -474,6 +501,15 @@ static TurnState detectEdgeOnlyTurn(uint16_t physicalMask, uint16_t enabledMask)
     const bool left = (visible & EDGE_ONLY_LEFT_MASK) != 0U;
     const bool right = (visible & EDGE_ONLY_RIGHT_MASK) != 0U;
     // Ambiguous simultaneous outer clusters: do not guess a direction.
+    if (left == right) return TURN_NONE;
+    return left ? TURN_LEFT : TURN_RIGHT;
+}
+static TurnState detectWideCorner(uint16_t bits, uint8_t count) {
+    if (count < 4 || count > 8 || !oneContiguousCluster(bits) ||
+        (bits & 0x03C0U) == 0U) return TURN_NONE;
+    // S4..S8 triggers LEFT; S7..S11 triggers RIGHT.
+    const bool left = (bits & 0x0010U) && !(bits & 0xFC00U);
+    const bool right = (bits & 0x0800U) && !(bits & 0x003FU);
     if (left == right) return TURN_NONE;
     return left ? TURN_LEFT : TURN_RIGHT;
 }
@@ -803,6 +839,76 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
+    // Keep a wide 90-degree corner in CASE 2/3 until the old bar was
+    // left, a narrow new line is centered for 30ms, or SEARCH timeout.
+    if (widePhase != WIDE_IDLE) {
+        if (!(mask & 0x03C0U)) wideLeftCenter = true;
+        if (widePhase == WIDE_TURN && wideLeftCenter &&
+            (uint32_t)(now - wideStartedMs) >= WIDE_MIN_TURN_MS)
+            widePhase = WIDE_RECENTER;
+        if (widePhase == WIDE_RECENTER &&
+            narrowNewLine(mask, bitCount16(mask), position)) {
+            if (!wideCenteredMs) wideCenteredMs = now;
+            else if ((uint32_t)(now - wideCenteredMs) >= WIDE_CENTER_CONFIRM_MS) {
+                widePhase = WIDE_IDLE;
+                wideDirection = wideCandidate = TURN_NONE;
+                wideCenteredMs = 0;
+                wideHadNarrow = false;
+                wideRecoveryMs = now;
+                turnState = TURN_NONE;
+                missing = false;
+                lineLocked = true;
+                clearPidState();
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+                return LINE_CASE_NORMAL_PID;
+            }
+        } else wideCenteredMs = 0;
+        if ((uint32_t)(now - wideStartedMs) >= WIDE_TIMEOUT_MS) {
+            turnState = searchStateFor(wideDirection);
+            searchStartedMs = now;
+            centeredTurnFrames = 0;
+            turnMissing = false;
+            widePhase = WIDE_IDLE;
+            wideDirection = wideCandidate = TURN_NONE;
+            wideHadNarrow = false;
+            clearPidState();
+            return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+        }
+        return wideDirection == TURN_LEFT ?
+            LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+    }
+    const bool narrow = narrowNewLine(mask, bitCount16(mask), position);
+    const TurnState wideSeen = detectWideCorner(mask, bitCount16(mask));
+    if (finishDetectionArmed && lineLocked && !isSearchTurn() &&
+        wideHadNarrow && (uint32_t)(now-wideNarrowMs) <= WIDE_HISTORY_MS &&
+        wideSeen != TURN_NONE) {
+        if (wideCandidate != wideSeen) {
+            wideCandidate = wideSeen;
+            wideCandidateMs = now;
+        } else if ((uint32_t)(now-wideCandidateMs) >= WIDE_CONFIRM_MS) {
+            widePhase = WIDE_TURN;
+            wideDirection = wideSeen;
+            wideStartedMs = now;
+            wideLeftCenter = false;
+            wideCenteredMs = 0;
+            wideCandidate = TURN_NONE;
+            wideHadNarrow = false;
+            turnState = wideSeen;
+            lastTurnDirection = wideSeen;
+            turnStartedMs = now;
+            centeredTurnFrames = 0;
+            turnMissing = false;
+            clearPidState();
+            return wideSeen == TURN_LEFT ?
+                LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+        }
+    } else wideCandidate = TURN_NONE;
+    if (narrow && !isSearchTurn()) {
+        wideHadNarrow = true;
+        wideNarrowMs = now;
+    }
+
     // Physical 16-eye FSM remains active; intentionally disabled PID eyes
     // cannot trigger the new edge-only response.
     const TurnState edgeOnlyTurn = detectEdgeOnlyTurn(mask, map1PidSensorMask());
@@ -1031,6 +1137,10 @@ void pid_line_follow_step(void) {
 
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
+        if (widePhase != WIDE_IDLE && wideDirection == TURN_LEFT) {
+            motor_set_speeds(-EDGE_ONLY_TURN_INNER_REVERSE_PWM,
+                             EDGE_ONLY_TURN_OUTER_PWM);
+        } else {
         const bool edgeOnly = detectEdgeOnlyTurn(
             sensor_get_line_bits(), pidSensorMask) == TURN_LEFT;
         if (edgeOnly && turnState != SEARCH_LEFT) {
@@ -1047,8 +1157,13 @@ void pid_line_follow_step(void) {
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(inner, outer);
         }
+        }
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
+        if (widePhase != WIDE_IDLE && wideDirection == TURN_RIGHT) {
+            motor_set_speeds(EDGE_ONLY_TURN_OUTER_PWM,
+                             -EDGE_ONLY_TURN_INNER_REVERSE_PWM);
+        } else {
         const bool edgeOnly = detectEdgeOnlyTurn(
             sensor_get_line_bits(), pidSensorMask) == TURN_RIGHT;
         if (edgeOnly && turnState != SEARCH_RIGHT) {
@@ -1063,6 +1178,7 @@ void pid_line_follow_step(void) {
                 : sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
+        }
         }
     } else if (currentCase == LINE_CASE_NORMAL_PID && pidMeasurementGood) {
         const float err = pidPosition;
@@ -1140,6 +1256,17 @@ void pid_line_follow_step(void) {
                     (1.0f - OUTER_SENSOR_SPEED_REDUCTION * edgeSeverity));
             if (edgeSpeed < base) base = edgeSpeed;
             governedForwardSpeed = base;
+        }
+        // 40ms post-corner hold then 250 PWM/s recovery ramp.
+        if (wideRecoveryMs) {
+            const uint32_t elapsed = (uint32_t)(millis() - wideRecoveryMs);
+            const uint32_t rampMs = elapsed > WIDE_RECOVERY_HOLD_MS
+                ? elapsed - WIDE_RECOVERY_HOLD_MS : 0U;
+            const float cap = WIDE_RECOVERY_START_PWM +
+                WIDE_RECOVERY_RAMP_PWM_PER_SEC * (float)rampMs * 0.001f;
+            if (base > cap) base = cap;
+            governedForwardSpeed = base;
+            if (cap >= (float)pidConfig.maxSpeed) wideRecoveryMs = 0;
         }
         if (reacquireSpeedFrames > 0) {
             const float rampProgress =
