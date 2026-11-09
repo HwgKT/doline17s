@@ -32,6 +32,10 @@ uint16_t sensor_read_mux(uint8_t channel);
 void sensor_read_all(void);
 bool sensor_adc_ready(void);
 const char *sensor_adc_mode(void);
+// 0 = production baseline (discard first ADC sample), 1 = experimental no-discard.
+// Mode is RAM-only and defaults to 0 after each reboot.
+uint8_t sensor_get_adc_mode(void);
+bool sensor_set_adc_mode(uint8_t mode);
 uint32_t sensor_adc_error_count(void);
 bool sensor_capture_white(void);
 bool sensor_capture_black(void);
