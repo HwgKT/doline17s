@@ -471,7 +471,7 @@ class App(tk.Tk):
         # MAP 1: HS_PEAK sets target BASE from 11k; others keep legacy HS.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK (10k+)", bg=PANEL,
+        self.label(hs_row, "HS_PEAK (11k+)", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.label(hs_row, textvariable=self.hs_peak_value_text,
                    bg=PANEL, fg=CYAN, font=("Consolas", 9),
