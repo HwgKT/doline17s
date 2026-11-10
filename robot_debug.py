@@ -906,13 +906,14 @@ class App(tk.Tk):
             except ValueError as exc:
                 feedback.set(f"Cấu hình không hợp lệ: {exc}")
                 return
-            # Send in ascending order. Each stage is validated by firmware.
+            # Single atomic command avoids intermediate conflicting tick thresholds.
             self.pid_gain_profiles_received.clear()
-            for stage, (start, kp, ki, kd) in enumerate(profiles, start=1):
-                command = f"PID_PROFILE:{stage},{start},{kp:.3f},{ki:.3f},{kd:.3f}"
-                if not self.send_command(command):
-                    feedback.set(f"Không thể gửi profile {stage}")
-                    return
+            values = ";".join(
+                f"{start},{kp:.3f},{ki:.3f},{kd:.3f}"
+                for start, kp, ki, kd in profiles)
+            if not self.send_command("PID_PROFILES:" + values):
+                feedback.set("Không thể gửi cấu hình 4 profile")
+                return
             feedback.set("Đã gửi 4 profile; chờ phản hồi PID_PROFILE từ ESP32.")
             self.pid_gain_profile_status.set("PID chặng: chờ xác nhận ESP32")
 
