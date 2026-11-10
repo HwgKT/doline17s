@@ -323,25 +323,21 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
     return governedForwardSpeed;
 }
 
-// Map 1 six-segment open-loop PWM BASE schedule, indexed by monotonic
-// progress since AUTO start. X1..X5 are trial landmarks from map geometry,
-// a complete ~15766-tick run and partial Map 1 runs; verify on the track.
-// No wheel speed PID is introduced. Existing line PID / loss / finish remain.
-constexpr int32_t MAP1_X1_TICKS = 3800;
-constexpr int32_t MAP1_X2_TICKS = 7400;
-constexpr int32_t MAP1_X3_TICKS = 8350;
-constexpr int32_t MAP1_X4_TICKS = 10500;
-constexpr int32_t MAP1_X5_TICKS = 11300;
-constexpr float MAP1_SEGMENT_PWM[6] = {140.0f, 170.0f, 140.0f,
-                                      255.0f, 140.0f, 255.0f};
+// Map 1 eight-segment open-loop PWM BASE schedule, using monotonic
+// encoder progress relative to AUTO start. X1..X7 are estimated landmarks
+// from track geometry and recorded runs (including a ~15766-tick finish).
+// Especially X6/X7 require on-track validation before competition.
+constexpr int32_t MAP1_X_TICKS[7] = {
+    3800, 7400, 8350, 10500, 11300, 12800, 15000
+};
+constexpr float MAP1_SEGMENT_PWM[8] = {
+    140.0f, 170.0f, 160.0f, 255.0f,
+    200.0f, 255.0f, 230.0f, 255.0f
+};
 
 static float map1CappedBase(int32_t progress) {
-    const int32_t thresholds[5] = {
-        MAP1_X1_TICKS, MAP1_X2_TICKS, MAP1_X3_TICKS,
-        MAP1_X4_TICKS, MAP1_X5_TICKS
-    };
     uint8_t segment = 0;
-    while (segment < 5 && progress >= thresholds[segment]) ++segment;
+    while (segment < 7 && progress >= MAP1_X_TICKS[segment]) ++segment;
     float target = MAP1_SEGMENT_PWM[segment];
     // Retain the existing opt-in route-lock safety cap.
     if (map1Route.active) target = map1Route.baseCap(progress, target);
