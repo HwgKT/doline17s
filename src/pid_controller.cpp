@@ -168,9 +168,10 @@ static int32_t runEncoderProgress() {
 // Encoder origins are captured at AUTO start (pid_set_auto_mode).
 // User-configurable through SENSOR_PROFILE SPP commands while stopped.
 // Values persist across AUTO runs but return to defaults after reboot.
-int32_t map1SensorStage2Ticks = 350;
-int32_t map1SensorStage3Ticks = 1500;
-uint16_t map1SensorStageMasks[3] = {0xFFFFU, 0xFFFFU, 0xFFFFU};
+int32_t map1SensorStage2Ticks = 650;
+int32_t map1SensorStage3Ticks = 1350;
+// Stage 1: S6-S15; stage 2: S0-S9; stage 3: all 16 sensors.
+uint16_t map1SensorStageMasks[3] = {0xFFC0U, 0x03FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 
