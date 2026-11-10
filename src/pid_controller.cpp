@@ -475,7 +475,6 @@ void pid_set_base_speed(int16_t speed) {
     if (!autoMode) map1ScheduledBase = (float)pidConfig.baseSpeed;
 }
 void pid_set_auto_mode(bool enabled) {
-    motor_set_wheel_speed_mode(false); // Manual, STOP and transitions always bypass wheel PI.
     autoMode = enabled;
     currentCase = LINE_CASE_STOPPED;
     resetLineTracking();
@@ -956,10 +955,6 @@ void pid_line_follow_step(void) {
                                      map1CappedBase(map1MaxProgress));
         }
     }
-    // Wheel PI is active only while measuring and following a valid line.
-    // SEARCH pivots, sharp turns, dashes and START/FINISH keep direct PWM.
-    motor_set_wheel_speed_mode(currentCase == LINE_CASE_NORMAL_PID &&
-                               pidMeasurementGood);
     const uint32_t nowUs = micros();
     const float measuredDt = (float)(nowUs - lastComputeTimeUs) * 1e-6f;
     const bool dtValid = measuredDt > 0 && measuredDt <= 0.1f;
