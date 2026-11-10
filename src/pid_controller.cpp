@@ -233,7 +233,8 @@ constexpr uint16_t CORNER_RIGHT_WING = 0xF000U; // S12..S15
 constexpr uint16_t CORNER_CENTER = 0x03C0U; // S6..S9, tolerate S7 failure
 constexpr uint32_t CORNER_ROW_MEMORY_MS = 110;
 constexpr uint32_t CORNER_ASYMMETRIC_BRAKE_MS = 35;
-constexpr uint32_t CORNER_BRAKE_TIMEOUT_MS = 150;
+constexpr uint32_t CORNER_BRAKE_WARN_MS = 150;
+constexpr uint32_t CORNER_BRAKE_SAFETY_TIMEOUT_MS = 550; // stop only on persistent unsafe wheel speed
 constexpr uint32_t CORNER_ROTATE_TIMEOUT_MS = 500;
 constexpr uint32_t CORNER_ENCODER_SAMPLE_MS = 10;
 constexpr float CORNER_FORWARD_STOP_TPS = 240.0f; // preliminary, tune from logs
@@ -248,7 +249,9 @@ uint32_t cornerPhaseSinceMs = 0;
 uint32_t cornerRowSeenMs = 0;
 uint32_t cornerEncoderSampleMs = 0;
 int32_t cornerEncoderPrevL = 0, cornerEncoderPrevR = 0;
-float cornerForwardTps = 0.0f;
+float cornerWheelTpsL = 0.0f, cornerWheelTpsR = 0.0f;
+bool cornerSpeedValid = false;
+bool cornerBrakeWarned = false;
 uint8_t cornerLeftWingFrames = 0, cornerRightWingFrames = 0;
 uint8_t cornerCenteredFrames = 0;
 uint8_t cornerBrakeSlowFrames = 0;
@@ -417,7 +420,8 @@ static void resetCornerController() {
     cornerDirection = 0;
     cornerPhaseSinceMs = cornerRowSeenMs = cornerEncoderSampleMs = 0;
     cornerEncoderPrevL = cornerEncoderPrevR = 0;
-    cornerForwardTps = 0.0f;
+    cornerWheelTpsL = cornerWheelTpsR = 0.0f;
+    cornerSpeedValid = cornerBrakeWarned = false;
     cornerLeftWingFrames = cornerRightWingFrames = 0;
     cornerCenteredFrames = cornerBrakeSlowFrames = 0;
     cornerRowSeen = false;
@@ -429,11 +433,16 @@ static bool sampleCornerEncoders(uint32_t now) {
     encoder_get_counts(&l, &r);
     const uint32_t dtMs = now - cornerEncoderSampleMs;
     if (dtMs > 0 && dtMs <= 100) {
-        // Use per-wheel magnitudes: counter-rotation cannot cancel to zero.
-        const float measured = 500.0f *
-            (fabsf((float)(l - cornerEncoderPrevL)) +
-             fabsf((float)(r - cornerEncoderPrevR))) / (float)dtMs;
-        cornerForwardTps = 0.5f * cornerForwardTps + 0.5f * measured;
+        const float leftTps = 1000.0f * (float)(l - cornerEncoderPrevL) / (float)dtMs;
+        const float rightTps = 1000.0f * (float)(r - cornerEncoderPrevR) / (float)dtMs;
+        if (!cornerSpeedValid) {
+            cornerWheelTpsL = leftTps;
+            cornerWheelTpsR = rightTps;
+        } else {
+            cornerWheelTpsL += 0.5f * (leftTps - cornerWheelTpsL);
+            cornerWheelTpsR += 0.5f * (rightTps - cornerWheelTpsR);
+        }
+        cornerSpeedValid = true;
     }
     cornerEncoderSampleMs = now;
     cornerEncoderPrevL = l;
@@ -479,7 +488,8 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
         encoder_get_counts(&cornerEncoderPrevL, &cornerEncoderPrevR);
         cornerEncoderSampleMs = now;
         cornerBrakeSlowFrames = 0;
-        cornerForwardTps = 0.0f;
+        cornerWheelTpsL = cornerWheelTpsR = 0.0f;
+        cornerSpeedValid = cornerBrakeWarned = false;
         clearPidState();
         sppLogPrintf("[CORNER] DETECT dir=%d runEnc=%ld t_ms=%lu\n",
             (int)cornerDirection, (long)map1MaxProgress, (unsigned long)now);
@@ -490,15 +500,36 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
             ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
         const bool newSpeedSample = sampleCornerEncoders(now);
         const uint32_t elapsed = now - cornerPhaseSinceMs;
-        // Preserve a little forward motion at entry; stop both wheels as
-        // soon as the asymmetric phase ends.
+        // A genuine centered line during braking may be a straight path or
+        // a false corner trigger. Hand back to PID instead of forcing a pivot.
+        const bool centered = blackCount >= 1 && blackCount <= 6 &&
+            bitCount16(mask & CORNER_CENTER) >= 2 &&
+            !(mask & (CORNER_LEFT_WING | CORNER_RIGHT_WING));
+        cornerCenteredFrames = centered ? cornerCenteredFrames + 1 : 0;
+        if (cornerCenteredFrames >= 4) {
+            sppLogPrintf("[CORNER] BRAKE_REACQUIRED runEnc=%ld t_ms=%lu\n",
+                (long)map1MaxProgress, (unsigned long)now);
+            cornerPhase = CORNER_EXIT;
+            cornerPhaseSinceMs = now;
+            clearPidState();
+            turnState = TURN_NONE;
+            lineLocked = previouslyLocked = true;
+            acquiring = missing = turnMissing = startupLossActive = false;
+            derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+            motor_set_speeds(0, 0);
+            return true;
+        }
+        // Preserve modest outer-wheel motion on entry. After that, apply
+        // short braking rather than reversing fast-spinning motors.
         if (elapsed < CORNER_ASYMMETRIC_BRAKE_MS) {
             if (cornerDirection < 0) motor_set_speeds(0, CORNER_OUTER_BRAKE_PWM);
             else motor_set_speeds(CORNER_OUTER_BRAKE_PWM, 0);
         } else {
-            motor_set_speeds(0, 0); // BTS7960 short-brake with EN held HIGH
+            motor_set_speeds(0, 0); // BTS7960 short brake, both EN HIGH
             if (newSpeedSample) {
-                if (cornerForwardTps <= CORNER_FORWARD_STOP_TPS) {
+                if (cornerSpeedValid &&
+                    fabsf(cornerWheelTpsL) <= CORNER_FORWARD_STOP_TPS &&
+                    fabsf(cornerWheelTpsR) <= CORNER_FORWARD_STOP_TPS) {
                     if (cornerBrakeSlowFrames < 3) ++cornerBrakeSlowFrames;
                 } else cornerBrakeSlowFrames = 0;
             }
@@ -506,16 +537,25 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
                 cornerPhase = CORNER_ROTATE;
                 cornerPhaseSinceMs = now;
                 cornerCenteredFrames = 0;
-                sppLogPrintf("[CORNER] ROTATE dir=%d v=%.1f t_ms=%lu\n",
-                    (int)cornerDirection, (double)cornerForwardTps,
-                    (unsigned long)now);
+                sppLogPrintf("[CORNER] ROTATE dir=%d vL=%.1f vR=%.1f t_ms=%lu\n",
+                    (int)cornerDirection, (double)cornerWheelTpsL,
+                    (double)cornerWheelTpsR, (unsigned long)now);
             }
         }
+        if (cornerPhase == CORNER_BRAKE && !cornerBrakeWarned &&
+            elapsed >= CORNER_BRAKE_WARN_MS) {
+            cornerBrakeWarned = true;
+            sppLogPrintf("[CORNER] BRAKE_EXTEND vL=%.1f vR=%.1f t_ms=%lu\n",
+                (double)cornerWheelTpsL, (double)cornerWheelTpsR,
+                (unsigned long)now);
+        }
         if (cornerPhase == CORNER_BRAKE &&
-            elapsed >= CORNER_BRAKE_TIMEOUT_MS) {
-            // High residual forward speed: safe stop, never force reverse.
-            sppLogPrintf("[CORNER] BRAKE_TIMEOUT v=%.1f t_ms=%lu\n",
-                (double)cornerForwardTps, (unsigned long)now);
+            elapsed >= CORNER_BRAKE_SAFETY_TIMEOUT_MS) {
+            // Cannot safely force reverse while wheel speeds remain high.
+            // Preserve safety stop rather than silently driving off the map.
+            sppLogPrintf("[CORNER] BRAKE_SAFETY_STOP vL=%.1f vR=%.1f t_ms=%lu\n",
+                (double)cornerWheelTpsL, (double)cornerWheelTpsR,
+                (unsigned long)now);
             resetCornerController();
             detectedCase = LINE_CASE_STOPPED;
             motor_stop();
@@ -1130,7 +1170,9 @@ void pid_line_follow_step(void) {
             ? good
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
-    currentCase = pid_detect_case(pos, blackCount);
+    if (cornerPhase == CORNER_IDLE || sensor_get_line_bits() == 0xFFFFU) {
+        currentCase = pid_detect_case(pos, blackCount);
+    }
     if (map1Route.active && currentCase != LINE_CASE_STOPPED) {
         const bool validRouteLine =
             finishDetectionArmed && lineLocked &&
@@ -1156,10 +1198,17 @@ void pid_line_follow_step(void) {
         motor_stop();
         return;
     }
-    // The corner controller owns PWM only after a confirmed row-to-wing event.
-    // Keep STOP / ADC / route-fault checks at their existing priority.
-    if (processMap1Corner(sensor_get_line_bits(), blackCount, currentCase))
+    // Finish and other STOP cases must preempt the corner override.
+    if (currentCase == LINE_CASE_STOPPED) {
+        resetCornerController();
+        motor_stop();
         return;
+    }
+    // The corner controller owns PWM only after confirmed row-to-wing evidence.
+    if (processMap1Corner(sensor_get_line_bits(), blackCount, currentCase)) {
+        lastComputeTimeUs = micros();
+        return;
+    }
     const uint32_t nowUs = micros();
     const float measuredDt = (float)(nowUs - lastComputeTimeUs) * 1e-6f;
     const bool dtValid = measuredDt > 0 && measuredDt <= 0.1f;
