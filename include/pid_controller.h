@@ -76,6 +76,12 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask3);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
+// Map 1: four independent PID gain profiles, editable only while AUTO is stopped.
+bool pid_set_map1_pid_profile(uint8_t stage, int32_t startTick,
+                              float kp, float ki, float kd);
+void pid_get_map1_pid_profile(uint8_t stage, int32_t* startTick,
+                              float* kp, float* ki, float* kd);
+uint8_t pid_get_map1_pid_stage(void);
 uint8_t pid_get_high_speed_stage(void);
 // Adjustable peak PWM before START (100-255), must not be below BASE.
 bool pid_set_high_speed_peak(int16_t pwm);
