@@ -89,7 +89,7 @@ void btPollCommands(BtCommandHandler handler){
     if(c=='\n'||c=='\r'){
       if(line.length()&&handler)handler(line);
       line="";
-    } else if(c>=32&&c<=126&&line.length()<80)line+=c;
-    else if(line.length()>=80)line="";
+    } else if(c>=32&&c<=126&&line.length()<256)line+=c;
+    else if(line.length()>=256)line="";
   }
 }
