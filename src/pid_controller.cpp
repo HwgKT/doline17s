@@ -220,6 +220,8 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
 
+// Temporarily disable encoder wheel PI. Keep its code for future experiments.
+constexpr bool WHEEL_PID_ENABLED = false;
 // Cascaded control: line PID produces SIGNED wheel speed setpoints; wheel PI
 // closes the speed loop with quadrature encoder feedback. Tune on the robot:
 // one PWM unit corresponds to approximately 6 wheel encoder ticks/second.
@@ -1045,10 +1047,15 @@ void pid_line_follow_step(void) {
 
         float leftCommand = base + correction;
         float rightCommand = base - correction;
-        // Stage 1: line PID -> signed velocity targets (ticks/second).
-        // Stage 2: encoder wheel PI + nominal PWM feed-forward -> motor PWM.
-        driveWheelSpeedCascade(clampPwmSigned(leftCommand),
-                               clampPwmSigned(rightCommand));
+        // With wheel PI disabled, output the line PID's signed PWM directly.
+        // The wheel-speed feedback implementation remains available for re-enable.
+        const int16_t leftPwm = clampPwmSigned(leftCommand);
+        const int16_t rightPwm = clampPwmSigned(rightCommand);
+        if (WHEEL_PID_ENABLED) {
+            driveWheelSpeedCascade(leftPwm, rightPwm);
+        } else {
+            motor_set_speeds(leftPwm, rightPwm);
+        }
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
         // On the all-black START pad, use BASE to ensure forward motion.
