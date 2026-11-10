@@ -132,12 +132,12 @@ constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // Map 1: BASE follows the app-configured HS_PEAK from 11,000 ticks onward.
 // No additional per-section PWM caps; wheel PI remains independently toggled.
 // Map 1 gain scheduling: encoder-relative PID gains, independent of wheel PI.
-struct Map1PidGainStage { int32_t startTick; float kp; float ki; float kd; };
+struct Map1PidGainStage { int32_t startTick; float kp; float ki; float kd; int16_t pwm; };
 Map1PidGainStage map1PidStages[4] = {
-    {0, 1.60f, 0.0f, 0.80f},
-    {2500, 1.60f, 0.0f, 0.80f},
-    {8000, 1.60f, 0.0f, 0.80f},
-    {11000, 1.60f, 0.0f, 0.80f}
+    {0, 1.60f, 0.0f, 0.80f, -1},
+    {2500, 1.60f, 0.0f, 0.80f, -1},
+    {8000, 1.60f, 0.0f, 0.80f, -1},
+    {11000, 1.60f, 0.0f, 0.80f, -1}
 };
 uint8_t map1ActivePidStage = 0;
 int32_t map1MaxProgress = 0;
@@ -557,18 +557,25 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask2) *mask2 = map1SensorStageMasks[1];
     if (mask3) *mask3 = map1SensorStageMasks[2];
 }
-bool pid_set_map1_pid_profiles(const int32_t ticks[4], const float gains[4][3]) {
+bool pid_set_map1_pid_profiles(const int32_t ticks[4], const float gains[4][3],
+                               const int16_t pwms[4]) {
     if (autoMode || ticks[0] != 0 ||
         !(ticks[0] < ticks[1] && ticks[1] < ticks[2] &&
           ticks[2] < ticks[3] && ticks[3] <= 10000000)) return false;
     for (uint8_t i = 0; i < 4; ++i) {
+        if (i < 3 && (pwms[i] < -1 || pwms[i] > 255)) return false;
+        if (i == 3 && (pwms[i] < 100 || pwms[i] > 255 ||
+                       pwms[i] < pidConfig.baseSpeed)) return false;
         for (uint8_t j = 0; j < 3; ++j) {
             if (!isfinite(gains[i][j]) || gains[i][j] < 0.0f ||
                 gains[i][j] > 50.0f) return false;
         }
     }
     for (uint8_t i = 0; i < 4; ++i)
-        map1PidStages[i] = {ticks[i], gains[i][0], gains[i][1], gains[i][2]};
+        map1PidStages[i] = {ticks[i], gains[i][0], gains[i][1], gains[i][2],
+                            i == 3 ? -1 : pwms[i]};
+    // Stage 4 shares the existing HS_PEAK setting from the app.
+    highSpeedPeakPwm = pwms[3];
     return true;
 }
 bool pid_set_map1_pid_profile(uint8_t stage, int32_t startTick,
@@ -582,7 +589,7 @@ bool pid_set_map1_pid_profile(uint8_t stage, int32_t startTick,
                startTick > 10000000) return false;
     if (stage < 3 && startTick >= map1PidStages[stage + 1].startTick)
         return false;
-    map1PidStages[stage] = {startTick, kp, ki, kd};
+    map1PidStages[stage] = {startTick, kp, ki, kd, map1PidStages[stage].pwm};
     return true;
 }
 void pid_get_map1_pid_profile(uint8_t stage, int32_t* startTick,
@@ -593,6 +600,10 @@ void pid_get_map1_pid_profile(uint8_t stage, int32_t* startTick,
     if (kp) *kp = cfg.kp;
     if (ki) *ki = cfg.ki;
     if (kd) *kd = cfg.kd;
+}
+int16_t pid_get_map1_pid_pwm(uint8_t stage) {
+    if (stage >= 4) return -1;
+    return stage == 3 ? highSpeedPeakPwm : map1PidStages[stage].pwm;
 }
 uint8_t pid_get_map1_pid_stage(void) { return map1ActivePidStage; }
 uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
@@ -1100,12 +1111,14 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Map 1: use the app-selected HS_PEAK as BASE from tick 11,000.
-        // Keep configured BASE, sensor masks, SEARCH and wheel PI unchanged.
-        constexpr int32_t MAP1_LATE_BASE_START_TICKS = 11000;
-        const float base =
-            (selectedMap == 1 && map1MaxProgress >= MAP1_LATE_BASE_START_TICKS)
-            ? (float)highSpeedPeakPwm : (float)pidConfig.baseSpeed;
+        // Map 1 PWM follows each PID gain stage; -1 inherits the shared BASE.
+        // The final stage always follows app-controlled HS_PEAK.
+        const float base = selectedMap == 1
+            ? (map1ActivePidStage == 3 ? (float)highSpeedPeakPwm
+               : map1PidStages[map1ActivePidStage].pwm >= 0
+               ? (float)map1PidStages[map1ActivePidStage].pwm
+               : (float)pidConfig.baseSpeed)
+            : (float)pidConfig.baseSpeed;
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
