@@ -1,0 +1,10 @@
+[2026-11-10T01:06:00.271+07:00] CSV BẮT ĐẦU: D:\EC\doline17s\logs\map_01\linerobot_map01_20261110_010600_262788.csv
+[2026-11-10T01:06:00.273+07:00] TX > AUTO:1
+[2026-11-10T01:06:00.322+07:00] RX < MODE: AUTO PID
+[2026-11-10T01:06:00.324+07:00] RX < RUN_ORIGIN map=1 encL0=6876 encR0=6147 base=140 peak=220 kp=1.60 ki=0.00 kd=0.80 t_ms=1186654
+[2026-11-10T01:06:00.325+07:00] RX < HS_STAGE OFF map=1 runEnc=0 base=140 peak=220 start=10000 t_ms=1186655
+[2026-11-10T01:06:00.654+07:00] TX > DIAG
+[2026-11-10T01:06:00.700+07:00] RX < DIAG: bt=1 auto=1 target=0 loop=648.0Hz pid=115.5Hz queued=0.0Hz sent=0.0Hz drop=0 failed=0 missed=0 pending=0 encL=7501 encR=6768 case=5 line=0 lost=0 reacq=26 map=1 runEnc=623 hs=0 peak=220 route=0 rf=0 clu=FFFF
+[2026-11-10T01:06:01.999+07:00] TX > STOP
+[2026-11-10T01:06:02.090+07:00] RX < MOTOR: STOP
+[2026-11-10T01:06:02.093+07:00] CSV đang chốt (ESP32 ĐÃ XÁC NHẬN DỪNG: MOTOR: STOP): D:\EC\doline17s\logs\map_01\linerobot_map01_20261110_010600_262788.csv

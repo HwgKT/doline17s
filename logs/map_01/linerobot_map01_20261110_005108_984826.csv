@@ -1,0 +1,2 @@
+﻿host_iso,t_ms,adc0,adc1,adc2,adc3,adc4,adc5,adc6,adc7,adc8,adc9,adc10,adc11,adc12,adc13,adc14,adc15,cal0,cal1,cal2,cal3,cal4,cal5,cal6,cal7,cal8,cal9,cal10,cal11,cal12,cal13,cal14,cal15,logic0,logic1,logic2,logic3,logic4,logic5,logic6,logic7,logic8,logic9,logic10,logic11,logic12,logic13,logic14,logic15,encL,encR,pwmL,pwmR,err,p,i,d,out,mode,logic16
+CAL_THRESHOLDS,,1607,2716,1645,2742,1770,1650,1346,1218,1219,976,1927,1001,2110,2022,1568,2233,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
