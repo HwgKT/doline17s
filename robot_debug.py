@@ -197,7 +197,7 @@ class App(tk.Tk):
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
         self.high_speed_peak = 220  # Expected startup default; read back from firmware.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
-        self.hs_late_start = 10000
+        self.hs_late_start = 11000
         self.hs_late_mode = False
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
