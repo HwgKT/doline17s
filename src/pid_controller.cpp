@@ -1111,10 +1111,10 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Map 1 PWM follows each PID gain stage; -1 inherits the shared BASE.
-        // The final stage always follows app-controlled HS_PEAK.
+        // Map 1 uses per-stage PWM until tick 11,000, then app HS_PEAK.
+        // Preserve the independent HS transition even when PID stage ticks move.
         const float base = selectedMap == 1
-            ? (map1ActivePidStage == 3 ? (float)highSpeedPeakPwm
+            ? (map1MaxProgress >= 11000 ? (float)highSpeedPeakPwm
                : map1PidStages[map1ActivePidStage].pwm >= 0
                ? (float)map1PidStages[map1ActivePidStage].pwm
                : (float)pidConfig.baseSpeed)
