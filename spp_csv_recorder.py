@@ -6,6 +6,11 @@ import queue
 import threading
 import time
 
+EVENT_FIELDS = [
+    "event_type", "marker", "marker_symbol", "marker_map",
+    "marker_auto", "marker_runEnc", "led_feedback",
+]
+
 class TelemetryCsvRecorder(threading.Thread):
     def __init__(self, header, thresholds, map_id, logs_root=None):
         super().__init__(name="spp-csv-writer", daemon=True)
@@ -19,6 +24,11 @@ class TelemetryCsvRecorder(threading.Thread):
         if type(map_id) is not int or map_id not in (1, 2, 3):
             raise ValueError("Select MAP 1, MAP 2 or MAP 3 before recording")
         self.map_id = map_id
+        self.header = list(header)
+        self.event_fields_enabled = (
+            len(self.header) >= len(EVENT_FIELDS) and
+            self.header[-len(EVENT_FIELDS):] == EVENT_FIELDS
+        )
         root = Path(logs_root) if logs_root is not None else Path(__file__).resolve().parent / "logs"
         folder = root / f"map_{map_id:02d}"
         folder.mkdir(parents=True, exist_ok=True)
@@ -32,6 +42,8 @@ class TelemetryCsvRecorder(threading.Thread):
             ["CAL_THRESHOLDS", "", *thresholds] + [""] * (len(header) - 18))
         self.output.flush()
         self.queue = queue.Queue(maxsize=8192)
+        # Reserve queue slots so a burst of telemetry cannot crowd out START/END markers.
+        self.event_reserve = 8
         self.file_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.recording = True
@@ -39,6 +51,7 @@ class TelemetryCsvRecorder(threading.Thread):
         self.enqueued = 0
         self.written = 0
         self.dropped = 0
+        self.dropped_events = 0
         self.error = None
 
     def set_calibration(self, white=None, black=None):
@@ -53,37 +66,82 @@ class TelemetryCsvRecorder(threading.Thread):
         received_at = datetime.datetime.now().astimezone().isoformat(
             timespec="milliseconds")
         try:
-            self.queue.put_nowait((received_at, sample))
+            # Keep a small number of queue slots available for operator markers.
+            if self.queue.qsize() >= self.queue.maxsize - self.event_reserve:
+                self.dropped += 1
+                return
+            self.queue.put_nowait(("sample", received_at, sample))
             self.enqueued += 1
         except queue.Full:
             self.dropped += 1
+
+    def submit_marker(self, event_type, marker, marker_symbol, marker_map,
+                      marker_auto, marker_run_enc=None, led_feedback="",
+                      sample=None):
+        """Queue an operator marker in timestamp order with the latest telemetry snapshot."""
+        if (not self.recording or self.stop_event.is_set() or self.error
+                or not self.event_fields_enabled):
+            return False
+        if marker not in ("START", "END"):
+            raise ValueError("marker must be START or END")
+        received_at = datetime.datetime.now().astimezone().isoformat(
+            timespec="milliseconds")
+        event_fields = [
+            event_type or "",
+            marker,
+            marker_symbol or "",
+            marker_map if marker_map is not None else "",
+            int(bool(marker_auto)),
+            marker_run_enc if marker_run_enc is not None else "",
+            led_feedback or "",
+        ]
+        try:
+            self.queue.put_nowait(("marker", received_at, (sample, event_fields)))
+            return True
+        except queue.Full:
+            self.dropped_events += 1
+            return False
+
+    def _sample_row(self, received_at, sample):
+        if sample is None:
+            data_width = len(self.header) - 2 - (
+                len(EVENT_FIELDS) if self.event_fields_enabled else 0)
+            return [received_at, ""] + [""] * max(0, data_width)
+        raw = list(sample[1:17])
+        profile = self.calibration
+        if profile is None:
+            calibrated = [""] * 16
+            logic = [""] * 16
+            logic_word = ""
+        else:
+            white, black = profile
+            calibrated = [
+                max(0, min(1000, ((raw[i] - white[i]) * 1000 //
+                    (black[i] - white[i])))) if black[i] - white[i] >= 150 else 0
+                for i in range(16)
+            ]
+            logic = [int(value >= 400) for value in calibrated]
+            logic_word = "".join(str(bit) for bit in logic)
+        return [received_at, sample[0], *raw, *calibrated, *logic,
+                *sample[17:27], logic_word]
 
     def run(self):
         last_flush = time.monotonic()
         try:
             while not self.stop_event.is_set() or not self.queue.empty():
                 try:
-                    received_at, sample = self.queue.get(timeout=0.15)
+                    kind, received_at, payload = self.queue.get(timeout=0.15)
                 except queue.Empty:
                     pass
                 else:
-                    raw = list(sample[1:17])
-                    profile = self.calibration
-                    if profile is None:
-                        calibrated = [""] * 16
-                        logic = [""] * 16
-                        logic_word = ""
+                    if kind == "sample":
+                        row = self._sample_row(received_at, payload)
+                        if self.event_fields_enabled:
+                            row.extend([""] * len(EVENT_FIELDS))
                     else:
-                        white, black = profile
-                        calibrated = [
-                            max(0, min(1000, ((raw[i] - white[i]) * 1000 //
-                                (black[i] - white[i])))) if black[i] - white[i] >= 150 else 0
-                            for i in range(16)
-                        ]
-                        logic = [int(value >= 400) for value in calibrated]
-                        logic_word = "".join(str(bit) for bit in logic)
-                    row = ([received_at, sample[0], *raw, *calibrated, *logic,
-                            *sample[17:27], logic_word])
+                        sample, event_fields = payload
+                        row = self._sample_row(received_at, sample)
+                        row.extend(event_fields)
                     with self.file_lock:
                         self.writer.writerow(row)
                         self.written += 1
