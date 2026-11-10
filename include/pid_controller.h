@@ -77,6 +77,8 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 // Map 1: four independent PID gain profiles, editable only while AUTO is stopped.
+// Atomically replace all 4 stages; rejects out-of-order encoder thresholds.
+bool pid_set_map1_pid_profiles(const int32_t ticks[4], const float gains[4][3]);
 bool pid_set_map1_pid_profile(uint8_t stage, int32_t startTick,
                               float kp, float ki, float kd);
 void pid_get_map1_pid_profile(uint8_t stage, int32_t* startTick,
