@@ -185,20 +185,21 @@ void command(const String &raw) {
       pid_get_map1_pid_profile(i,&tick,&kp,&ki,&kd);
       char b[120];
       snprintf(b,sizeof(b),
-        "PID_PROFILE STAGE=%u TICK=%ld KP=%.3f KI=%.3f KD=%.3f",
-        (unsigned)(i+1),(long)tick,kp,ki,kd);
+        "PID_PROFILE STAGE=%u TICK=%ld KP=%.3f KI=%.3f KD=%.3f PWM=%d",
+        (unsigned)(i+1),(long)tick,kp,ki,kd,pid_get_map1_pid_pwm(i));
       reply(b);
     }
     return;
   }
   // Apply all four gain profiles as one validated transaction.
-  // Example PID_PROFILES:0,1.6,0,0.8;2500,1.6,0,0.8;8000,1.6,0,0.8;11000,1.6,0,0.8
+  // PID_PROFILES:tick,kp,ki,kd,pwm;... (PWM=-1 inherits BASE; stage 4 uses HS_PEAK)
   if(s.startsWith("PID_PROFILES:")){
     if(pid_is_auto_mode()||manualActive){
       reply("ERR: PID_PROFILE_REQUIRES_STOPPED");return;
     }
     int32_t ticks[4]={0,0,0,0};
     float gains[4][3]={{0}};
+    int16_t pwms[4]={-1,-1,-1,240};
     String data=s.substring(13);
     bool valid=true;
     for(uint8_t i=0;i<4;++i){
@@ -207,16 +208,17 @@ void command(const String &raw) {
         valid=false;break;
       }
       const String part=i<3 ? data.substring(0,sep) : data;
-      long tick=0;char tail=0;
-      const int n=sscanf(part.c_str(),"%ld,%f,%f,%f %c",
-                         &tick,&gains[i][0],&gains[i][1],&gains[i][2],&tail);
-      if(n!=4 || tick<0 || tick>10000000L){
+      long tick=0;int pwm=0;char tail=0;
+      const int n=sscanf(part.c_str(),"%ld,%f,%f,%f,%d %c",
+                         &tick,&gains[i][0],&gains[i][1],&gains[i][2],&pwm,&tail);
+      if(n!=5 || tick<0 || tick>10000000L || pwm < -1 || pwm > 255){
         valid=false;break;
       }
       ticks[i]=(int32_t)tick;
+      pwms[i]=(int16_t)pwm;
       if(i<3)data=data.substring(sep+1);
     }
-    if(!valid||!pid_set_map1_pid_profiles(ticks,gains)){
+    if(!valid||!pid_set_map1_pid_profiles(ticks,gains,pwms)){
       reply("ERR: PID_PROFILE_INVALID");return;
     }
     command("PID_PROFILE");return;
@@ -410,8 +412,8 @@ void command(const String &raw) {
       char stageMsg[115];int32_t tick=0;float kp=0,ki=0,kd=0;
       pid_get_map1_pid_profile(0,&tick,&kp,&ki,&kd);
       snprintf(stageMsg,sizeof(stageMsg),
-        "PID_STAGE STAGE=1 runEnc=0 KP=%.3f KI=%.3f KD=%.3f t_ms=%lu",
-        kp,ki,kd,(unsigned long)millis());
+        "PID_STAGE STAGE=1 runEnc=0 KP=%.3f KI=%.3f KD=%.3f PWM=%d t_ms=%lu",
+        kp,ki,kd,pid_get_map1_pid_pwm(0),(unsigned long)millis());
       reply(stageMsg);
     }
     reply(String("ADC_RUN_MODE: ")+sensor_get_adc_mode()+
@@ -674,9 +676,9 @@ void loop() {
       pid_get_map1_pid_profile(newPidStage,&startTick,&kp,&ki,&kd);
       char stageMsg[120];
       snprintf(stageMsg,sizeof(stageMsg),
-        "PID_STAGE STAGE=%u runEnc=%ld KP=%.3f KI=%.3f KD=%.3f t_ms=%lu",
+        "PID_STAGE STAGE=%u runEnc=%ld KP=%.3f KI=%.3f KD=%.3f PWM=%d t_ms=%lu",
         (unsigned)(newPidStage+1),(long)pid_get_run_encoder_progress(),
-        kp,ki,kd,(unsigned long)millis());
+        kp,ki,kd,pid_get_map1_pid_pwm(newPidStage),(unsigned long)millis());
       reply(stageMsg);
     }
     // A latched finish or PID stop must end AUTO, otherwise Python remains
