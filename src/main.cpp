@@ -662,8 +662,6 @@ void loop() {
       reply(b);
     }
   }
-  // Independent 50-Hz encoder speed loop, after high-rate line PID targets.
-  motor_update_wheel_pi();
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
