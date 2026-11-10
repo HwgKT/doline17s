@@ -327,7 +327,7 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 // Map 1 is a single uninterrupted run. Thresholds are trial values inferred
 // from the endpoint clusters of 30 separate recorded runs (not wheel-PI gains).
 // The line PID continues steering both wheels and all safety/FSM states remain.
-constexpr int32_t MAP1_STAGE2_TICKS = 1850;
+constexpr int32_t MAP1_STAGE2_TICKS = 2350;
 constexpr int32_t MAP1_STAGE3_TICKS = 5900;
 constexpr float MAP1_STAGE1_PWM = 140.0f;
 constexpr float MAP1_STAGE2_PWM = 200.0f;
