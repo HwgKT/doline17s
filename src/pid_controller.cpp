@@ -557,6 +557,20 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask2) *mask2 = map1SensorStageMasks[1];
     if (mask3) *mask3 = map1SensorStageMasks[2];
 }
+bool pid_set_map1_pid_profiles(const int32_t ticks[4], const float gains[4][3]) {
+    if (autoMode || ticks[0] != 0 ||
+        !(ticks[0] < ticks[1] && ticks[1] < ticks[2] &&
+          ticks[2] < ticks[3] && ticks[3] <= 10000000)) return false;
+    for (uint8_t i = 0; i < 4; ++i) {
+        for (uint8_t j = 0; j < 3; ++j) {
+            if (!isfinite(gains[i][j]) || gains[i][j] < 0.0f ||
+                gains[i][j] > 50.0f) return false;
+        }
+    }
+    for (uint8_t i = 0; i < 4; ++i)
+        map1PidStages[i] = {ticks[i], gains[i][0], gains[i][1], gains[i][2]};
+    return true;
+}
 bool pid_set_map1_pid_profile(uint8_t stage, int32_t startTick,
                               float kp, float ki, float kd) {
     if (autoMode || stage >= 4 || kp < 0.0f || kp > 50.0f ||
