@@ -1083,44 +1083,22 @@ class App(tk.Tk):
         now = time.monotonic()
         if running and not self.auto_running:
             self.run_started_at = now
-            self.run_live_elapsed_floor = 0.0
         elif not running and self.auto_running:
-            # Freeze the same clock shown on screen: never sum the host clock
-            # on top of the ESP32-derived duration.
-            self.run_elapsed_seconds = self._live_run_elapsed(now)
+            if self.run_started_at is not None:
+                self.run_elapsed_seconds += now - self.run_started_at
             self.run_started_at = None
         self.auto_running = running
         self.update_run_timer_display(now)
 
-    def _live_run_elapsed(self, now):
-        if not self.auto_running:
-            return self.run_elapsed_seconds
-        if (self.last_esp_elapsed_seconds is not None
-                and self.last_esp_sample_received_at is not None):
-            # ESP32 timestamps are authoritative; the host clock smoothly
-            # interpolates even when a telemetry packet is delayed.
-            age = max(0.0, now - self.last_esp_sample_received_at)
-            elapsed = self.last_esp_elapsed_seconds + age
-        elif self.run_started_at is not None:
-            elapsed = self.run_elapsed_seconds + max(0.0, now - self.run_started_at)
-        else:
-            elapsed = self.run_elapsed_seconds
-        # Delayed or reordered frames must never cause negative time jumps.
-        self.run_live_elapsed_floor = max(self.run_live_elapsed_floor, elapsed)
-        return self.run_live_elapsed_floor
-
     def reset_run_timer(self):
-        if self.auto_running:
-            self.log("Không thể reset giờ khi xe đang AUTO; thời gian tính từ START.")
-            return
         self.run_elapsed_seconds = 0.0
-        self.run_live_elapsed_floor = 0.0
-        self.run_started_at = None
+        self.run_started_at = time.monotonic() if self.auto_running else None
         self.update_run_timer_display()
 
     def update_run_timer_display(self, now=None):
-        clock_now = time.monotonic() if now is None else now
-        elapsed = self._live_run_elapsed(clock_now) if self.auto_running else self.run_elapsed_seconds
+        elapsed = self.run_elapsed_seconds
+        if self.auto_running and self.run_started_at is not None:
+            elapsed += (time.monotonic() if now is None else now) - self.run_started_at
         total_ticks = max(0, int(elapsed * 100))
         total_seconds, ticks = divmod(total_ticks, 100)
         hours, remainder = divmod(total_seconds, 3600)
@@ -1273,19 +1251,6 @@ class App(tk.Tk):
         self.start_pending = False
         self.set_auto_running(False)
         self.run_finished_latched = True
-        stop = re.search(r"\bt_ms=(\d+)\b", reason)
-        if stop and self.run_origin_esp_ms is not None:
-            end_ms = int(stop.group(1))
-            duration_ms = (end_ms - self.run_origin_esp_ms) & 0xFFFFFFFF
-            # Guard against messages from a stale run / impossible durations.
-            if duration_ms < 3600000:
-                self.run_finish_esp_ms = end_ms
-                self.run_elapsed_seconds = duration_ms / 1000.0
-                self.last_esp_elapsed_seconds = None
-                self.last_esp_sample_received_at = None
-                self.run_live_elapsed_floor = self.run_elapsed_seconds
-                self.update_run_timer_display()
-                self.log(f"THỜI GIAN ESP32: {self.run_elapsed_seconds:.3f} s")
         self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + reason)
         self.start_confirmed = False
         if self.estop_latched is False:
@@ -1333,14 +1298,6 @@ class App(tk.Tk):
         # Independent CSV worker handles all received frames, even if UI drops.
         self.last_adc = list(s[1:17])
         t, left, right = s[0], s[17], s[18]
-        if self.auto_running and self.run_origin_esp_ms is not None and s[26] == 1:
-            runtime_ms = (int(t) - self.run_origin_esp_ms) & 0xFFFFFFFF
-            if runtime_ms < 3600000:
-                runtime = runtime_ms / 1000.0
-                if (self.last_esp_elapsed_seconds is None
-                        or runtime >= self.last_esp_elapsed_seconds):
-                    self.last_esp_elapsed_seconds = runtime
-                    self.last_esp_sample_received_at = time.monotonic()
         if self.preview_pid_log.get() and s[26] == 1:
             if self.last_preview_ms is None or (t - self.last_preview_ms) % (2**32) >= 200:
                 self.last_preview_ms = t
@@ -1362,12 +1319,6 @@ class App(tk.Tk):
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
-            start = re.search(r"\bt_ms=(\d+)\b", message)
-            if start:
-                self.run_origin_esp_ms = int(start.group(1))
-                self.run_finish_esp_ms = None
-                self.last_esp_elapsed_seconds = None
-                self.last_esp_sample_received_at = None
             self.begin_external_run(message)
         self.log(f"RX < {message}")
         sensor_profile_match = re.fullmatch(
@@ -1430,12 +1381,8 @@ class App(tk.Tk):
             self.log("ESP32 từ chối reset encoder: xe vẫn đang chạy.")
         elif message == "MODE: AUTO PID":
             self.run_finished_latched = False
-            self.run_origin_esp_ms = None
-            self.run_finish_esp_ms = None
             self.run_elapsed_seconds = 0.0
-            self.last_esp_elapsed_seconds = None
-            self.last_esp_sample_received_at = None
-            self.run_live_elapsed_floor = 0.0
+            self.run_started_at = None
             self.start_pending = False
             self.start_confirmed = True
             self.set_auto_running(True)
