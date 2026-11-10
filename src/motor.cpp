@@ -11,13 +11,13 @@ static int16_t currentRightSpeed = 0;
 namespace {
 constexpr uint32_t WHEEL_SAMPLE_US = 20000U; // 50 Hz
 // Initial nominal mapping (ticks/s per legacy PWM command); CALIBRATE on robot.
-constexpr float TICKS_PER_SECOND_PER_CMD_L = 7.0f;
-constexpr float TICKS_PER_SECOND_PER_CMD_R = 7.0f;
-constexpr float WHEEL_KP = 0.025f;  // PWM / (tick/s)
-constexpr float WHEEL_KI = 0.35f;   // PWM / tick
+constexpr float TICKS_PER_SECOND_PER_CMD_L = 7.2f;
+constexpr float TICKS_PER_SECOND_PER_CMD_R = 7.4f;
+constexpr float WHEEL_KP = 0.030f;  // PWM / (tick/s)
+constexpr float WHEEL_KI = 0.30f;   // PWM / tick
 constexpr float VELOCITY_EMA_ALPHA = 0.40f;
-constexpr float MAX_PI_CORRECTION_PWM = 45.0f;
-constexpr float MAX_INTEGRAL_PWM = 35.0f;
+constexpr float MAX_PI_CORRECTION_PWM = 35.0f;
+constexpr float MAX_INTEGRAL_PWM = 25.0f;
 bool wheelMode = false;
 bool wheelNeedsInitialOutput = false;
 int16_t targetCommandL = 0, targetCommandR = 0;
