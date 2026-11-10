@@ -82,6 +82,8 @@ class Reader(threading.Thread):
         self.bad = 0
         self.frames_rx = 0
         self.frames_dropped = 0
+        self.saw_auto_frame = False
+        self.stopped_frame_count = 0
 
     def run(self):
         while self.running:
@@ -130,6 +132,21 @@ class Reader(threading.Thread):
             if xor_sum(data) == self.buf[2 + PAYLOAD_LEN]:
                 self.frames_rx += 1
                 sample = struct.unpack(FMT, data)
+                # Redundant STOP confirmation: if the FINISH text reply is
+                # lost, three post-AUTO frames with mode=0 and both PWM=0
+                # still let Tk latch the timer. Never trigger during SEARCH:
+                # SEARCH keeps firmware AUTO mode=1.
+                if sample[26] == 1:
+                    self.saw_auto_frame = True
+                    self.stopped_frame_count = 0
+                elif (self.saw_auto_frame and
+                      sample[19] == 0 and sample[20] == 0):
+                    self.stopped_frame_count += 1
+                    if self.stopped_frame_count == 3:
+                        self.saw_auto_frame = False
+                        self.control_queue.put(("stopped_sample", sample[0]))
+                else:
+                    self.stopped_frame_count = 0
                 # Logging precedes GUI delivery; Tk slowdown cannot throttle disk writes.
                 if self.recorder is not None:
                     self.recorder.submit(sample)
@@ -1708,6 +1725,10 @@ class App(tk.Tk):
                 kind, payload = self.controls_q.get_nowait()
                 if kind == "text":
                     self.on_text(payload)
+                elif kind == "stopped_sample":
+                    if (self.auto_running or self.start_confirmed) and not self.run_finished_latched:
+                        self.confirm_stopped(
+                            f"TELEMETRY AUTO=0 PWM=0 x3 t_ms={payload}; FINISH ACK có thể thất lạc")
                 elif kind == "error":
                     self.disconnect()
                     self.status_label.config(text=payload, fg=ROSE)
