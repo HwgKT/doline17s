@@ -699,7 +699,7 @@ class App(tk.Tk):
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
         self.hs_peak_value_text.set("— / 255")
-        self.hs_peak_feedback.set("Đang đọc HS_PEAK (BASE sau 10k) từ ESP32...")
+        self.hs_peak_feedback.set("Đang đọc HS_PEAK (BASE từ 11k) từ ESP32...")
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
