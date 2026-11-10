@@ -244,6 +244,8 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind_all("<Escape>", lambda _event: self.stop_line())
         self.after(30, self.tick)
+        # Stopwatch refresh independent of sensor cases and SPP telemetry.
+        self.after(20, self.tick_run_timer)
 
     def label(self, parent, text="", fg=FG, bg=None, **kw):
         return tk.Label(parent, text=text, fg=fg, bg=BG if bg is None else bg, **kw)
@@ -803,6 +805,14 @@ class App(tk.Tk):
             self.reader.send(command)
             self.log(f"TX > {command}")
             return True
+        except serial.SerialTimeoutException as exc:
+            # Virtual COM write timeout != established Bluetooth disconnect.
+            # Keep RX alive so delayed FINISH remains receivable.
+            self.log(f"SPP WRITE TIMEOUT ({command}): {exc}; giữ COM để chờ RX.")
+            if command == "DIAG":
+                self.next_diag_poll = None
+            self.status_label.config(text="SPP TX bị nghẽn — vẫn giữ COM", fg=AMBER)
+            return False
         except (serial.SerialException, OSError) as exc:
             self.log(f"Lỗi gửi: {exc}")
             self.disconnect()
@@ -1091,9 +1101,17 @@ class App(tk.Tk):
         self.update_run_timer_display(now)
 
     def reset_run_timer(self):
+        if self.auto_running:
+            self.log("Không thể reset đồng hồ trong lúc AUTO đang chạy.")
+            return
         self.run_elapsed_seconds = 0.0
-        self.run_started_at = time.monotonic() if self.auto_running else None
+        self.run_started_at = None
         self.update_run_timer_display()
+
+    def tick_run_timer(self):
+        # Always run while Tk is alive; line loss cannot pause this timer.
+        self.update_run_timer_display()
+        self.after(20, self.tick_run_timer)
 
     def update_run_timer_display(self, now=None):
         elapsed = self.run_elapsed_seconds
@@ -1701,7 +1719,12 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         try:
-            for _ in range(512):
+            # Bound Tk frame processing to ~7 ms; Reader records all binary
+            # samples separately, so CSV logging is not rate limited here.
+            ui_deadline = time.monotonic() + 0.007
+            for _ in range(128):
+                if time.monotonic() >= ui_deadline:
+                    break
                 kind, payload = self.q.get_nowait()
                 if kind == "data":
                     self.on_sample(payload)
@@ -1713,7 +1736,6 @@ class App(tk.Tk):
         if last is not None:
             self.update_view(last)
         now = time.monotonic()
-        self.update_run_timer_display(now)
         if (self.hs_peak_pending is not None and self.hs_peak_pending_at is not None
                 and now - self.hs_peak_pending_at >= 3.0):
             expected = self.hs_peak_pending
@@ -1757,8 +1779,11 @@ class App(tk.Tk):
         # One small SPP text request per 2 seconds; no USB traffic.
         if self.next_diag_poll is not None and now >= self.next_diag_poll:
             if self.reader is not None and self.reader.is_alive():
-                self.send_command("DIAG")
                 self.next_diag_poll = now + self.diag_interval_s
+                # DIAG is informational; a blocking COM write used to freeze
+                # Tk's timer during a race or a line-loss recovery.
+                if not (self.auto_running or self.start_pending):
+                    self.send_command("DIAG")
             else:
                 self.next_diag_poll = None
         if self.stop_ack_deadline is not None and now >= self.stop_ack_deadline:
