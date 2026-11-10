@@ -73,9 +73,21 @@ void btSendLine(const String &line){
   memcpy(reply.bytes,line.c_str(),length);
   reply.bytes[length]='\n';
   reply.len=length+1;
-  // Never hold the 650-Hz control loop for Bluetooth writes.
+  // Never hold the control loop for Bluetooth writes. If diagnostics
+  // filled the control queue, evict an older reply to preserve FINISH/STOP.
   if(xQueueSend(replyQueue,&reply,0)!=pdTRUE){
-    ++failed; // Observable through DIAG; never block the motion loop.
+    const bool urgent=line.startsWith("AUTO_FINISHED:") ||
+      line.startsWith("AUTO_STOPPED:") ||
+      line.startsWith("ESTOP:") ||
+      line.startsWith("MOTOR: STOP") ||
+      line.startsWith("MODE: AUTO PID") ||
+      line.startsWith("RUN_ORIGIN ");
+    if(urgent){
+      Reply stale{};
+      xQueueReceive(replyQueue,&stale,0);
+      if(xQueueSend(replyQueue,&reply,0)==pdTRUE)return;
+    }
+    ++failed; // Observable in DIAG.
   }
 }
 bool btSendTelemetry(const Telemetry &sample){
