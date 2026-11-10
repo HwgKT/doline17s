@@ -220,7 +220,6 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
-constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
 
 // Cascaded control: line PID produces SIGNED wheel speed setpoints; wheel PI
 // closes the speed loop with quadrature encoder feedback. Tune on the robot:
@@ -288,54 +287,9 @@ static int16_t clampPwmSigned(float value) {
 static uint8_t bitCount16(uint16_t value) {
     return (uint8_t)__builtin_popcount((unsigned)value);
 }
-static float outerSensorSeverity(uint16_t mask) {
-    float severity = 0.0f;
-    for (uint8_t i = 0; i < 4; ++i) {
-        if (mask & (uint16_t)(1U << i)) {
-            const float sensorSeverity = (float)(4U - i) * 0.25f;
-            if (sensorSeverity > severity) severity = sensorSeverity;
-        }
-        const uint8_t rightSensor = (uint8_t)(15U - i);
-        if (mask & (uint16_t)(1U << rightSensor)) {
-            const float sensorSeverity = (float)(4U - i) * 0.25f;
-            if (sensorSeverity > severity) severity = sensorSeverity;
-        }
-    }
-    return severity;
-}
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
 }
-static void limitMotorCommandPeak(float& left, float& right, float limit) {
-    const float peak = fmaxf(fabsf(left), fabsf(right));
-    if (peak > limit && peak > 0.0f) {
-        const float scale = limit / peak;
-        left *= scale;
-        right *= scale;
-    }
-}
-static float updateForwardSpeed(float absErr, float requestedBase) {
-    const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-    float targetSpeed = requestedBase *
-        (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
-    const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-        ? pidConfig.baseSpeed : 45);
-    if (targetSpeed < minimumSpeed) targetSpeed = minimumSpeed;
-    if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
-    governedForwardSpeed = targetSpeed;
-    return governedForwardSpeed;
-}
-
-// Encoder averages can drift during SEARCH pivots; require line confirmation
-// for all accelerations instead of trusting encoder progress alone.
-static float map1CappedBase(int32_t progress) {
-    float base = (float)pidConfig.baseSpeed;
-    if (map1Route.active)
-        base = map1Route.baseCap(progress, base);
-    // No encoder-dependent speed adjustment.
-    return base;
-}
-
 static void resetWheelSpeedPid() {
     wheelFeedbackReady = false;
     wheelPrevSampleUs = 0;
@@ -1032,10 +986,7 @@ void pid_line_follow_step(void) {
             const int16_t searchPwm = searchPwmForCurrentTurn();
             motor_set_speeds(-searchPwm, searchPwm);
         } else {
-            const int16_t outer = map1Route.active
-                ? (int16_t)fminf((float)sharpTurnPwm(),
-                                map1Route.wheelCap(map1MaxProgress))
-                : sharpTurnPwm();
+            const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(inner, outer);
         }
@@ -1044,10 +995,7 @@ void pid_line_follow_step(void) {
         if (turnState == SEARCH_RIGHT) {
             motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
-            const int16_t outer = map1Route.active
-                ? (int16_t)fminf((float)sharpTurnPwm(),
-                                map1Route.wheelCap(map1MaxProgress))
-                : sharpTurnPwm();
+            const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
@@ -1091,10 +1039,7 @@ void pid_line_follow_step(void) {
         // the line PID; wheel PI later translates speed targets into PWM.
         float base = (float)pidConfig.baseSpeed;
         governedForwardSpeed = base;
-        const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
-        float correction = lastCorrection;
-        if (correction > correctionLimit) correction = correctionLimit;
-        if (correction < -correctionLimit) correction = -correctionLimit;
+        const float correction = lastCorrection;
 
         // Preserve the current governed forward PWM for map-specific gaps.
         lastNormalForwardPwm = clampPwm(base);
