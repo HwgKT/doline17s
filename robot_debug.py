@@ -468,7 +468,7 @@ class App(tk.Tk):
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # MAP 1: HS_PEAK sets target BASE after 10k; others keep legacy HS.
+        # MAP 1: HS_PEAK sets target BASE from 11k; others keep legacy HS.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
         self.label(hs_row, "HS_PEAK (10k+)", bg=PANEL,
