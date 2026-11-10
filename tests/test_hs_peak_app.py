@@ -68,7 +68,7 @@ class PeakUiTest(unittest.TestCase):
         self.assertEqual(ui.messages, ["HS_PEAK:180"])
         self.assertEqual(ui.hs_peak_confirmed, 255)  # Not optimistic.
         self.assertEqual(ui.hs_peak_pending, 180)
-        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
+        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP=OFF START=0 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 180)
         self.assertIsNone(ui.hs_peak_pending)
         self.assertEqual(ui.hs_peak_var.get(), 180)
@@ -97,7 +97,7 @@ class PeakUiTest(unittest.TestCase):
     def test_readback_does_not_replace_unapplied_slider(self):
         ui = FakeApp()
         ui.hs_peak_var.set(220)
-        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
+        App.on_text(ui, "HS_PEAK: PWM=180 BASE=120 RAMP=OFF START=0 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 180)
         self.assertEqual(ui.hs_peak_var.get(), 220)
         self.assertTrue(ui.hs_peak_dirty)
@@ -114,7 +114,7 @@ class PeakUiTest(unittest.TestCase):
         self.assertIsNone(ui.hs_peak_confirmed)
         self.assertFalse(ui.hs_peak_dirty)
         self.assertEqual(ui.messages[-1], "HS_PEAK")
-        App.on_text(ui, "HS_PEAK: PWM=220 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
+        App.on_text(ui, "HS_PEAK: PWM=220 BASE=120 RAMP=OFF START=0 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100")
         self.assertEqual(ui.hs_peak_confirmed, 220)
         self.assertEqual(ui.hs_peak_var.get(), 220)
 
@@ -125,7 +125,7 @@ class PeakUiTest(unittest.TestCase):
         ):
             App.on_text(
                 ui,
-                f"HS_PEAK: PWM={peak} BASE=120 RAMP_END=300 "
+                f"HS_PEAK: PWM={peak} BASE=120 RAMP=OFF START=0 "
                 f"BRAKE_START={expected_start} BRAKE_END=2300 "
                 "HOLD_PWM=110 HOLD_MIN_END=3100",
             )

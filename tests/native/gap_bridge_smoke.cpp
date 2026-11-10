@@ -81,7 +81,7 @@ static void beginMap(uint8_t map, int32_t origin, int16_t peak=220, int16_t base
     assert(pid_get_run_encoder_progress() == 0);
     stepMs(14);
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
-    assert(pwmL == base && pwmR == base);
+    assert(pwmL == peak && pwmR == peak); // HS_PEAK applies immediately; no initial ramp
 }
 static void advanceTo(int32_t relativeTicks, int32_t origin) {
     simLeft = origin + relativeTicks;
@@ -177,15 +177,15 @@ int main(void) {
     setLine(); stepMs(2);
     assert(pid_get_current_case() == LINE_CASE_NORMAL_PID);
 
-    // All MAPs share first-straight brake 1800->2300, then HOLD PWM 110.
-    // Finishing the ramp must NOT return to BASE at encoder 2300.
+    // All MAPs start directly at HS_PEAK, then brake and HOLD at PWM 110.
+    // The initial BASE -> HS_PEAK acceleration ramp is intentionally removed.
     for (uint8_t map = 1; map <= 3; ++map) {
         const int32_t origin = 210000 + int32_t(map) * 10000;
         beginMap(map, origin);
-        assert(pid_get_high_speed_stage() == 1);
+        assert(pid_get_high_speed_stage() == 2); // CRUISE from AUTO start
         advanceTo(100, origin);
         stepMs(2);
-        assert(pwmL >= 153 && pwmL <= 154 && pwmL == pwmR);
+        assert(pwmL == 220 && pwmR == 220);
         advanceTo(300, origin);
         stepMs(2);
         assert(pid_get_high_speed_stage() == 2);

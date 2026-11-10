@@ -39,9 +39,8 @@ constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 // Named-track dashed-line coast. Encoder positions are relative to AUTO start.
 // These are provisional windows extracted from the 2026-10-31 map logs.
 constexpr uint32_t GAP_TIMEOUT_MS = 100;
-// First straight trapezoid in relative motor-encoder ticks.
-// An experimental open-loop PWM envelope, not closed-loop wheel velocity.
-constexpr int32_t HS_RAMP_END_ENC = 300;
+// Encoder-based first-straight PWM envelope; not closed-loop wheel velocity.
+// HS_PEAK is applied immediately; only the encoder-triggered brake remains.
 // Shared first-straight corner profile for MAP 1/2/3.
 constexpr int32_t HS_BRAKE_START_ENC = 1800;        // Peak 100..229
 constexpr int32_t HS_EARLY_BRAKE_START_ENC = 1600;  // Peak 230..239
@@ -75,12 +74,8 @@ static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     // HOLD target is independent of BASE (e.g. BASE=100, HOLD=110).
     // Never turn braking into acceleration if HS_PEAK is below 110.
     const float holdPwm = fminf(HS_CORNER_HOLD_PWM, peak);
-    if (ticks <= 0) return basePwm;
-    if (ticks < HS_RAMP_END_ENC) {
-        return basePwm + (peak - basePwm) *
-            ((float)ticks / (float)HS_RAMP_END_ENC);
-    }
     const int32_t brakeStart = highSpeedBrakeStart();
+    // Initial BASE -> HS_PEAK ramp removed: use HS_PEAK from AUTO start.
     if (ticks < brakeStart) return peak;
     if (ticks < HS_BRAKE_END_ENC) {
         return peak +
@@ -114,6 +109,54 @@ static int32_t runEncoderProgress() {
                         ((int64_t)right - runEncoderOriginR);
     return (int32_t)(sum / 2);
 }
+
+// Map 1 PID-only sensor selection, ported from mainHighSpeedv2.
+// Physical 16-eye acquisition and FSM remain full-width.
+// Stage 1: S5..S15; Stage 2: S0..S8; Stage 3: S0..S15.
+int32_t map1SensorStage2Ticks = 650;
+int32_t map1SensorStage3Ticks = 1350;
+uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
+constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
+int32_t map1SensorMaxTicks = 0;
+
+static int32_t map1SensorTravelTicks() {
+    int32_t left = 0, right = 0;
+    encoder_get_counts(&left, &right);
+    int64_t dl = (int64_t)left - runEncoderOriginL;
+    int64_t dr = (int64_t)right - runEncoderOriginR;
+    if (dl < 0) dl = -dl;
+    if (dr < 0) dr = -dr;
+    const int64_t average = (dl + dr) / 2;
+    return average > INT32_MAX ? INT32_MAX : (int32_t)average;
+}
+
+static uint16_t map1PidSensorMask() {
+    if (selectedMap != 1 || !autoMode) return MAP1_SENSOR_MASK_STAGE3;
+    const int32_t traveled = map1SensorTravelTicks();
+    if (traveled > map1SensorMaxTicks) map1SensorMaxTicks = traveled;
+    if (map1SensorMaxTicks < map1SensorStage2Ticks)
+        return map1SensorStageMasks[0];
+    if (map1SensorMaxTicks < map1SensorStage3Ticks)
+        return map1SensorStageMasks[1];
+    return map1SensorStageMasks[2];
+}
+
+static bool calculateMaskedPidPosition(uint16_t allowedMask, float *outPosition) {
+    if (!outPosition || !calibrationReady) return false;
+    const uint16_t visible = sensor_get_line_bits() & allowedMask;
+    float weighted = 0.0f;
+    uint32_t strength = 0;
+    for (uint8_t i = 0; i < N_SENSORS; ++i) {
+        if (!(visible & (uint16_t(1U) << i))) continue;
+        const uint16_t calibrated = sensor_get_calibrated(i);
+        weighted += (float)calibrated * SENSOR_WEIGHTS[i];
+        strength += calibrated;
+    }
+    if (strength == 0) return false;
+    *outPosition = weighted / (float)strength;
+    return true;
+}
+
 constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
 
 // A sharp turn is entered only when the centroid reaches the outer region.
@@ -245,6 +288,7 @@ static void resetLineTracking() {
     highSpeedStage = HS_DISABLED;
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
+    map1SensorMaxTicks = 0;
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -315,7 +359,7 @@ void pid_set_auto_mode(bool enabled) {
     autoStartedMs = millis();
     if (enabled) {
         encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
-        highSpeedStage = selectedMap >= 1 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED;
+        highSpeedStage = selectedMap >= 1 && selectedMap <= 3 ? HS_CRUISE : HS_DISABLED;
     }
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
@@ -332,6 +376,28 @@ bool pid_select_map(uint8_t mapId) {
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
+
+bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
+                                 uint16_t mask1, uint16_t mask2, uint16_t mask3) {
+    if (autoMode || stage2 <= 0 || stage3 <= stage2 ||
+        stage3 > 10000000 || !mask1 || !mask2 || !mask3) return false;
+    map1SensorStage2Ticks = stage2;
+    map1SensorStage3Ticks = stage3;
+    map1SensorStageMasks[0] = mask1;
+    map1SensorStageMasks[1] = mask2;
+    map1SensorStageMasks[2] = mask3;
+    return true;
+}
+
+void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
+                                 uint16_t *mask1, uint16_t *mask2,
+                                 uint16_t *mask3) {
+    if (stage2) *stage2 = map1SensorStage2Ticks;
+    if (stage3) *stage3 = map1SensorStage3Ticks;
+    if (mask1) *mask1 = map1SensorStageMasks[0];
+    if (mask2) *mask2 = map1SensorStageMasks[1];
+    if (mask3) *mask3 = map1SensorStageMasks[2];
+}
 uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
@@ -406,10 +472,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                     ? HS_FINISHED : HS_CORNER_HOLD;
         } else if (highSpeedMaxProgress >= highSpeedBrakeStart()) {
             highSpeedStage = HS_BRAKE;
-        } else if (highSpeedMaxProgress >= HS_RAMP_END_ENC) {
-            highSpeedStage = HS_CRUISE;
         } else {
-            highSpeedStage = HS_ACCEL;
+            highSpeedStage = HS_CRUISE;
         }
     }
 
@@ -627,6 +691,12 @@ void pid_line_follow_step(void) {
     float pos = 0;
     uint8_t blackCount = 0;
     const bool good = pid_calculate_position(&pos, &blackCount);
+    const uint16_t pidSensorMask = map1PidSensorMask();
+    float pidPosition = pos;
+    const bool pidMeasurementGood =
+        pidSensorMask == MAP1_SENSOR_MASK_STAGE3
+            ? good
+            : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
     const uint32_t nowUs = micros();
@@ -655,8 +725,8 @@ void pid_line_follow_step(void) {
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
-    } else if (currentCase == LINE_CASE_NORMAL_PID && good) {
-        const float err = pos;
+    } else if (currentCase == LINE_CASE_NORMAL_PID && pidMeasurementGood) {
+        const float err = pidPosition;
         const float absErr = fabsf(err);
 
         // Non-linear P gain: ramps up quadratically as error increases.

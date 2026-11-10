@@ -67,7 +67,13 @@ bool pid_is_auto_mode(void);
 // Set track profile before AUTO. Valid MAP values: 1, 2, 3.
 bool pid_select_map(uint8_t mapId);
 uint8_t pid_get_selected_map(void);
-// High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
+// Map 1 NORMAL_PID sensor masks; physical 16-eye FSM inputs remain unmasked.
+bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
+                                 uint16_t mask1, uint16_t mask2, uint16_t mask3);
+void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
+                                 uint16_t *mask1, uint16_t *mask2,
+                                 uint16_t *mask3);
+// High-speed stage: 0 disabled, 1 reserved (initial ramp removed), 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
 // Adjustable peak PWM before START (100-255), must not be below BASE.

@@ -77,6 +77,15 @@ int main(void) {
         minValues[i]=1000;maxValues[i]=2000;thresholds[i]=1400;
     }
     pid_init(2.2f,0,0,120);
+    int32_t sensorStage2=0,sensorStage3=0;
+    uint16_t sensorMask1=0,sensorMask2=0,sensorMask3=0;
+    pid_get_map1_sensor_profile(&sensorStage2,&sensorStage3,
+                                &sensorMask1,&sensorMask2,&sensorMask3);
+    assert(sensorStage2==650 && sensorStage3==1350);
+    assert(sensorMask1==0xFFE0U && sensorMask2==0x01FFU &&
+           sensorMask3==0xFFFFU);
+    assert(pid_set_map1_sensor_profile(650,1350,0xFFE0U,0x01FFU,0xFFFFU));
+    assert(!pid_set_map1_sensor_profile(1350,650,0xFFE0U,0x01FFU,0xFFFFU));
     pid_set_auto_mode(true);
     pid_line_follow_step();
     assert(leftPwm==0 && rightPwm==0);

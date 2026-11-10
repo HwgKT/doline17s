@@ -1272,7 +1272,7 @@ class App(tk.Tk):
             hs = re.search(r"\bhs=(\d+)\b", message)
             tick = re.search(r"\brunEnc=(-?\d+)\b", message)
             if hs:
-                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE", "ABORTED", "HOLD")
+                names = ("OFF", "RESERVED", "CRUISE", "BRAKE", "COMPLETE", "ABORTED", "HOLD")
                 state = int(hs.group(1))
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
                 self.high_speed_status.set(

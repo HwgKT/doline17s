@@ -99,7 +99,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -158,7 +158,7 @@ void command(const String &raw) {
   if(s=="HS_PEAK"){
     char b[160];
     snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
+      "HS_PEAK: PWM=%d BASE=%d RAMP=OFF START=0 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
       pid_get_high_speed_peak(),pid_get_base_speed(),
       (long)pid_get_high_speed_brake_start());
     reply(b);return;
@@ -206,6 +206,35 @@ void command(const String &raw) {
     String b="SENSORS: ";
     for(int i=0;i<N_SENSORS;++i)b+=(sensor_is_black(i)?'1':'0');
     reply(b);return;
+  }
+  // Read/update the Map 1 NORMAL_PID sensor masks; masks are hexadecimal.
+  if(s=="SENSOR_PROFILE"){
+    int32_t t1=0,t2=0;
+    uint16_t m1=0,m2=0,m3=0;
+    pid_get_map1_sensor_profile(&t1,&t2,&m1,&m2,&m3);
+    char b[130];
+    snprintf(b,sizeof(b),
+      "SENSOR_PROFILE T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
+      (long)t1,(long)t2,(unsigned)m1,(unsigned)m2,(unsigned)m3);
+    reply(b);return;
+  }
+  if(s.startsWith("SENSOR_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: SENSOR_PROFILE_REQUIRES_STOPPED");return;
+    }
+    long t1=0,t2=0;
+    unsigned m1=0,m2=0,m3=0;
+    char trailing=0;
+    const int count=sscanf(s.c_str()+15,"%ld,%ld,%x,%x,%x %c",
+                            &t1,&t2,&m1,&m2,&m3,&trailing);
+    if(count!=5 || t1<=0 || t2<=t1 || t2>10000000L ||
+       m1==0 || m2==0 || m3==0 ||
+       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU ||
+       !pid_set_map1_sensor_profile((int32_t)t1,(int32_t)t2,
+                                   (uint16_t)m1,(uint16_t)m2,(uint16_t)m3)){
+      reply("ERR: SENSOR_PROFILE_INVALID");return;
+    }
+    command("SENSOR_PROFILE");return;
   }
   // Explicit track profile, independent of the Python CSV destination.
   if(s=="MAP"){
@@ -268,13 +297,13 @@ void command(const String &raw) {
        pid_get_kp(),pid_get_ki(),pid_get_kd(),
        (unsigned long)millis());
     reply(runInfo);
-    char rampEvent[160];
-    snprintf(rampEvent,sizeof(rampEvent),
-      "HS_STAGE RAMP map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+    char cruiseEvent[160];
+    snprintf(cruiseEvent,sizeof(cruiseEvent),
+      "HS_STAGE CRUISE map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
       (unsigned)pid_get_selected_map(),pid_get_base_speed(),
       pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
       (unsigned long)millis());
-    reply(rampEvent);
+    reply(cruiseEvent);
     return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
@@ -519,7 +548,7 @@ void loop() {
     }
     if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
       static const char* const labels[]={
-        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD"
+        "OFF","RESERVED","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD"
       };
       if(newHighSpeedStage<7U){
         char b[160];
