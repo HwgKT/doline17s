@@ -214,10 +214,10 @@ class App(tk.Tk):
         self.sensor_profile_confirmed = False
         # Gain scheduling is independent of the three-stage sensor mask.
         self.pid_gain_profiles = [
-            (0, 1.60, 0.00, 0.80),
-            (2500, 1.60, 0.00, 0.80),
-            (8000, 1.60, 0.00, 0.80),
-            (11000, 1.60, 0.00, 0.80),
+            (0, 1.60, 0.00, 0.80, -1),
+            (2500, 1.60, 0.00, 0.80, -1),
+            (8000, 1.60, 0.00, 0.80, -1),
+            (11000, 1.60, 0.00, 0.80, 240),
         ]
         self.pid_gain_profiles_received = set()
         self.pid_gain_profile_window = None
@@ -314,17 +314,6 @@ class App(tk.Tk):
             sensor_profile_bar, text="Đọc từ ESP32",
             command=lambda: self.send_command("SENSOR_PROFILE"))
         self.sensor_profile_read_btn.pack(side="right")
-
-        gain_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
-        gain_bar.pack(fill="x", padx=8, pady=(0, 2))
-        ttk.Button(gain_bar, text="Cấu hình PID theo chặng",
-                   command=self.open_pid_gain_profile_editor).pack(
-                       side="left", padx=(0, 6))
-        self.label(gain_bar, textvariable=self.pid_gain_profile_status,
-                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(
-                       side="left", fill="x", expand=True)
-        ttk.Button(gain_bar, text="Đọc PID chặng",
-                   command=lambda: self.send_command("PID_PROFILE")).pack(side="right")
 
         # Calibration is a prerequisite for START. Keep its controls visible at
         # minimum window size rather than below the non-scrollable HS_PEAK panel.
@@ -519,6 +508,16 @@ class App(tk.Tk):
         self.label(panel, textvariable=self.hs_peak_feedback,
                    bg=PANEL, fg=MUTED, font=("Segoe UI", 8),
                    anchor="w").pack(fill="x", pady=(0, 1))
+
+        # Stage PID/PWM editor beside the existing BASE and HS_PEAK controls.
+        gain_bar = tk.Frame(panel, bg=PANEL, pady=4)
+        gain_bar.pack(fill="x", pady=(3, 3))
+        ttk.Button(gain_bar, text="PID + PWM theo chặng",
+                   command=self.open_pid_gain_profile_editor).pack(side="left", padx=(0, 5))
+        ttk.Button(gain_bar, text="Đọc 4 chặng",
+                   command=lambda: self.send_command("PID_PROFILE")).pack(side="right")
+        self.label(panel, textvariable=self.pid_gain_profile_status,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 8)).pack(fill="x")
 
         terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
@@ -856,21 +855,22 @@ class App(tk.Tk):
                 self.pid_gain_profile_window = None
         win = tk.Toplevel(self)
         self.pid_gain_profile_window = win
-        win.title("MAP 1 — 4 bộ PID theo encoder")
+        win.title("MAP 1 — PID + PWM theo encoder")
         win.configure(bg=PANEL)
-        win.geometry("625x380")
-        win.minsize(580, 340)
+        win.geometry("780x400")
+        win.minsize(740, 360)
         win.transient(self)
-        self.label(win, "Mốc bắt đầu mỗi chặng (tick AUTO), Kp / Ki / Kd riêng.",
+        self.label(win, "PID và PWM theo chặng; -1 kế thừa BASE chung. PWM GD4 đồng bộ HS_PEAK.",
                    bg=PANEL, fg=MUTED).pack(anchor="w", padx=12, pady=(12, 6))
         entries = []
-        for stage, (start, kp, ki, kd) in enumerate(self.pid_gain_profiles):
+        for stage, (start, kp, ki, kd, pwm) in enumerate(self.pid_gain_profiles):
             row = tk.Frame(win, bg=PANEL, padx=12, pady=4)
             row.pack(fill="x")
             self.label(row, f"GD{stage + 1}", bg=PANEL,
                        font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 15))
             vars_ = []
-            for title, value in (("Tick", start), ("Kp", kp), ("Ki", ki), ("Kd", kd)):
+            for title, value in (("Tick", start), ("Kp", kp), ("Ki", ki),
+                                 ("Kd", kd), ("PWM", pwm)):
                 self.label(row, title, bg=PANEL, fg=MUTED).pack(side="left", padx=(0, 3))
                 variable = tk.StringVar(value=str(value))
                 ttk.Entry(row, textvariable=variable, width=10).pack(
@@ -892,25 +892,34 @@ class App(tk.Tk):
             profiles = []
             try:
                 for vars_ in entries:
-                    start_text, *gain_text = (v.get().strip() for v in vars_)
+                    start_text, kp_s, ki_s, kd_s, pwm_s = (
+                        v.get().strip() for v in vars_)
                     if not start_text.isdigit():
                         raise ValueError("Tick phải là số nguyên không âm")
                     start = int(start_text)
-                    gains = [float(v) for v in gain_text]
+                    gains = [float(v) for v in (kp_s, ki_s, kd_s)]
                     if not all(math.isfinite(g) and 0 <= g <= 50 for g in gains):
                         raise ValueError("Gain phải nằm trong khoảng 0–50")
-                    profiles.append((start, *gains))
+                    pwm = int(pwm_s)
+                    if str(pwm) != pwm_s or not (-1 <= pwm <= 255):
+                        raise ValueError("PWM: -1 hoặc 0–255")
+                    profiles.append((start, *gains, pwm))
                 ticks = [p[0] for p in profiles]
                 if ticks[0] != 0 or not (0 < ticks[1] < ticks[2] < ticks[3] <= 10000000):
                     raise ValueError("Mốc phải có dạng 0 < T2 < T3 < T4")
+                if not (100 <= profiles[3][4] <= 255):
+                    raise ValueError("PWM GD4 / HS_PEAK phải từ 100 đến 255")
+                base = int(self.pid_vars["Base"].get().strip())
+                if profiles[3][4] < base:
+                    raise ValueError("HS_PEAK của GD4 phải >= BASE chung")
             except ValueError as exc:
                 feedback.set(f"Cấu hình không hợp lệ: {exc}")
                 return
             # Single atomic command avoids intermediate conflicting tick thresholds.
             self.pid_gain_profiles_received.clear()
             values = ";".join(
-                f"{start},{kp:.3f},{ki:.3f},{kd:.3f}"
-                for start, kp, ki, kd in profiles)
+                f"{start},{kp:.3f},{ki:.3f},{kd:.3f},{pwm}"
+                for start, kp, ki, kd, pwm in profiles)
             if not self.send_command("PID_PROFILES:" + values):
                 feedback.set("Không thể gửi cấu hình 4 profile")
                 return
@@ -1407,15 +1416,22 @@ class App(tk.Tk):
         self.log(f"RX < {message}")
         gain_match = re.fullmatch(
             r"PID_PROFILE STAGE=(\d+) TICK=(\d+) KP=([\d.]+) "
-            r"KI=([\d.]+) KD=([\d.]+)", message)
+            r"KI=([\d.]+) KD=([\d.]+) PWM=(-?\d+)", message)
         if gain_match:
             stage = int(gain_match.group(1))
             if 1 <= stage <= 4:
                 profile = (int(gain_match.group(2)),
                            float(gain_match.group(3)),
                            float(gain_match.group(4)),
-                           float(gain_match.group(5)))
+                           float(gain_match.group(5)),
+                           int(gain_match.group(6)))
                 self.pid_gain_profiles[stage - 1] = profile
+                if stage == 4:
+                    self.high_speed_peak = profile[4]
+                    self.hs_peak_confirmed = profile[4]
+                    if not self.hs_peak_dirty:
+                        self.hs_peak_var.set(profile[4])
+                        self.hs_peak_value_text.set(f"{profile[4]} / 255")
                 self.pid_gain_profiles_received.add(stage)
                 starts = "/".join(str(p[0]) for p in self.pid_gain_profiles)
                 suffix = "ESP32 OK" if len(self.pid_gain_profiles_received) == 4 else "đang đọc"
