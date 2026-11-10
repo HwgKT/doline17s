@@ -27,6 +27,10 @@ static float lastDashedCorrection = 0;   // remembered PID output for dashed-lin
 namespace {
 constexpr uint32_t LINE_ACQUIRE_MS = 10;
 constexpr uint32_t LINE_LOSS_MS = 30;           // was 40 — faster loss detection reduces stutter duration
+// A line that disappeared at the outer edge during an active sharp turn is
+// not a centered dashed gap. Pivot immediately rather than driving both
+// wheels forward for the usual 30 ms loss-confirmation window.
+constexpr float EDGE_CORNER_IMMEDIATE_SEARCH_ERROR = 55.0f;
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 // Finish requires ALL 16 sensors to see black on 3 consecutive PID samples.
@@ -837,6 +841,24 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
 
         if (!isSearchTurn() && blackCount == 0) {
+            // The last valid physical line measurement was at the far edge
+            // and its direction agrees with the active sharp turn. Start
+            // the existing SEARCH pivot on this FIRST all-white sample.
+            // Keep the normal 30ms grace for centered dashed-line gaps.
+            const bool edgeCornerLost =
+                (turnState == TURN_RIGHT &&
+                 lastKnownPosition >= EDGE_CORNER_IMMEDIATE_SEARCH_ERROR) ||
+                (turnState == TURN_LEFT &&
+                 lastKnownPosition <= -EDGE_CORNER_IMMEDIATE_SEARCH_ERROR);
+            if (edgeCornerLost) {
+                turnState = searchStateFor(turnState);
+                searchStartedMs = now;
+                centeredTurnFrames = 0;
+                turnMissing = false;
+                missing = false;
+                clearPidState();
+                return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+            }
             if (!turnMissing) {
                 turnMissing = true;
                 turnMissingSinceMs = now;
