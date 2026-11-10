@@ -131,6 +131,15 @@ constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // Map 1: BASE follows the app-configured HS_PEAK from 11,000 ticks onward.
 // No additional per-section PWM caps; wheel PI remains independently toggled.
+// Map 1 gain scheduling: encoder-relative PID gains, independent of wheel PI.
+struct Map1PidGainStage { int32_t startTick; float kp; float ki; float kd; };
+Map1PidGainStage map1PidStages[4] = {
+    {0, 1.60f, 0.0f, 0.80f},
+    {2500, 1.60f, 0.0f, 0.80f},
+    {8000, 1.60f, 0.0f, 0.80f},
+    {11000, 1.60f, 0.0f, 0.80f}
+};
+uint8_t map1ActivePidStage = 0;
 int32_t map1MaxProgress = 0;
 // Map 01 route lock assumes a repeatable START pose; enabled by default.
 bool map1RouteLockEnabled = false; // Temporarily disabled by default for PID/sensor-mask testing; ROUTE_LOCK:1 to enable.
@@ -412,6 +421,7 @@ static void resetLineTracking() {
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
+    map1ActivePidStage = 0;
     map1SensorMaxTicks = 0;
      map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
@@ -547,7 +557,31 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask2) *mask2 = map1SensorStageMasks[1];
     if (mask3) *mask3 = map1SensorStageMasks[2];
 }
-uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
+bool pid_set_map1_pid_profile(uint8_t stage, int32_t startTick,
+                              float kp, float ki, float kd) {
+    if (autoMode || stage >= 4 || kp < 0.0f || kp > 50.0f ||
+        ki < 0.0f || ki > 50.0f || kd < 0.0f || kd > 50.0f ||
+        !isfinite(kp) || !isfinite(ki) || !isfinite(kd)) return false;
+    if (stage == 0) {
+        if (startTick != 0) return false;
+    } else if (startTick <= map1PidStages[stage - 1].startTick ||
+               startTick > 10000000) return false;
+    if (stage < 3 && startTick >= map1PidStages[stage + 1].startTick)
+        return false;
+    map1PidStages[stage] = {startTick, kp, ki, kd};
+    return true;
+}
+void pid_get_map1_pid_profile(uint8_t stage, int32_t* startTick,
+                              float* kp, float* ki, float* kd) {
+    if (stage >= 4) return;
+    const Map1PidGainStage& cfg = map1PidStages[stage];
+    if (startTick) *startTick = cfg.startTick;
+    if (kp) *kp = cfg.kp;
+    if (ki) *ki = cfg.ki;
+    if (kd) *kd = cfg.kd;
+}
+uint8_t pid_get_map1_pid_stage(void) { return map1ActivePidStage; }
+uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage;
 int32_t pid_get_map1_late_boost_start(void) { return 11000; }
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
@@ -1002,9 +1036,27 @@ void pid_line_follow_step(void) {
         const float err = pidPosition;
         const float absErr = fabsf(err);
 
-        // Non-linear P gain: ramps up quadratically as error increases.
-        // This makes the robot react gently near center but aggressively near edges.
-        const float p = pidConfig.Kp * (1.0f + 0.018f * absErr) * err;
+        // Map 1 gain scheduling, using monotonic AUTO-relative encoder ticks.
+        // On stage transition invalidate derivative history to avoid a PWM spike.
+        const Map1PidGainStage* activeGains = nullptr;
+        if (selectedMap == 1) {
+            uint8_t stage = 0;
+            for (uint8_t i = 1; i < 4; ++i)
+                if (map1MaxProgress >= map1PidStages[i].startTick) stage = i;
+            if (stage != map1ActivePidStage) {
+                map1ActivePidStage = stage;
+                derivativeHistoryValid = false;
+                derivativeWarmupFrames = 2;
+                integralError = 0.0f;
+                lastDTerm = 0.0f;
+            }
+            activeGains = &map1PidStages[stage];
+        }
+        const float kp = activeGains ? activeGains->kp : pidConfig.Kp;
+        const float ki = activeGains ? activeGains->ki : pidConfig.Ki;
+        const float kd = activeGains ? activeGains->kd : pidConfig.Kd;
+        // Preserve the original nonlinear-P and filtered-D PID implementation.
+        const float p = kp * (1.0f + 0.018f * absErr) * err;
 
         // Integral with anti-windup: tighter clamp + decay when error crosses zero
         if ((integralError > 0 && err < 0) || (integralError < 0 && err > 0))
@@ -1012,14 +1064,14 @@ void pid_line_follow_step(void) {
         integralError += err * dt;
         if (integralError > 80.0f) integralError = 80.0f;
         if (integralError < -80.0f) integralError = -80.0f;
-        const float it = pidConfig.Ki * integralError;
+        const float it = ki * integralError;
 
         // Derivative on error with low-pass filter to reduce noise spikes
         float d = 0.0f;
         if (derivativeWarmupFrames > 0) {
             --derivativeWarmupFrames;
-        } else if (pidConfig.Kd != 0 && derivativeHistoryValid && dtValid) {
-            const float rawD = pidConfig.Kd * (err - lastError) / measuredDt;
+        } else if (kd != 0 && derivativeHistoryValid && dtValid) {
+            const float rawD = kd * (err - lastError) / measuredDt;
             // First-order low-pass: alpha=0.6 balances responsiveness vs noise
             d = 0.6f * rawD + 0.4f * lastDTerm;
             // Hard clamp: prevents catastrophic D-spikes when re-entering PID after a turn
