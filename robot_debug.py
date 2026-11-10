@@ -1532,7 +1532,7 @@ class App(tk.Tk):
                         and getattr(self, "selected_map", None) == 1):
                     self.high_speed_status.set(
                         f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                        f"| 10k+ BASE→{self.high_speed_peak}"
+                        f"| 11k+ BASE→{self.high_speed_peak}"
                     )
                 else:
                     self.high_speed_status.set(
