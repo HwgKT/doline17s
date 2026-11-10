@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID PID_PROFILE PID_PROFILE:stage,tick,kp,ki,kd HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID PID_PROFILE PID_PROFILE:stage,tick,kp,ki,kd PID_PROFILES:four_semicolon_rows HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -190,6 +190,36 @@ void command(const String &raw) {
       reply(b);
     }
     return;
+  }
+  // Apply all four gain profiles as one validated transaction.
+  // Example PID_PROFILES:0,1.6,0,0.8;2500,1.6,0,0.8;8000,1.6,0,0.8;11000,1.6,0,0.8
+  if(s.startsWith("PID_PROFILES:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: PID_PROFILE_REQUIRES_STOPPED");return;
+    }
+    int32_t ticks[4]={0,0,0,0};
+    float gains[4][3]={{0}};
+    String data=s.substring(13);
+    bool valid=true;
+    for(uint8_t i=0;i<4;++i){
+      const int sep=data.indexOf(';');
+      if((i<3 && sep<0)||(i==3 && sep>=0)){
+        valid=false;break;
+      }
+      const String part=i<3 ? data.substring(0,sep) : data;
+      long tick=0;char tail=0;
+      const int n=sscanf(part.c_str(),"%ld,%f,%f,%f %c",
+                         &tick,&gains[i][0],&gains[i][1],&gains[i][2],&tail);
+      if(n!=4 || tick<0 || tick>10000000L){
+        valid=false;break;
+      }
+      ticks[i]=(int32_t)tick;
+      if(i<3)data=data.substring(sep+1);
+    }
+    if(!valid||!pid_set_map1_pid_profiles(ticks,gains)){
+      reply("ERR: PID_PROFILE_INVALID");return;
+    }
+    command("PID_PROFILE");return;
   }
   if(s.startsWith("PID_PROFILE:")){
     if(pid_is_auto_mode()||manualActive){
