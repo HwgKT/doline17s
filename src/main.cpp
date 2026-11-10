@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 MAP1_BASE_PROFILE MAP1_BASE_PROFILE:b1,...,b8 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -157,6 +157,51 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Read/update the eight Map 1 BASE targets without opening a terminal.
+  // MAP1_BASE_PROFILE:b1,b2,b3,b4,b5,b6,b7,b8 (PWM 45..255).
+  // Encoder X1..X7 are read-only here; BASE values are runtime RAM settings.
+  if(s=="MAP1_BASE_PROFILE"){
+    int32_t x[7]={0};
+    uint8_t base[8]={0};
+    pid_get_map1_speed_profile(x,base);
+    char b[220];
+    snprintf(b,sizeof(b),
+      "MAP1_BASE_PROFILE X1=%ld X2=%ld X3=%ld X4=%ld X5=%ld X6=%ld X7=%ld "
+      "B1=%u B2=%u B3=%u B4=%u B5=%u B6=%u B7=%u B8=%u",
+      (long)x[0],(long)x[1],(long)x[2],(long)x[3],(long)x[4],(long)x[5],(long)x[6],
+      (unsigned)base[0],(unsigned)base[1],(unsigned)base[2],(unsigned)base[3],
+      (unsigned)base[4],(unsigned)base[5],(unsigned)base[6],(unsigned)base[7]);
+    reply(b);return;
+  }
+  if(s.startsWith("MAP1_BASE_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP1_BASE_PROFILE_REQUIRES_STOPPED");return;
+    }
+    if(pid_get_selected_map()!=1){
+      reply("ERR: MAP1_BASE_PROFILE_MAP1_ONLY");return;
+    }
+    int value[8]={0};
+    char trailing=0;
+    const int count=sscanf(s.c_str()+18,
+      "%d,%d,%d,%d,%d,%d,%d,%d %c",
+      &value[0],&value[1],&value[2],&value[3],
+      &value[4],&value[5],&value[6],&value[7],&trailing);
+    if(count!=8){
+      reply("ERR: MAP1_BASE_PROFILE_FORMAT");return;
+    }
+    uint8_t base[8];
+    for(uint8_t i=0;i<8;++i){
+      if(value[i]<45 || value[i]>255){
+        reply("ERR: MAP1_BASE_PROFILE_RANGE_45_255");return;
+      }
+      base[i]=(uint8_t)value[i];
+    }
+    if(!pid_set_map1_base_profile(base)){
+      reply("ERR: MAP1_BASE_PROFILE_REJECTED");return;
+    }
+    command("MAP1_BASE_PROFILE");return;
+  }
+
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
   // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
   if(s=="SENSOR_PROFILE"){
@@ -438,6 +483,7 @@ void connectionState(uint32_t now) {
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
       command("HS_PEAK");
+      command("MAP1_BASE_PROFILE");
     }else{
       safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
       btDropPendingTelemetry(); // no replay after reconnect
