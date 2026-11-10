@@ -61,8 +61,8 @@ constexpr uint16_t CORNER90_R_WING = 0xF000U; // S12..S15
 constexpr uint16_t CORNER90_CENTER = 0x0180U; // S7,S8
 constexpr uint32_t CORNER90_CANDIDATE_MS = 110;
 constexpr uint32_t CORNER90_MIN_TURN_MS = 25;
-constexpr uint32_t CORNER90_MAX_TURN_MS = 350;
-constexpr uint32_t CORNER90_WHITE_TIMEOUT_MS = 65;
+constexpr uint32_t CORNER90_MAX_TURN_MS = 500;
+constexpr uint32_t CORNER90_WHITE_TIMEOUT_MS = 110;
 constexpr uint8_t CORNER90_WING_FRAMES = 2;
 constexpr uint8_t CORNER90_REACQUIRE_FRAMES = 3;
 // Named-track dashed-line coast. Encoder positions are relative to AUTO start.
