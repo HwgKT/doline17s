@@ -12,82 +12,50 @@ namespace {
 BluetoothSerial SerialBT;
 constexpr size_t FRAME_BYTES=2+sizeof(Telemetry)+1;
 constexpr UBaseType_t QUEUE_FRAMES=12;
-constexpr UBaseType_t QUEUE_REPLIES=12;
-constexpr size_t REPLY_BYTES=512; // DIAG/PERF lines can exceed 192 bytes.
 struct Frame { uint8_t bytes[FRAME_BYTES]; };
-struct Reply { char bytes[REPLY_BYTES]; size_t len; };
 QueueHandle_t txQueue=nullptr;
-QueueHandle_t replyQueue=nullptr;
+SemaphoreHandle_t txLock=nullptr;
 TaskHandle_t txTask=nullptr;
 volatile uint32_t queued=0,sent=0,dropped=0,failed=0;
 void txWorker(void *) {
   Frame frame{};
-  Reply reply{};
   for(;;){
-    // Control replies have priority over bulk telemetry. Only this task
-    // writes to SerialBT, so text can never split a binary 72-byte frame.
-    if(xQueueReceive(replyQueue,&reply,0)==pdTRUE){
-      if(SerialBT.hasClient()){
-        const size_t n=SerialBT.write(
-          reinterpret_cast<const uint8_t *>(reply.bytes),reply.len);
-        if(n!=reply.len)++failed;
-      }
-      continue;
-    }
-    if(xQueueReceive(txQueue,&frame,pdMS_TO_TICKS(5))!=pdTRUE)continue;
-    // Check again before writing a frame: FINISH/STOP must go first.
-    if(uxQueueMessagesWaiting(replyQueue)>0){
-      // Control burst: skip a sample rather than delay a stop ACK.
-      ++dropped;
-      continue;
-    }
+    if(xQueueReceive(txQueue,&frame,portMAX_DELAY)!=pdTRUE)continue;
     if(!SerialBT.hasClient()){++dropped;continue;}
-    // SPP can block under backpressure; never block the PID loop.
-    const size_t n=SerialBT.write(frame.bytes,sizeof(frame.bytes));
-    if(n==sizeof(frame.bytes))++sent; // Accepted by SPP, NOT delivered to PC.
-    else ++failed;
+    // BluetoothSerial.write can wait for SPP buffers. Run off the PID loop.
+    if(xSemaphoreTake(txLock,portMAX_DELAY)==pdTRUE){
+      const size_t n=SerialBT.write(frame.bytes,sizeof(frame.bytes));
+      xSemaphoreGive(txLock);
+      if(n==sizeof(frame.bytes))++sent; // Accepted by SPP, NOT delivered to PC.
+      else ++failed;
+    }
   }
 }
 }
 bool btBegin(const char *name){
   if(!SerialBT.begin(name))return false;
   txQueue=xQueueCreate(QUEUE_FRAMES,sizeof(Frame));
-  replyQueue=xQueueCreate(QUEUE_REPLIES,sizeof(Reply));
-  if(!txQueue||!replyQueue){
+  txLock=xSemaphoreCreateMutex();
+  if(!txQueue||!txLock){
     if(txQueue)vQueueDelete(txQueue);
-    if(replyQueue)vQueueDelete(replyQueue);
-    txQueue=nullptr;replyQueue=nullptr;SerialBT.end();return false;
+    if(txLock)vSemaphoreDelete(txLock);
+    txQueue=nullptr;txLock=nullptr;SerialBT.end();return false;
   }
-  if(xTaskCreatePinnedToCore(txWorker,"spp_telemetry",4096,nullptr,1,&txTask,0)!=pdPASS){
-    vQueueDelete(txQueue);vQueueDelete(replyQueue);
-    txQueue=nullptr;replyQueue=nullptr;SerialBT.end();return false;
+  if(xTaskCreatePinnedToCore(txWorker,"spp_telemetry",3072,nullptr,1,&txTask,0)!=pdPASS){
+    vQueueDelete(txQueue);vSemaphoreDelete(txLock);
+    txQueue=nullptr;txLock=nullptr;SerialBT.end();return false;
   }
   return true;
 }
 bool btConnected(){return SerialBT.hasClient();}
 void btSendLine(const String &line){
-  if(!btConnected()||!replyQueue)return;
-  Reply reply{};
-  const size_t length=line.length();
-  if(length+1>=REPLY_BYTES){++failed;return;}
-  memcpy(reply.bytes,line.c_str(),length);
-  reply.bytes[length]='\n';
-  reply.len=length+1;
-  // Never hold the control loop for Bluetooth writes. If diagnostics
-  // filled the control queue, evict an older reply to preserve FINISH/STOP.
-  if(xQueueSend(replyQueue,&reply,0)!=pdTRUE){
-    const bool urgent=line.startsWith("AUTO_FINISHED:") ||
-      line.startsWith("AUTO_STOPPED:") ||
-      line.startsWith("ESTOP:") ||
-      line.startsWith("MOTOR: STOP") ||
-      line.startsWith("MODE: AUTO PID") ||
-      line.startsWith("RUN_ORIGIN ");
-    if(urgent){
-      Reply stale{};
-      xQueueReceive(replyQueue,&stale,0);
-      if(xQueueSend(replyQueue,&reply,0)==pdTRUE)return;
-    }
-    ++failed; // Observable in DIAG.
+  if(!btConnected()||!txLock)return;
+  String msg=line;msg+='\n';
+  // Text replies are rare and explicitly requested; serialize whole writes
+  // with the binary worker so a line never corrupts a 72-byte frame.
+  if(xSemaphoreTake(txLock,pdMS_TO_TICKS(100))==pdTRUE){
+    SerialBT.write(reinterpret_cast<const uint8_t *>(msg.c_str()),msg.length());
+    xSemaphoreGive(txLock);
   }
 }
 bool btSendTelemetry(const Telemetry &sample){
@@ -112,8 +80,6 @@ void btDropPendingTelemetry(){
     const uint32_t n=uxQueueMessagesWaiting(txQueue);
     xQueueReset(txQueue);dropped+=n;
   }
-  // Keep replyQueue intact: queued RUN_ORIGIN / FINISH / STOP events
-  // are critical and must survive telemetry flushes.
 }
 void btPollCommands(BtCommandHandler handler){
   static String line;
