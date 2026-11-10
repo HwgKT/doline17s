@@ -232,6 +232,17 @@ class App(tk.Tk):
         self.sensor_profile_status = tk.StringVar(
             value="PID mắt: chờ ESP32 (mặc định 650 / 1350 ticks)")
         self.sensor_profile_window = None
+        # Eight Map 1 BASE targets; encoder X thresholds are read back from ESP32.
+        self.map1_x_ticks = [3800, 7400, 8350, 10500, 11300, 12800, 15000]
+        self.map1_base_values = [140, 140, 140, 240, 210, 240, 210, 255]
+        self.map1_base_confirmed = False
+        self.map1_base_pending = None
+        self.map1_base_window = None
+        self.map1_base_vars = []
+        self.map1_base_stage_labels = []
+        self.map1_base_dirty = False
+        self.map1_base_status = tk.StringVar(
+            value="MAP 1 BASE: chờ ESP32 xác nhận")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -523,6 +534,14 @@ class App(tk.Tk):
         self.label(panel, textvariable=self.hs_peak_feedback,
                    bg=PANEL, fg=MUTED, font=("Segoe UI", 8),
                    anchor="w").pack(fill="x", pady=(0, 1))
+
+        map1_base_row = tk.Frame(panel, bg=PANEL)
+        map1_base_row.pack(fill="x", pady=(3, 2))
+        ttk.Button(map1_base_row, text="BASE từng đoạn Map 1",
+                   command=self.open_map1_base_editor).pack(side="left", padx=(0, 7))
+        self.label(map1_base_row, textvariable=self.map1_base_status,
+                   bg=PANEL, fg=CYAN, font=("Segoe UI", 8),
+                   anchor="w").pack(side="left", fill="x", expand=True)
 
         terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
@@ -861,6 +880,126 @@ class App(tk.Tk):
         cmd = self.cmd_var.get().strip()
         if self.send_command(cmd):
             self.cmd_var.set("")
+
+    def open_map1_base_editor(self):
+        if self.map1_base_window is not None:
+            try:
+                if self.map1_base_window.winfo_exists():
+                    self.map1_base_window.lift()
+                    self.send_command("MAP1_BASE_PROFILE")
+                    return
+            except tk.TclError:
+                self.map1_base_window = None
+
+        win = tk.Toplevel(self)
+        self.map1_base_window = win
+        win.title("MAP 1 — BASE theo 8 đoạn encoder")
+        win.configure(bg=PANEL)
+        win.geometry("560x500")
+        win.minsize(520, 460)
+        win.transient(self)
+
+        self.label(
+            win,
+            "Nhập BASE mục tiêu cho từng đoạn. PID gains giữ nguyên; "
+            "speed governor vẫn có thể giảm PWM thực tế theo sai số line.",
+            bg=PANEL, fg=MUTED, wraplength=520, justify="left"
+        ).pack(anchor="w", padx=12, pady=(10, 7))
+
+        table = tk.Frame(win, bg=PANEL, padx=12)
+        table.pack(fill="both", expand=True)
+        headers = (("Đoạn", 18), ("Encoder", 22), ("BASE PWM", 12))
+        for col, (caption, width) in enumerate(headers):
+            self.label(table, caption, bg=PANEL, fg=CYAN,
+                       width=width, anchor="w").grid(
+                           row=0, column=col, sticky="w", padx=4, pady=(2, 7))
+
+        self.map1_base_vars = []
+        self.map1_base_stage_labels = []
+        self.map1_base_dirty = False
+        for i, value in enumerate(self.map1_base_values):
+            start = 0 if i == 0 else self.map1_x_ticks[i - 1]
+            end = self.map1_x_ticks[i] if i < 7 else None
+            encoder_text = (f"{start:,} – {end:,}" if end is not None
+                            else f"≥ {start:,} (về đích)")
+            self.label(table, f"Đoạn {i + 1}", bg=PANEL, width=18,
+                       anchor="w").grid(row=i + 1, column=0, sticky="w",
+                                        padx=4, pady=4)
+            range_label = self.label(table, encoder_text, bg=PANEL,
+                                     fg=MUTED, width=22, anchor="w")
+            range_label.grid(row=i + 1, column=1, sticky="w", padx=4, pady=4)
+            self.map1_base_stage_labels.append(range_label)
+            var = tk.StringVar(value=str(value))
+            var.trace_add("write", lambda *_: setattr(self, "map1_base_dirty", True))
+            self.map1_base_vars.append(var)
+            ttk.Entry(table, textvariable=var, width=10,
+                      justify="center").grid(row=i + 1, column=2,
+                                             sticky="w", padx=4, pady=4)
+
+        feedback = tk.StringVar(
+            value="Chỉ áp dụng khi đã kết nối SPP, chọn MAP 1 và robot STOP.")
+        self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER,
+                   wraplength=520, justify="left").pack(
+                       anchor="w", padx=12, pady=(8, 4))
+
+        actions = tk.Frame(win, bg=PANEL, padx=12, pady=8)
+        actions.pack(fill="x")
+
+        def read_profile():
+            if self.reader is None or not self.reader.is_alive():
+                feedback.set("Chưa kết nối Bluetooth Classic SPP.")
+                return
+            self.map1_base_dirty = False
+            if self.send_command("MAP1_BASE_PROFILE"):
+                feedback.set("Đang đọc mốc encoder và BASE từ ESP32...")
+
+        def apply_profile():
+            if (self.selected_map != 1 or self.reader is None
+                    or not self.reader.is_alive() or self.auto_running
+                    or self.start_pending or self.stop_ack_deadline is not None
+                    or self.stop_verify_pending or self.run_csv.active is not None):
+                feedback.set(
+                    "Cần kết nối SPP, chọn MAP 1, robot STOP và CSV đã đóng.")
+                return
+            try:
+                values = [int(var.get().strip()) for var in self.map1_base_vars]
+            except ValueError:
+                feedback.set("BASE phải là số nguyên.")
+                return
+            if len(values) != 8 or any(v < 45 or v > 255 for v in values):
+                feedback.set("Mỗi BASE phải nằm trong khoảng 45–255 PWM.")
+                return
+            command = "MAP1_BASE_PROFILE:" + ",".join(str(v) for v in values)
+            if self.send_command(command):
+                self.map1_base_pending = tuple(values)
+                self.map1_base_confirmed = False
+                self.map1_base_dirty = False
+                self.map1_base_status.set("MAP 1 BASE: đang chờ ESP32 xác nhận")
+                feedback.set("Đã gửi cấu hình; chỉ coi là áp dụng sau khi nhận ACK.")
+
+        def load_defaults():
+            defaults = [140, 140, 140, 240, 210, 240, 210, 255]
+            for var, value in zip(self.map1_base_vars, defaults):
+                var.set(str(value))
+            feedback.set("Đã điền BASE mặc định của firmware; nhấn Áp dụng để gửi.")
+
+        ttk.Button(actions, text="Đọc từ ESP32",
+                   command=read_profile).pack(side="left", padx=(0, 6))
+        ttk.Button(actions, text="Áp dụng BASE",
+                   command=apply_profile).pack(side="left", padx=6)
+        ttk.Button(actions, text="Mặc định",
+                   command=load_defaults).pack(side="left", padx=6)
+
+        def close_window():
+            self.map1_base_window = None
+            self.map1_base_vars = []
+            self.map1_base_stage_labels = []
+            win.destroy()
+
+        ttk.Button(actions, text="Đóng",
+                   command=close_window).pack(side="right")
+        win.protocol("WM_DELETE_WINDOW", close_window)
+        read_profile()
 
     def open_sensor_profile_editor(self):
         """Edit per-stage masks and switch ticks; changes require robot stopped."""
@@ -1356,6 +1495,55 @@ class App(tk.Tk):
         if message.startswith("RUN_ORIGIN "):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
+        if message.startswith("MAP1_BASE_PROFILE "):
+            try:
+                x_ticks = [
+                    int(re.search(rf"\bX{i}=(\d+)\b", message).group(1))
+                    for i in range(1, 8)
+                ]
+                base_values = [
+                    int(re.search(rf"\bB{i}=(\d+)\b", message).group(1))
+                    for i in range(1, 9)
+                ]
+                if (any(a >= b for a, b in zip(x_ticks, x_ticks[1:]))
+                        or any(v < 45 or v > 255 for v in base_values)):
+                    raise ValueError("invalid Map 1 profile")
+                pending = self.map1_base_pending
+                self.map1_x_ticks = x_ticks
+                self.map1_base_values = base_values
+                if pending is not None and tuple(base_values) != pending:
+                    self.map1_base_confirmed = False
+                    self.map1_base_status.set(
+                        "MAP 1 BASE: ESP32 trả về khác cấu hình vừa gửi")
+                else:
+                    self.map1_base_pending = None
+                    self.map1_base_confirmed = True
+                    self.map1_base_status.set(
+                        "MAP 1 BASE: ESP32 OK | " +
+                        " / ".join(str(v) for v in base_values))
+                    self.map1_base_dirty = False
+                if self.map1_base_window is not None:
+                    try:
+                        if self.map1_base_window.winfo_exists():
+                            if not self.map1_base_dirty or tuple(base_values) == pending:
+                                for var, value in zip(self.map1_base_vars, base_values):
+                                    var.set(str(value))
+                                self.map1_base_dirty = False
+                            for i, label in enumerate(self.map1_base_stage_labels):
+                                start = 0 if i == 0 else x_ticks[i - 1]
+                                end = x_ticks[i] if i < 7 else None
+                                text = (f"{start:,} – {end:,}" if end is not None
+                                        else f"≥ {start:,} (về đích)")
+                                label.configure(text=text)
+                    except tk.TclError:
+                        self.map1_base_window = None
+            except (AttributeError, ValueError):
+                self.map1_base_confirmed = False
+                self.map1_base_status.set("MAP 1 BASE: phản hồi ESP32 không hợp lệ")
+        elif message.startswith("ERR: MAP1_BASE_PROFILE_"):
+            self.map1_base_pending = None
+            self.map1_base_confirmed = False
+            self.map1_base_status.set("MAP 1 BASE: ESP32 từ chối — xem Terminal")
         sensor_profile_match = re.fullmatch(
             r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
