@@ -1034,9 +1034,13 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Fixed BASE across all encoder ticks. Steering still comes from
-        // the line PID; wheel PI later translates speed targets into PWM.
-        float base = (float)pidConfig.baseSpeed;
+        // Map 1: raise the forward BASE after 11k AUTO-relative ticks.
+        // Do not change configured BASE, sensor masks, SEARCH or wheel PI.
+        constexpr int32_t MAP1_LATE_BASE_START_TICKS = 11000;
+        constexpr float MAP1_LATE_BASE_PWM = 190.0f;
+        const float base =
+            (selectedMap == 1 && map1MaxProgress >= MAP1_LATE_BASE_START_TICKS)
+            ? MAP1_LATE_BASE_PWM : (float)pidConfig.baseSpeed;
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
