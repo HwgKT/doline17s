@@ -44,9 +44,9 @@ constexpr uint16_t START_PAD_CENTER_MASK = 0x03C0U; // central eyes S6..S9
 constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
 constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
-constexpr int16_t LINE_SEARCH_PWM = 85;
+constexpr int16_t LINE_SEARCH_PWM = 90;
 // MAP 1 experiment: faster pivot only at the long left corner near 1,311 ticks.
-constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 95;
+constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 90;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_END_ENC = 1700;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -260,13 +260,6 @@ uint8_t centeredTurnFrames = 0;
 uint8_t derivativeWarmupFrames = 0;
 uint8_t reacquireSpeedFrames = 0;
 bool turnMissing = false;
-// Last actual motor command issued by NORMAL_PID while a sharp corner's
-// physical line is at the outer edge. Kept only for this corner's SEARCH.
-int16_t lastEdgePidLeftPwm = 0;
-int16_t lastEdgePidRightPwm = 0;
-TurnState lastEdgePidTurn = TURN_NONE;
-uint32_t lastEdgePidMs = 0;
-bool edgeSearchHold = false;
 bool startupLossActive = false;
 bool finishLineLatched = false;
 bool finishDetectionArmed = false;
@@ -417,10 +410,6 @@ static void resetLineTracking() {
     derivativeWarmupFrames = 0;
     reacquireSpeedFrames = 0;
     turnMissing = false;
-    lastEdgePidLeftPwm = lastEdgePidRightPwm = 0;
-    lastEdgePidTurn = TURN_NONE;
-    lastEdgePidMs = 0;
-    edgeSearchHold = false;
     startupLossActive = false;
     finishLineLatched = false;
     finishDetectionArmed = false;
@@ -487,29 +476,6 @@ static int16_t searchPwmForCurrentTurn() {
 }
 static bool isLeftTurn() {
     return turnState == TURN_LEFT || turnState == SEARCH_LEFT;
-}
-// Called only on a transition to SEARCH, while the previous TURN state is
-// still available. A stale command or a wrong direction must never be reused.
-static void latchEdgePidSearchPwm(TurnState previousTurn, uint32_t now) {
-    edgeSearchHold =
-        lastEdgePidTurn == previousTurn &&
-        (uint32_t)(now - lastEdgePidMs) <= 100U &&
-        ((previousTurn == TURN_RIGHT &&
-          lastEdgePidLeftPwm > 0 && lastEdgePidRightPwm < 0) ||
-         (previousTurn == TURN_LEFT &&
-          lastEdgePidLeftPwm < 0 && lastEdgePidRightPwm > 0));
-}
-static void driveSearchWithLastEdgePid(TurnState searchDirection) {
-    if (edgeSearchHold &&
-        ((searchDirection == SEARCH_LEFT && lastEdgePidTurn == TURN_LEFT) ||
-         (searchDirection == SEARCH_RIGHT && lastEdgePidTurn == TURN_RIGHT))) {
-        motor_set_speeds(lastEdgePidLeftPwm, lastEdgePidRightPwm);
-    } else if (searchDirection == SEARCH_LEFT) {
-        const int16_t searchPwm = searchPwmForCurrentTurn();
-        motor_set_speeds(-searchPwm, searchPwm);
-    } else {
-        motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
-    }
 }
 static TurnState searchStateFor(TurnState direction) {
     return direction == TURN_LEFT ? SEARCH_LEFT : SEARCH_RIGHT;
@@ -836,8 +802,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             }
             if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
                 turnState = TURN_NONE;
-                edgeSearchHold = false;
-                lastEdgePidTurn = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
                 turnMissing = false;
@@ -864,8 +828,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             }
             if (centeredTurnFrames >= TURN_CENTERED_FRAMES) {
                 turnState = TURN_NONE;
-                edgeSearchHold = false;
-                lastEdgePidTurn = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
                 derivativeHistoryValid = false;
@@ -889,7 +851,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 (turnState == TURN_LEFT &&
                  lastKnownPosition <= -EDGE_CORNER_IMMEDIATE_SEARCH_ERROR);
             if (edgeCornerLost) {
-                latchEdgePidSearchPwm(turnState, now);
                 turnState = searchStateFor(turnState);
                 searchStartedMs = now;
                 centeredTurnFrames = 0;
@@ -902,7 +863,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 turnMissing = true;
                 turnMissingSinceMs = now;
             } else if (uint32_t(now - turnMissingSinceMs) >= LINE_LOSS_MS) {
-                latchEdgePidSearchPwm(turnState, now);
                 turnState = searchStateFor(turnState);
                 searchStartedMs = now;
                 centeredTurnFrames = 0;
@@ -917,8 +877,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
             turnState = TURN_NONE;
-            edgeSearchHold = false;
-            lastEdgePidTurn = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
             acquiring = missing = false;
@@ -960,8 +918,6 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (sharpLeft || sharpRight) {
             turnState = sharpLeft ? TURN_LEFT : TURN_RIGHT;
-            edgeSearchHold = false;
-            lastEdgePidTurn = TURN_NONE;
             lastTurnDirection = turnState;
             turnStartedMs = now;
             centeredTurnFrames = 0;
@@ -1061,7 +1017,8 @@ void pid_line_follow_step(void) {
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
-            driveSearchWithLastEdgePid(SEARCH_LEFT);
+            const int16_t searchPwm = searchPwmForCurrentTurn();
+            motor_set_speeds(-searchPwm, searchPwm);
         } else {
             const int16_t outer = map1Route.active
                 ? (int16_t)fminf((float)sharpTurnPwm(),
@@ -1073,7 +1030,7 @@ void pid_line_follow_step(void) {
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
         if (turnState == SEARCH_RIGHT) {
-            driveSearchWithLastEdgePid(SEARCH_RIGHT);
+            motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
             const int16_t outer = map1Route.active
                 ? (int16_t)fminf((float)sharpTurnPwm(),
@@ -1213,30 +1170,7 @@ void pid_line_follow_step(void) {
             steeringPeakLimit = fminf(steeringPeakLimit,
                                       map1Route.wheelCap(map1MaxProgress));
         limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
-        const int16_t pidLeftPwm = clampPwmSigned(leftCommand);
-        const int16_t pidRightPwm = clampPwmSigned(rightCommand);
-        // Save the REAL outgoing PID command, not the raw correction. Only
-        // capture while the physical sensor line is at the matching edge.
-        // This preserves the same left/right turning torque at SEARCH entry.
-        const uint16_t physicalLineMask = sensor_get_line_bits();
-        if (turnState == TURN_RIGHT &&
-            pos >= EDGE_CORNER_IMMEDIATE_SEARCH_ERROR &&
-            (physicalLineMask & 0xC000U) != 0U &&
-            pidLeftPwm > 0 && pidRightPwm < 0) {
-            lastEdgePidLeftPwm = pidLeftPwm;
-            lastEdgePidRightPwm = pidRightPwm;
-            lastEdgePidTurn = TURN_RIGHT;
-            lastEdgePidMs = millis();
-        } else if (turnState == TURN_LEFT &&
-                   pos <= -EDGE_CORNER_IMMEDIATE_SEARCH_ERROR &&
-                   (physicalLineMask & 0x0003U) != 0U &&
-                   pidLeftPwm < 0 && pidRightPwm > 0) {
-            lastEdgePidLeftPwm = pidLeftPwm;
-            lastEdgePidRightPwm = pidRightPwm;
-            lastEdgePidTurn = TURN_LEFT;
-            lastEdgePidMs = millis();
-        }
-        motor_set_speeds(pidLeftPwm, pidRightPwm);
+        motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
         // On the all-black START pad, use BASE to ensure forward motion.
