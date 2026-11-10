@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID PID_PROFILE PID_PROFILE:stage,tick,kp,ki,kd HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -178,8 +178,34 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Map 1: four individually editable PID gains, one reply per stage.
+  if(s=="PID_PROFILE"){
+    for(uint8_t i=0;i<4;++i){
+      int32_t tick=0;float kp=0,ki=0,kd=0;
+      pid_get_map1_pid_profile(i,&tick,&kp,&ki,&kd);
+      char b[120];
+      snprintf(b,sizeof(b),
+        "PID_PROFILE STAGE=%u TICK=%ld KP=%.3f KI=%.3f KD=%.3f",
+        (unsigned)(i+1),(long)tick,kp,ki,kd);
+      reply(b);
+    }
+    return;
+  }
+  if(s.startsWith("PID_PROFILE:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: PID_PROFILE_REQUIRES_STOPPED");return;
+    }
+    int stage=0;long tick=0;float kp=0,ki=0,kd=0;char tail=0;
+    const int count=sscanf(s.c_str()+12,"%d,%ld,%f,%f,%f %c",
+                           &stage,&tick,&kp,&ki,&kd,&tail);
+    if(count!=5 || stage<1 || stage>4 ||
+       !pid_set_map1_pid_profile((uint8_t)(stage-1),(int32_t)tick,kp,ki,kd)){
+      reply("ERR: PID_PROFILE_INVALID");return;
+    }
+    command("PID_PROFILE");return;
+  }
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
-  // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
+  // SENSOR_PROFILE:650,1350,FFE0,01FF,FFFF (masks are hexadecimal).
   if(s=="SENSOR_PROFILE"){
     int32_t t1=0,t2=0;
     uint16_t m1=0,m2=0,m3=0;
@@ -350,6 +376,14 @@ void command(const String &raw) {
     manualActive=false;
     pid_set_auto_mode(true);
     reply("MODE: AUTO PID");
+    if(pid_get_selected_map()==1){
+      char stageMsg[115];int32_t tick=0;float kp=0,ki=0,kd=0;
+      pid_get_map1_pid_profile(0,&tick,&kp,&ki,&kd);
+      snprintf(stageMsg,sizeof(stageMsg),
+        "PID_STAGE STAGE=1 runEnc=0 KP=%.3f KI=%.3f KD=%.3f t_ms=%lu",
+        kp,ki,kd,(unsigned long)millis());
+      reply(stageMsg);
+    }
     reply(String("ADC_RUN_MODE: ")+sensor_get_adc_mode()+
           " method="+sensor_adc_mode());
     int32_t runL=0,runR=0;
@@ -591,6 +625,7 @@ void loop() {
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t oldPidStage=pid_get_map1_pid_stage();
     const uint8_t oldRouteStage=pid_get_map1_route_stage();
     const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
@@ -600,8 +635,20 @@ void loop() {
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t newPidStage=pid_get_map1_pid_stage();
     const uint8_t newRouteStage=pid_get_map1_route_stage();
     const uint8_t newRouteFault=pid_get_map1_route_fault_code();
+    if(pid_get_selected_map()==1 && newPidStage!=oldPidStage &&
+       newCase==LINE_CASE_NORMAL_PID){
+      int32_t startTick=0;float kp=0,ki=0,kd=0;
+      pid_get_map1_pid_profile(newPidStage,&startTick,&kp,&ki,&kd);
+      char stageMsg[120];
+      snprintf(stageMsg,sizeof(stageMsg),
+        "PID_STAGE STAGE=%u runEnc=%ld KP=%.3f KI=%.3f KD=%.3f t_ms=%lu",
+        (unsigned)(newPidStage+1),(long)pid_get_run_encoder_progress(),
+        kp,ki,kd,(unsigned long)millis());
+      reply(stageMsg);
+    }
     // A latched finish or PID stop must end AUTO, otherwise Python remains
     // in AUTO while both PWM outputs are zero and START stays locked.
     // Snapshot the stop reason BEFORE safeStop() clears PID state.
