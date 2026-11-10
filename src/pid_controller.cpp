@@ -581,7 +581,7 @@ void pid_get_map1_pid_profile(uint8_t stage, int32_t* startTick,
     if (kd) *kd = cfg.kd;
 }
 uint8_t pid_get_map1_pid_stage(void) { return map1ActivePidStage; }
-uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage;
+uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
 int32_t pid_get_map1_late_boost_start(void) { return 11000; }
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
