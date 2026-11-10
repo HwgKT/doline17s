@@ -82,6 +82,7 @@ class Reader(threading.Thread):
         self.bad = 0
         self.frames_rx = 0
         self.frames_dropped = 0
+        self.last_rx_at = time.monotonic()
 
     def run(self):
         while self.running:
@@ -91,6 +92,7 @@ class Reader(threading.Thread):
                 self.control_queue.put(("error", f"Bluetooth/COM lỗi đọc: {exc}"))
                 break
             if chunk:
+                self.last_rx_at = time.monotonic()
                 self.buf.extend(chunk)
                 self._parse()
         try:
@@ -803,6 +805,13 @@ class App(tk.Tk):
             self.reader.send(command)
             self.log(f"TX > {command}")
             return True
+        except serial.SerialTimeoutException as exc:
+            # Windows Bluetooth COM can time out on a DIAG request even when
+            # the receiver remains open. Closing COM here loses FINISH ACK.
+            self.log(f"SPP TX TIMEOUT ({command}): {exc}. Giữ kết nối để chờ phản hồi RX.")
+            self.next_diag_poll = None  # Stop poll traffic until manually re-enabled.
+            self.status_label.config(text="SPP gửi chậm — giữ COM, chờ RX", fg=AMBER)
+            return False
         except (serial.SerialException, OSError) as exc:
             self.log(f"Lỗi gửi: {exc}")
             self.disconnect()
@@ -1810,8 +1819,16 @@ class App(tk.Tk):
         # One small SPP text request per 2 seconds; no USB traffic.
         if self.next_diag_poll is not None and now >= self.next_diag_poll:
             if self.reader is not None and self.reader.is_alive():
-                self.send_command("DIAG")
-                self.next_diag_poll = now + self.diag_interval_s
+                # Never queue diagnostic writes when SPP has stopped delivering
+                # bytes: this previously caused COM write timeouts and an
+                # unnecessary disconnect before the FINISH event arrived.
+                rx_age = now - self.reader.last_rx_at
+                if rx_age <= 3.0:
+                    if self.send_command("DIAG"):
+                        self.next_diag_poll = now + self.diag_interval_s
+                else:
+                    self.next_diag_poll = None
+                    self.log(f"SPP RX im lặng {rx_age:.1f}s: tạm dừng DIAG; vẫn giữ COM.")
             else:
                 self.next_diag_poll = None
         if self.stop_ack_deadline is not None and now >= self.stop_ack_deadline:
