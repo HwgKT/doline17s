@@ -240,6 +240,25 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
 constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
+
+// Cascaded control: line PID produces SIGNED wheel speed setpoints; wheel PI
+// closes the speed loop with quadrature encoder feedback. Tune on the robot:
+// one PWM unit corresponds to approximately 6 wheel encoder ticks/second.
+// This factor and gains are initial estimates, NOT calibrated motor constants.
+constexpr float WHEEL_TPS_PER_PWM = 6.0f;
+constexpr uint32_t WHEEL_SPEED_SAMPLE_US = 20000U;  // 50 Hz speed loop
+constexpr float WHEEL_SPEED_FILTER_ALPHA = 0.4f;
+constexpr float WHEEL_KP = 0.045f;  // PWM / (ticks/s)
+constexpr float WHEEL_KI = 0.13f;   // PWM / (ticks)
+constexpr float WHEEL_I_LIMIT_PWM = 35.0f;
+constexpr float WHEEL_CORRECTION_LIMIT_PWM = 55.0f;
+float wheelSpeedTps[2] = {0.0f, 0.0f};
+float wheelIntegralPwm[2] = {0.0f, 0.0f};
+float wheelCorrectionPwm[2] = {0.0f, 0.0f};
+int32_t wheelPrevEnc[2] = {0, 0};
+uint32_t wheelPrevSampleUs = 0;
+bool wheelFeedbackReady = false;
+int8_t wheelPrevDirection[2] = {0, 0};
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
 
@@ -391,6 +410,90 @@ static float map1UpdateScheduledBase(int32_t progress, float absErr,
     else map1ScheduledBase = target;
     return map1ScheduledBase;
 }
+static void resetWheelSpeedPid() {
+    wheelFeedbackReady = false;
+    wheelPrevSampleUs = 0;
+    for (uint8_t i = 0; i < 2; ++i) {
+        wheelSpeedTps[i] = 0.0f;
+        wheelIntegralPwm[i] = 0.0f;
+        wheelCorrectionPwm[i] = 0.0f;
+        wheelPrevDirection[i] = 0;
+    }
+}
+
+// Called every line-controller cycle, wheel speed is refreshed at 50 Hz.
+// Feed-forward preserves the original line PID wheel command; encoder feedback
+// compensates loading and wheel mismatch without changing the line PID gains.
+static void driveWheelSpeedCascade(int16_t nominalLeftPwm,
+                                   int16_t nominalRightPwm) {
+    int32_t encL = 0, encR = 0;
+    encoder_get_counts(&encL, &encR);
+    const int32_t currentEnc[2] = {encL, encR};
+    const int16_t nominalPwm[2] = {nominalLeftPwm, nominalRightPwm};
+    const uint32_t nowUs = micros();
+
+    if (!wheelFeedbackReady) {
+        wheelPrevEnc[0] = encL;
+        wheelPrevEnc[1] = encR;
+        wheelPrevSampleUs = nowUs;
+        wheelFeedbackReady = true;
+    }
+
+    const uint32_t elapsedUs = nowUs - wheelPrevSampleUs;
+    if (elapsedUs >= WHEEL_SPEED_SAMPLE_US) {
+        const float dt = (float)elapsedUs * 1.0e-6f;
+        const bool sampleValid = dt >= 0.015f && dt <= 0.1f;
+        for (uint8_t i = 0; i < 2; ++i) {
+            const int32_t delta = currentEnc[i] - wheelPrevEnc[i];
+            if (sampleValid) {
+                const float measured = (float)delta / dt;
+                wheelSpeedTps[i] += WHEEL_SPEED_FILTER_ALPHA *
+                    (measured - wheelSpeedTps[i]);
+                const float target = (float)nominalPwm[i] * WHEEL_TPS_PER_PWM;
+                const float error = target - wheelSpeedTps[i];
+                const float proposedI = fmaxf(-WHEEL_I_LIMIT_PWM,
+                    fminf(WHEEL_I_LIMIT_PWM,
+                          wheelIntegralPwm[i] + WHEEL_KI * error * dt));
+                const float proposedCorrection = WHEEL_KP * error + proposedI;
+                // Do not integrate further into the correction saturation.
+                if (fabsf(proposedCorrection) < WHEEL_CORRECTION_LIMIT_PWM ||
+                    (proposedCorrection > 0 && error < 0) ||
+                    (proposedCorrection < 0 && error > 0)) {
+                    wheelIntegralPwm[i] = proposedI;
+                }
+                wheelCorrectionPwm[i] = fmaxf(-WHEEL_CORRECTION_LIMIT_PWM,
+                    fminf(WHEEL_CORRECTION_LIMIT_PWM,
+                          WHEEL_KP * error + wheelIntegralPwm[i]));
+            } else {
+                wheelSpeedTps[i] = 0.0f;
+                wheelIntegralPwm[i] = 0.0f;
+                wheelCorrectionPwm[i] = 0.0f;
+            }
+            wheelPrevEnc[i] = currentEnc[i];
+        }
+        wheelPrevSampleUs = nowUs;
+    }
+
+    int16_t drivePwm[2] = {0, 0};
+    for (uint8_t i = 0; i < 2; ++i) {
+        const int8_t direction = nominalPwm[i] > 0 ? 1 :
+                                nominalPwm[i] < 0 ? -1 : 0;
+        if (!direction || (wheelPrevDirection[i] &&
+                           wheelPrevDirection[i] != direction)) {
+            wheelIntegralPwm[i] = 0.0f;
+            wheelCorrectionPwm[i] = 0.0f;
+        }
+        wheelPrevDirection[i] = direction;
+        if (!direction) continue;
+        const float requested = (float)nominalPwm[i] + wheelCorrectionPwm[i];
+        // Prevent wheel PI from accidentally reversing the line PID's command.
+        const float aligned = direction > 0 ? fmaxf(0.0f, requested) :
+                                             fminf(0.0f, requested);
+        drivePwm[i] = clampPwmSigned(aligned);
+    }
+    motor_set_speeds(drivePwm[0], drivePwm[1]);
+}
+
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
     lastPTerm = lastITerm = lastDTerm = 0;
@@ -398,6 +501,7 @@ static void clearPidState() {
     derivativeWarmupFrames = 0;
 }
 static void resetLineTracking() {
+    resetWheelSpeedPid();
     lineLocked = previouslyLocked = acquiring = missing = false;
     acquireSinceMs = missingSinceMs = 0;
     lastKnownPosition = 0;
@@ -1014,6 +1118,10 @@ void pid_line_follow_step(void) {
     if (prev != LINE_CASE_NORMAL_PID || currentCase != LINE_CASE_NORMAL_PID)
         derivativeHistoryValid = false;
 
+    // Close wheel speed loop only when the line PID has a valid line measurement.
+    // SEARCH, dash gaps, crossing and stop keep their established direct PWM logic.
+    if (currentCase != LINE_CASE_NORMAL_PID || !pidMeasurementGood)
+        resetWheelSpeedPid();
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
@@ -1170,7 +1278,10 @@ void pid_line_follow_step(void) {
             steeringPeakLimit = fminf(steeringPeakLimit,
                                       map1Route.wheelCap(map1MaxProgress));
         limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
-        motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
+        // Stage 1: line PID -> signed velocity targets (ticks/second).
+        // Stage 2: encoder wheel PI + nominal PWM feed-forward -> motor PWM.
+        driveWheelSpeedCascade(clampPwmSigned(leftCommand),
+                               clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
         // On the all-black START pad, use BASE to ensure forward motion.
