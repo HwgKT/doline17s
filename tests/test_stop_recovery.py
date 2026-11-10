@@ -20,6 +20,7 @@ class FakeStopApp:
     stop_line = App.stop_line
     handle_stop_timeout = App.handle_stop_timeout
     confirm_stopped = App.confirm_stopped
+    _live_run_elapsed = App._live_run_elapsed
 
     def __init__(self):
         self.reader = SimpleNamespace(is_alive=lambda: True)
@@ -31,6 +32,14 @@ class FakeStopApp:
         self.start_pending = False
         self.start_confirmed = True
         self.auto_running = True
+        self.run_elapsed_seconds = 0.0
+        self.run_started_at = 10.0
+        self.run_origin_esp_ms = 10000
+        self.run_finish_esp_ms = None
+        self.last_esp_elapsed_seconds = None
+        self.last_esp_sample_received_at = None
+        self.run_live_elapsed_floor = 0.0
+        self.run_finished_latched = False
         self.estop_latched = False
         self.estop_pending = False
         self.control_state = Var()
@@ -108,6 +117,25 @@ class StopRecoveryTests(unittest.TestCase):
         App.on_text(ui, "AUTO_STOPPED: PID_STOPPED map=1 runEnc=5400 t_ms=22222")
         self.assertFalse(ui.auto_running)
         self.assertIn("runEnc=5400", ui.reasons[-1])
+
+    def test_firmware_finish_time_overrides_host_lag(self):
+        ui = FakeStopApp()
+        App.on_text(
+            ui, "AUTO_FINISHED: FULL_BLACK_3 map=1 runEnc=15500 t_ms=18765"
+        )
+        self.assertAlmostEqual(ui.run_elapsed_seconds, 8.765, places=3)
+        self.assertFalse(ui.auto_running)
+        self.assertTrue(ui.run_finished_latched)
+
+    def test_telemetry_gap_does_not_freeze_after_250ms(self):
+        ui = FakeStopApp()
+        ui.last_esp_elapsed_seconds = 3.0
+        ui.last_esp_sample_received_at = 20.0
+        self.assertAlmostEqual(App._live_run_elapsed(ui, 21.0), 4.0, places=3)
+        # Older telemetry must not move the display backward.
+        ui.last_esp_elapsed_seconds = 2.9
+        ui.last_esp_sample_received_at = 21.0
+        self.assertAlmostEqual(App._live_run_elapsed(ui, 21.0), 4.0, places=3)
 
     def test_explicit_motor_stop_remains_supported(self):
         ui = FakeStopApp()
