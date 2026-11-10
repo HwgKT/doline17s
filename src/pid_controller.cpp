@@ -548,7 +548,7 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask3) *mask3 = map1SensorStageMasks[2];
 }
 uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
-int32_t pid_get_map1_late_boost_start(void) { return 0; }
+int32_t pid_get_map1_late_boost_start(void) { return 11000; }
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
         return false;
