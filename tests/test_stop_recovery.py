@@ -66,6 +66,9 @@ class FakeStopApp:
     def update_control_buttons(self):
         self.button_updates += 1
 
+    def update_run_timer_display(self, now=None):
+        pass  # Test double; display formatting is verified separately.
+
     def log(self, message):
         self.logs.append(message)
 
