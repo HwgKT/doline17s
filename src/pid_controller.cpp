@@ -836,6 +836,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             }
             if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
                 turnState = TURN_NONE;
+                edgeSearchHold = false;
+                lastEdgePidTurn = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
                 turnMissing = false;
@@ -862,6 +864,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             }
             if (centeredTurnFrames >= TURN_CENTERED_FRAMES) {
                 turnState = TURN_NONE;
+                edgeSearchHold = false;
+                lastEdgePidTurn = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
                 derivativeHistoryValid = false;
@@ -913,6 +917,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
             turnState = TURN_NONE;
+            edgeSearchHold = false;
+            lastEdgePidTurn = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
             acquiring = missing = false;
@@ -954,6 +960,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (sharpLeft || sharpRight) {
             turnState = sharpLeft ? TURN_LEFT : TURN_RIGHT;
+            edgeSearchHold = false;
+            lastEdgePidTurn = TURN_NONE;
             lastTurnDirection = turnState;
             turnStartedMs = now;
             centeredTurnFrames = 0;
