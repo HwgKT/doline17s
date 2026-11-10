@@ -764,7 +764,7 @@ void pid_line_follow_step(void) {
         float base = updateForwardSpeed(absErr);
         // Replace only the forward-speed target on the first straight. Keep
         // existing PID steering, error governor, outer-eye limits, and SEARCH.
-        // For BASE:120, command envelope is 120 -> 255 -> 120.
+        // First straight starts at HS_PEAK, brakes to HOLD, then returns to BASE after completion.
         const bool highSpeedStraight =
             (highSpeedStage == HS_ACCEL || highSpeedStage == HS_CRUISE) &&
             turnState == TURN_NONE;
