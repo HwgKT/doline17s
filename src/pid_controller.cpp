@@ -506,7 +506,7 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
             bitCount16(mask & CORNER_CENTER) >= 2 &&
             !(mask & (CORNER_LEFT_WING | CORNER_RIGHT_WING));
         cornerCenteredFrames = centered ? cornerCenteredFrames + 1 : 0;
-        if (cornerCenteredFrames >= 4) {
+        if (cornerCenteredFrames >= 4 && elapsed >= CORNER_ASYMMETRIC_BRAKE_MS) {
             sppLogPrintf("[CORNER] BRAKE_REACQUIRED runEnc=%ld t_ms=%lu\n",
                 (long)map1MaxProgress, (unsigned long)now);
             cornerPhase = CORNER_EXIT;
