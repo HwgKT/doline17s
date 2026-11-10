@@ -49,6 +49,16 @@ void motor_set_right(int16_t speed);
  */
 void motor_set_speeds(int16_t speed_left, int16_t speed_right);
 
+// Wheel velocity PI: input command is a signed legacy 8-bit speed reference,
+// converted internally to signed encoder ticks/second. Normal line PID only.
+// Sharp turns, manual mode and emergency STOP bypass the wheel loop.
+void motor_set_wheel_speed_mode(bool enabled);
+void motor_update_wheel_pi(void);
+// Feedback diagnostics in encoder ticks/second (last complete 20-ms sample).
+void motor_get_wheel_velocity(float* target_left, float* actual_left,
+                              float* target_right, float* actual_right);
+
+
 /**
  * @brief Lấy tốc độ PWM hiện tại của động cơ trái
  * @return Giá trị PWM (-255 đến 255)
