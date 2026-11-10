@@ -1034,13 +1034,12 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Map 1: raise the forward BASE after 11k AUTO-relative ticks.
-        // Do not change configured BASE, sensor masks, SEARCH or wheel PI.
+        // Map 1: use the app-selected HS_PEAK as BASE from tick 11,000.
+        // Keep configured BASE, sensor masks, SEARCH and wheel PI unchanged.
         constexpr int32_t MAP1_LATE_BASE_START_TICKS = 11000;
-        constexpr float MAP1_LATE_BASE_PWM = 190.0f;
         const float base =
             (selectedMap == 1 && map1MaxProgress >= MAP1_LATE_BASE_START_TICKS)
-            ? MAP1_LATE_BASE_PWM : (float)pidConfig.baseSpeed;
+            ? (float)highSpeedPeakPwm : (float)pidConfig.baseSpeed;
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
