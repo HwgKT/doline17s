@@ -950,6 +950,7 @@ class App(tk.Tk):
                 feedback.set("Chưa kết nối Bluetooth Classic SPP.")
                 return
             self.map1_base_dirty = False
+            self.map1_base_pending = None
             if self.send_command("MAP1_BASE_PROFILE"):
                 feedback.set("Đang đọc mốc encoder và BASE từ ESP32...")
 
@@ -1512,6 +1513,7 @@ class App(tk.Tk):
                 self.map1_x_ticks = x_ticks
                 self.map1_base_values = base_values
                 if pending is not None and tuple(base_values) != pending:
+                    self.map1_base_pending = None
                     self.map1_base_confirmed = False
                     self.map1_base_status.set(
                         "MAP 1 BASE: ESP32 trả về khác cấu hình vừa gửi")
