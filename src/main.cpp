@@ -658,6 +658,7 @@ void loop() {
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
     const uint8_t oldPidStage=pid_get_map1_pid_stage();
+    const uint8_t oldCorner90=pid_get_corner90_state();
     const uint8_t oldRouteStage=pid_get_map1_route_stage();
     const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
@@ -668,8 +669,20 @@ void loop() {
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
     const uint8_t newPidStage=pid_get_map1_pid_stage();
+    const uint8_t newCorner90=pid_get_corner90_state();
     const uint8_t newRouteStage=pid_get_map1_route_stage();
     const uint8_t newRouteFault=pid_get_map1_route_fault_code();
+    if(oldCorner90!=newCorner90){
+      const uint8_t dir=newCorner90 ? newCorner90 : oldCorner90;
+      char cornerEvent[128];
+      snprintf(cornerEvent,sizeof(cornerEvent),
+        "CORNER90_%s dir=%s map=%u runEnc=%ld mask=%04X pwmL=%d pwmR=%d t_ms=%lu",
+        newCorner90 ? "START" : "END", dir==1 ? "LEFT" : "RIGHT",
+        (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
+        (unsigned)sensor_get_line_bits(), motor_get_left_speed(),
+        motor_get_right_speed(),(unsigned long)millis());
+      reply(cornerEvent);
+    }
     if(pid_get_selected_map()==1 && newPidStage!=oldPidStage &&
        newCase==LINE_CASE_NORMAL_PID){
       int32_t startTick=0;float kp=0,ki=0,kd=0;
