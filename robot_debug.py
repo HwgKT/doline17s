@@ -212,6 +212,17 @@ class App(tk.Tk):
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
         self.sensor_profile = (650, 1350, 0xFFE0, 0x01FF, 0xFFFF)
         self.sensor_profile_confirmed = False
+        # Gain scheduling is independent of the three-stage sensor mask.
+        self.pid_gain_profiles = [
+            (0, 1.60, 0.00, 0.80),
+            (2500, 1.60, 0.00, 0.80),
+            (8000, 1.60, 0.00, 0.80),
+            (11000, 1.60, 0.00, 0.80),
+        ]
+        self.pid_gain_profiles_received = set()
+        self.pid_gain_profile_window = None
+        self.pid_gain_profile_status = tk.StringVar(
+            value="PID chặng: chờ ESP32 (mặc định 0/2500/8000/11000)")
         self.sensor_profile_status = tk.StringVar(
             value="PID mắt: chờ ESP32 (mặc định 650 / 1350 ticks)")
         self.sensor_profile_window = None
@@ -303,6 +314,17 @@ class App(tk.Tk):
             sensor_profile_bar, text="Đọc từ ESP32",
             command=lambda: self.send_command("SENSOR_PROFILE"))
         self.sensor_profile_read_btn.pack(side="right")
+
+        gain_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
+        gain_bar.pack(fill="x", padx=8, pady=(0, 2))
+        ttk.Button(gain_bar, text="Cấu hình PID theo chặng",
+                   command=self.open_pid_gain_profile_editor).pack(
+                       side="left", padx=(0, 6))
+        self.label(gain_bar, textvariable=self.pid_gain_profile_status,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(
+                       side="left", fill="x", expand=True)
+        ttk.Button(gain_bar, text="Đọc PID chặng",
+                   command=lambda: self.send_command("PID_PROFILE")).pack(side="right")
 
         # Calibration is a prerequisite for START. Keep its controls visible at
         # minimum window size rather than below the non-scrollable HS_PEAK panel.
@@ -736,6 +758,8 @@ class App(tk.Tk):
         self.send_command("ROUTE_LOCK")
         self.sensor_profile_confirmed = False
         self.send_command("SENSOR_PROFILE")
+        self.pid_gain_profiles_received.clear()
+        self.send_command("PID_PROFILE")
         self.send_command("PID")
         self.send_command("STREAM:" + self.stream_rate.get())
 
@@ -821,6 +845,85 @@ class App(tk.Tk):
         cmd = self.cmd_var.get().strip()
         if self.send_command(cmd):
             self.cmd_var.set("")
+
+    def open_pid_gain_profile_editor(self):
+        """Configure four Map 1 PID stages. Apply only while robot is stopped."""
+        if self.pid_gain_profile_window is not None:
+            try:
+                self.pid_gain_profile_window.lift()
+                return
+            except tk.TclError:
+                self.pid_gain_profile_window = None
+        win = tk.Toplevel(self)
+        self.pid_gain_profile_window = win
+        win.title("MAP 1 — 4 bộ PID theo encoder")
+        win.configure(bg=PANEL)
+        win.geometry("625x380")
+        win.minsize(580, 340)
+        win.transient(self)
+        self.label(win, "Mốc bắt đầu mỗi chặng (tick AUTO), Kp / Ki / Kd riêng.",
+                   bg=PANEL, fg=MUTED).pack(anchor="w", padx=12, pady=(12, 6))
+        entries = []
+        for stage, (start, kp, ki, kd) in enumerate(self.pid_gain_profiles):
+            row = tk.Frame(win, bg=PANEL, padx=12, pady=4)
+            row.pack(fill="x")
+            self.label(row, f"GD{stage + 1}", bg=PANEL,
+                       font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 15))
+            vars_ = []
+            for title, value in (("Tick", start), ("Kp", kp), ("Ki", ki), ("Kd", kd)):
+                self.label(row, title, bg=PANEL, fg=MUTED).pack(side="left", padx=(0, 3))
+                variable = tk.StringVar(value=str(value))
+                ttk.Entry(row, textvariable=variable, width=10).pack(
+                    side="left", padx=(0, 12))
+                vars_.append(variable)
+            entries.append(vars_)
+        feedback = tk.StringVar(
+            value="Bấm Áp dụng khi STOP. App gửi 4 profile, ESP32 xác nhận từng dòng.")
+        self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER).pack(
+            anchor="w", padx=12, pady=(12, 6))
+
+        def apply():
+            if (self.reader is None or not self.reader.is_alive()
+                    or self.auto_running or self.start_pending
+                    or self.stop_ack_deadline is not None
+                    or self.stop_verify_pending or self.run_csv.active is not None):
+                feedback.set("Robot phải STOP và đã kết nối Bluetooth.")
+                return
+            profiles = []
+            try:
+                for vars_ in entries:
+                    start_text, *gain_text = (v.get().strip() for v in vars_)
+                    if not start_text.isdigit():
+                        raise ValueError("Tick phải là số nguyên không âm")
+                    start = int(start_text)
+                    gains = [float(v) for v in gain_text]
+                    if not all(math.isfinite(g) and 0 <= g <= 50 for g in gains):
+                        raise ValueError("Gain phải nằm trong khoảng 0–50")
+                    profiles.append((start, *gains))
+                ticks = [p[0] for p in profiles]
+                if ticks[0] != 0 or not (0 < ticks[1] < ticks[2] < ticks[3] <= 10000000):
+                    raise ValueError("Mốc phải có dạng 0 < T2 < T3 < T4")
+            except ValueError as exc:
+                feedback.set(f"Cấu hình không hợp lệ: {exc}")
+                return
+            # Send in ascending order. Each stage is validated by firmware.
+            self.pid_gain_profiles_received.clear()
+            for stage, (start, kp, ki, kd) in enumerate(profiles, start=1):
+                command = f"PID_PROFILE:{stage},{start},{kp:.3f},{ki:.3f},{kd:.3f}"
+                if not self.send_command(command):
+                    feedback.set(f"Không thể gửi profile {stage}")
+                    return
+            feedback.set("Đã gửi 4 profile; chờ phản hồi PID_PROFILE từ ESP32.")
+            self.pid_gain_profile_status.set("PID chặng: chờ xác nhận ESP32")
+
+        actions = tk.Frame(win, bg=PANEL, padx=12, pady=8)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Áp dụng 4 chặng",
+                   command=apply).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Đọc từ ESP32",
+                   command=lambda: self.send_command("PID_PROFILE")).pack(side="left")
+        ttk.Button(actions, text="Đóng", command=win.destroy).pack(side="right")
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
 
     def open_sensor_profile_editor(self):
         """Edit per-stage masks and switch ticks; changes require robot stopped."""
@@ -1301,6 +1404,31 @@ class App(tk.Tk):
         if message.startswith("RUN_ORIGIN "):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
+        gain_match = re.fullmatch(
+            r"PID_PROFILE STAGE=(\d+) TICK=(\d+) KP=([\d.]+) "
+            r"KI=([\d.]+) KD=([\d.]+)", message)
+        if gain_match:
+            stage = int(gain_match.group(1))
+            if 1 <= stage <= 4:
+                profile = (int(gain_match.group(2)),
+                           float(gain_match.group(3)),
+                           float(gain_match.group(4)),
+                           float(gain_match.group(5)))
+                self.pid_gain_profiles[stage - 1] = profile
+                self.pid_gain_profiles_received.add(stage)
+                starts = "/".join(str(p[0]) for p in self.pid_gain_profiles)
+                suffix = "ESP32 OK" if len(self.pid_gain_profiles_received) == 4 else "đang đọc"
+                self.pid_gain_profile_status.set(
+                    f"PID chặng: {starts} tick | {suffix}")
+                if self.pid_gain_profile_window is not None:
+                    try:
+                        self.pid_gain_profile_window.title(
+                            "MAP 1 — đã đọc PID (đóng/mở lại để tải mới)")
+                    except tk.TclError:
+                        self.pid_gain_profile_window = None
+        elif message.startswith("ERR: PID_PROFILE_"):
+            self.pid_gain_profile_status.set(
+                "PID chặng: ESP32 từ chối lệnh — xem Terminal")
         sensor_profile_match = re.fullmatch(
             r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
