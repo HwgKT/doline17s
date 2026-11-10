@@ -586,6 +586,9 @@ void loop() {
       const bool fullBlackFinish=pid_finish_line_latched();
       const uint8_t stopMap=pid_get_selected_map();
       const int32_t stopEnc=pid_get_run_encoder_progress();
+      // Capture the real arrival timestamp before cleanup and Bluetooth
+      // work so the stopwatch is independent of SPP queuing latency.
+      const uint32_t stopAtMs=millis();
       safeStop();
       // Drop queued pre-stop telemetry before announcing terminal state.
       btDropPendingTelemetry();
@@ -594,7 +597,7 @@ void loop() {
         snprintf(faultEvent,sizeof(faultEvent),
           "ROUTE_FAULT code=%u map=%u runEnc=%ld t_ms=%lu",
           (unsigned)newRouteFault,(unsigned)stopMap,
-          (long)stopEnc,(unsigned long)millis());
+          (long)stopEnc,(unsigned long)stopAtMs);
         reply(faultEvent);
       }
       char stopEvent[150];
@@ -604,7 +607,7 @@ void loop() {
         newRouteFault ? "AUTO_STOPPED: ROUTE_FAULT" :
                         "AUTO_STOPPED: PID_STOPPED",
         (unsigned)stopMap,(long)stopEnc,(unsigned)newRouteFault,
-        (unsigned long)millis());
+        (unsigned long)stopAtMs);
       reply(stopEvent);
     }
     if(newCase!=LINE_CASE_STOPPED && newRouteStage!=oldRouteStage &&
