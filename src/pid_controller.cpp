@@ -211,8 +211,6 @@ constexpr float TURN_CENTERED_POSITION = 22.0f;
 constexpr uint8_t TURN_CENTERED_FRAMES = 2;
 constexpr uint16_t TURN_CENTER_SENSOR_MASK = 0x03C0U;
 constexpr uint8_t TURN_CENTER_SENSOR_MIN = 2;
-constexpr int16_t TURN_PWM_MIN = 100;           // was 95 — slightly more aggressive
-constexpr int16_t TURN_PWM_MAX = 185;           // was 170 — allow faster outer wheel
 constexpr float TURN_CURVE_START_POSITION = 28.0f;
 constexpr float TURN_CURVE_END_POSITION = 75.0f;
 constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
@@ -425,10 +423,8 @@ static int16_t sharpTurnPwm() {
         frac = 1.0f - 0.3f * (float)(elapsed - 200) / (float)(SHARP_TURN_PROFILE_MS - 200);
         if (frac < 0.7f) frac = 0.7f;
     }
-    int32_t speed = (int32_t)((float)(pidConfig.baseSpeed + 40) * frac);
-    if (speed < TURN_PWM_MIN) speed = TURN_PWM_MIN;
-    if (speed > TURN_PWM_MAX) speed = TURN_PWM_MAX;
-    return (int16_t)speed;
+    // No extra 100..185 PWM clamp: only the configured motor 8-bit ceiling.
+    return clampPwm((float)(pidConfig.baseSpeed + 40) * frac);
 }
 static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
     float severity = (fabsf(position) - TURN_CURVE_START_POSITION) /
