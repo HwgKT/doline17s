@@ -1582,6 +1582,9 @@ class App(tk.Tk):
                     if start_match:
                         self.hs_brake_start = int(start_match.group(1))
                     self.hs_peak_confirmed = confirmed
+                    # Keep stage 4 PWM editor synchronized with HS_PEAK slider.
+                    stage4 = self.pid_gain_profiles[3]
+                    self.pid_gain_profiles[3] = (*stage4[:4], confirmed)
                     expected = self.hs_peak_pending
                     if expected is None or expected == confirmed:
                         self.hs_peak_pending = None
