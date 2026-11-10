@@ -87,8 +87,8 @@ class Reader(threading.Thread):
         while self.running:
             try:
                 chunk = self.ser.read(self.ser.in_waiting or 1)
-            except (serial.SerialException, OSError):
-                self.control_queue.put(("error", "Bluetooth/COM đã ngắt kết nối"))
+            except (serial.SerialException, OSError) as exc:
+                self.control_queue.put(("error", f"Bluetooth/COM lỗi đọc: {exc}"))
                 break
             if chunk:
                 self.buf.extend(chunk)
@@ -210,10 +210,10 @@ class App(tk.Tk):
             value="HS: MAP 1 từ 10k tick | chờ ESP32 xác nhận")
         self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
-        self.sensor_profile = (350, 1500, 0x01FF, 0xFF80, 0xFFFF)
+        self.sensor_profile = (650, 1350, 0xFFC0, 0x03FF, 0xFFFF)
         self.sensor_profile_confirmed = False
         self.sensor_profile_status = tk.StringVar(
-            value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
+            value="PID mắt: chờ ESP32 (mặc định 650 / 1350 ticks)")
         self.sensor_profile_window = None
         self.values = {}
         self.last_adc = [0] * 16
@@ -230,6 +230,10 @@ class App(tk.Tk):
         self.auto_running = False
         self.run_elapsed_seconds = 0.0
         self.run_started_at = None
+        # Monotonic ESP32 timestamps for accurate racing duration; wrap at 2^32 ms.
+        self.run_origin_esp_ms = None
+        self.run_finish_esp_ms = None
+        self.run_finished_latched = False
         self.run_timer_var = tk.StringVar(value="00:00:00")
         self._build()
         self.update_control_buttons()  # Includes HS widgets created after START/STOP.
@@ -704,6 +708,9 @@ class App(tk.Tk):
         self.estop_pending = False
         self.start_pending = False
         self.set_auto_running(False)
+        self.run_origin_esp_ms = None
+        self.run_finish_esp_ms = None
+        self.run_finished_latched = False
         self.control_state.set("Đang kết nối — chờ STATUS từ firmware.")
         self.adc_status.set("ADC: chờ STATUS")
         self.control_state_label.configure(fg=AMBER)
@@ -770,6 +777,7 @@ class App(tk.Tk):
         self.stop_verify_deadline = None
         self.stop_verify_retries = 0
         self.set_auto_running(False)
+        self.run_finished_latched = True
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
         self.next_diag_poll = None
@@ -1080,6 +1088,7 @@ class App(tk.Tk):
     def reset_run_timer(self):
         self.run_elapsed_seconds = 0.0
         self.run_started_at = time.monotonic() if self.auto_running else None
+        # Reset visual display only; retain firmware origin for official finish.
         self.update_run_timer_display()
 
     def update_run_timer_display(self, now=None):
@@ -1149,6 +1158,9 @@ class App(tk.Tk):
             self.update_control_buttons()
             return
         self.last_csv_total = 0
+        self.run_origin_esp_ms = None
+        self.run_finish_esp_ms = None
+        self.run_finished_latched = False
         self.stop_ack_deadline = None
         self.start_confirmed = False
         self.csv_status.set(f"CSV GHI: {recorder.path.name}")
@@ -1231,6 +1243,17 @@ class App(tk.Tk):
         self.stop_verify_retries = 0
         self.start_pending = False
         self.set_auto_running(False)
+        self.run_finished_latched = True
+        stop = re.search(r"\bt_ms=(\d+)\b", reason)
+        if stop and self.run_origin_esp_ms is not None:
+            end_ms = int(stop.group(1))
+            duration_ms = (end_ms - self.run_origin_esp_ms) & 0xFFFFFFFF
+            # Guard against messages from a stale run / impossible durations.
+            if duration_ms < 3600000:
+                self.run_finish_esp_ms = end_ms
+                self.run_elapsed_seconds = duration_ms / 1000.0
+                self.update_run_timer_display()
+                self.log(f"THỜI GIAN ESP32: {self.run_elapsed_seconds:.3f} s")
         self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + reason)
         self.start_confirmed = False
         if self.estop_latched is False:
@@ -1299,6 +1322,10 @@ class App(tk.Tk):
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
+            start = re.search(r"\bt_ms=(\d+)\b", message)
+            if start:
+                self.run_origin_esp_ms = int(start.group(1))
+                self.run_finish_esp_ms = None
             self.begin_external_run(message)
         self.log(f"RX < {message}")
         sensor_profile_match = re.fullmatch(
@@ -1360,6 +1387,10 @@ class App(tk.Tk):
             self.update_control_buttons()
             self.log("ESP32 từ chối reset encoder: xe vẫn đang chạy.")
         elif message == "MODE: AUTO PID":
+            self.run_finished_latched = False
+            self.run_origin_esp_ms = None
+            self.run_finish_esp_ms = None
+            self.run_elapsed_seconds = 0.0
             self.start_pending = False
             self.start_confirmed = True
             self.set_auto_running(True)
@@ -1572,7 +1603,10 @@ class App(tk.Tk):
                 self.estop_latched = estop.group(1) == "1"
                 self.estop_pending = False
                 self.start_pending = False
-                self.set_auto_running(bool(auto and auto.group(1) == "1"))
+                # Do not resurrect a finished run from a delayed STATUS reply.
+                reported_auto = bool(auto and auto.group(1) == "1")
+                if not self.run_finished_latched or not reported_auto:
+                    self.set_auto_running(reported_auto)
                 if self.estop_latched:
                     self.set_auto_running(False)
                     self.control_state.set("E-STOP đang khóa — gửi RESET_ESTOP trong terminal để mở khóa.")
