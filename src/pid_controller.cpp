@@ -52,6 +52,19 @@ constexpr int32_t MAP1_LEFT_SEARCH_TEST_END_ENC = 1700;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
+// MAP1 trapezoid: S0..3 left wing; S4..11 horizontal; S12..15 right.
+constexpr int32_t CORNER90_START_TICKS = 2000;
+constexpr uint16_t CORNER90_L_ROW = 0x01F0U; // S4..S8
+constexpr uint16_t CORNER90_R_ROW = 0x0F80U; // S7..S11
+constexpr uint16_t CORNER90_L_WING = 0x000FU; // S0..S3
+constexpr uint16_t CORNER90_R_WING = 0xF000U; // S12..S15
+constexpr uint16_t CORNER90_CENTER = 0x0180U; // S7,S8
+constexpr uint32_t CORNER90_CANDIDATE_MS = 110;
+constexpr uint32_t CORNER90_MIN_TURN_MS = 25;
+constexpr uint32_t CORNER90_MAX_TURN_MS = 350;
+constexpr uint32_t CORNER90_WHITE_TIMEOUT_MS = 65;
+constexpr uint8_t CORNER90_WING_FRAMES = 2;
+constexpr uint8_t CORNER90_REACQUIRE_FRAMES = 3;
 // Named-track dashed-line coast. Encoder positions are relative to AUTO start.
 // These are provisional windows extracted from the 2026-10-31 map logs.
 // TEMPORARY PID-only test mode for mainHighSpeedv2 (default OFF).
@@ -266,6 +279,11 @@ uint32_t searchStartedMs = 0;
 uint32_t autoStartedMs = 0;
 uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
+// 0=off, 1=left, 2=right. Confirm row-to-wing progression before pivot.
+uint8_t corner90Candidate = 0, corner90Active = 0;
+uint8_t corner90WingCount = 0, corner90CenterCount = 0;
+uint32_t corner90CandidateAt = 0, corner90StartedAt = 0;
+uint32_t corner90WhiteAt = 0;
 uint8_t derivativeWarmupFrames = 0;
 uint8_t reacquireSpeedFrames = 0;
 bool turnMissing = false;
@@ -401,6 +419,9 @@ static void resetLineTracking() {
     searchStartedMs = 0;
     turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
+    corner90Candidate = corner90Active = 0;
+    corner90WingCount = corner90CenterCount = 0;
+    corner90CandidateAt = corner90StartedAt = corner90WhiteAt = 0;
     derivativeWarmupFrames = 0;
     reacquireSpeedFrames = 0;
     turnMissing = false;
@@ -766,6 +787,107 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         fullLineFrames = 0;
     }
 
+    // A physical row-wide signal is a candidate, not a turn command.
+    // The matching sloped wing must then see line twice. All 16 raw
+    // sensors are used, independent of the MAP1 PID sensor masks.
+    if (selectedMap == 1 && autoMode && finishDetectionArmed &&
+        map1MaxProgress >= CORNER90_START_TICKS) {
+        if (corner90Active != 0U) {
+            const uint32_t elapsed = (uint32_t)(now - corner90StartedAt);
+            const bool centered = (mask & CORNER90_CENTER) == CORNER90_CENTER &&
+                (mask & (CORNER90_L_WING | CORNER90_R_WING)) == 0U &&
+                blackCount >= 2 && blackCount <= 6;
+            if (elapsed >= CORNER90_MIN_TURN_MS && centered) {
+                if (corner90CenterCount < CORNER90_REACQUIRE_FRAMES)
+                    ++corner90CenterCount;
+            } else {
+                corner90CenterCount = 0;
+            }
+            if (corner90CenterCount >= CORNER90_REACQUIRE_FRAMES) {
+                corner90Active = corner90Candidate = 0;
+                corner90CenterCount = corner90WingCount = 0;
+                corner90WhiteAt = 0;
+                turnState = TURN_NONE;
+                turnMissing = missing = false;
+                lineLocked = previouslyLocked = true;
+                clearPidState();
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+                return LINE_CASE_NORMAL_PID;
+            }
+            if (blackCount == 0U) {
+                if (corner90WhiteAt == 0U) corner90WhiteAt = now;
+            } else {
+                corner90WhiteAt = 0U;
+            }
+            const bool whiteTimeout = corner90WhiteAt != 0U &&
+                (uint32_t)(now - corner90WhiteAt) >= CORNER90_WHITE_TIMEOUT_MS;
+            if (elapsed >= CORNER90_MAX_TURN_MS || whiteTimeout) {
+                const TurnState dir = corner90Active == 1U
+                    ? TURN_LEFT : TURN_RIGHT;
+                corner90Active = corner90Candidate = 0;
+                corner90CenterCount = corner90WingCount = 0;
+                corner90WhiteAt = 0;
+                turnState = searchStateFor(dir);
+                searchStartedMs = now;
+                centeredTurnFrames = 0;
+                clearPidState();
+                return isLeftTurn() ? LINE_CASE_SHARP_LEFT
+                                    : LINE_CASE_SHARP_RIGHT;
+            }
+            return corner90Active == 1U ? LINE_CASE_SHARP_LEFT
+                                        : LINE_CASE_SHARP_RIGHT;
+        }
+
+        if (corner90Candidate &&
+            (uint32_t)(now - corner90CandidateAt) > CORNER90_CANDIDATE_MS)
+            corner90Candidate = corner90WingCount = 0;
+
+        if (blackCount >= 11U || mask == 0U || !lineLocked ||
+            isSearchTurn()) {
+            corner90Candidate = corner90WingCount = 0;
+        } else {
+            const bool wideLeft = (mask & CORNER90_L_ROW) == CORNER90_L_ROW;
+            const bool wideRight = (mask & CORNER90_R_ROW) == CORNER90_R_ROW;
+            if (corner90Candidate == 0U && wideLeft != wideRight) {
+                corner90Candidate = wideLeft ? 1U : 2U;
+                corner90CandidateAt = now;
+                corner90WingCount = 0;
+            }
+            if (corner90Candidate != 0U) {
+                const uint16_t wing = corner90Candidate == 1U
+                    ? CORNER90_L_WING : CORNER90_R_WING;
+                const uint16_t opposite = corner90Candidate == 1U
+                    ? CORNER90_R_WING : CORNER90_L_WING;
+                if (mask & opposite) {
+                    corner90Candidate = corner90WingCount = 0;
+                } else if (mask & wing) {
+                    if (corner90WingCount < CORNER90_WING_FRAMES)
+                        ++corner90WingCount;
+                    if (corner90WingCount >= CORNER90_WING_FRAMES) {
+                        corner90Active = corner90Candidate;
+                        corner90StartedAt = now;
+                        corner90CenterCount = 0;
+                        corner90WhiteAt = 0;
+                        turnState = corner90Active == 1U
+                            ? TURN_LEFT : TURN_RIGHT;
+                        lastTurnDirection = turnState;
+                        turnStartedMs = now;
+                        centeredTurnFrames = 0;
+                        turnMissing = false;
+                        clearPidState();
+                        return corner90Active == 1U ? LINE_CASE_SHARP_LEFT
+                                                    : LINE_CASE_SHARP_RIGHT;
+                    }
+                } else {
+                    corner90WingCount = 0;
+                }
+            }
+        }
+    } else {
+        corner90Candidate = corner90WingCount = 0;
+    }
+
     // GAP_BRIDGE has priority over startup grace and the usual 30ms dropout.
     // One timer per continuous white segment; no reentry after its timeout.
     if (gapActive) {
@@ -1038,7 +1160,22 @@ void pid_line_follow_step(void) {
     // SEARCH, dash gaps, crossing and stop keep their established direct PWM logic.
     if (currentCase != LINE_CASE_NORMAL_PID || !pidMeasurementGood)
         resetWheelSpeedPid();
-    if (currentCase == LINE_CASE_SHARP_LEFT) {
+    if (corner90Active != 0U &&
+        (currentCase == LINE_CASE_SHARP_LEFT ||
+         currentCase == LINE_CASE_SHARP_RIGHT)) {
+        // No global BASE/HS_PEAK reduction: redistribute signed PWM for yaw.
+        // Actual robot speed can still change; wheel PI remains disabled.
+        clearPidState();
+        const float stageBase = map1MaxProgress >= 11000
+            ? (float)highSpeedPeakPwm
+            : map1PidStages[map1ActivePidStage].pwm >= 0
+            ? (float)map1PidStages[map1ActivePidStage].pwm
+            : (float)pidConfig.baseSpeed;
+        const int16_t outer = clampPwm(fmaxf(stageBase, 180.0f));
+        const int16_t inner = -70;
+        if (corner90Active == 1U) motor_set_speeds(inner, outer);
+        else motor_set_speeds(outer, inner);
+    } else if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
             const int16_t searchPwm = searchPwmForCurrentTurn();
