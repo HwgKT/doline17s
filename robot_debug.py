@@ -47,7 +47,9 @@ CSV_HEADER = (["host_iso", "t_ms"] +
               [f"adc{i}" for i in range(16)] +
               [f"cal{i}" for i in range(16)] +
               [f"logic{i}" for i in range(16)] +
-              ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode", "logic16"])
+              ["encL", "encR", "pwmL", "pwmR", "err", "p", "i", "d", "out", "mode", "logic16"] +
+              ["event_type", "marker", "marker_symbol", "marker_map",
+               "marker_auto", "marker_runEnc", "led_feedback"])
 BG, PANEL, FG, MUTED = "#0f1420", "#161d31", "#e2e8f0", "#94a3b8"
 GREEN, GREY, AMBER, CYAN, ROSE = "#10b981", "#475569", "#f59e0b", "#22d3ee", "#f43f5e"
 
@@ -161,6 +163,11 @@ class App(tk.Tk):
         self.controls_q = queue.SimpleQueue()  # priority text replies / E-STOP ACK
         self.reader = None
         self.run_csv = RunCsvLifecycle(self.controls_q)
+        self.last_sample = None
+        self.run_origin_enc_l = None
+        self.run_origin_enc_r = None
+        self.marker_start_recorded = False
+        self.marker_end_recorded = False
         self.stop_ack_deadline = None
         self.stop_verify_pending = False
         self.stop_verify_deadline = None
@@ -240,11 +247,13 @@ class App(tk.Tk):
         self.run_finished_latched = False
         self.run_live_elapsed_floor = 0.0
         self.run_timer_var = tk.StringVar(value="00:00:00")
+        self.marker_status = tk.StringVar(value="Mốc: chờ START (<) / END (>)")
         self._build()
         self.update_control_buttons()  # Includes HS widgets created after START/STOP.
         self.refresh_ports()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind_all("<Escape>", lambda _event: self.stop_line())
+        self.bind_all("<KeyPress>", self.handle_marker_shortcut, add="+")
         self.after(30, self.tick)
 
     def label(self, parent, text="", fg=FG, bg=None, **kw):
@@ -380,6 +389,20 @@ class App(tk.Tk):
                    font=("Consolas", 10, "bold")).pack(side="left", padx=5)
         ttk.Button(run_timer, text="Reset giờ", width=9,
                    command=self.reset_run_timer).pack(side="right")
+        marker_bar = tk.Frame(panel, bg=PANEL)
+        marker_bar.pack(fill="x", pady=(0, 1))
+        self.marker_start_btn = tk.Button(
+            marker_bar, text="MỐC START  (<)", command=self.mark_run_start,
+            bg="#0e7490", fg="#ffffff", activebackground="#155e75",
+            relief="flat", font=("Segoe UI", 8, "bold"), height=1)
+        self.marker_start_btn.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.marker_end_btn = tk.Button(
+            marker_bar, text="MỐC END  (>)", command=self.mark_run_end,
+            bg="#7c3aed", fg="#ffffff", activebackground="#6d28d9",
+            relief="flat", font=("Segoe UI", 8, "bold"), height=1)
+        self.marker_end_btn.pack(side="left", fill="x", expand=True)
+        self.label(panel, textvariable=self.marker_status, bg=PANEL, fg=CYAN,
+                   font=("Consolas", 8)).pack(anchor="w", pady=(0, 1))
         self.control_state = tk.StringVar(value="Chưa kết nối / chưa xác định trạng thái")
         self.control_state_label = self.label(panel, textvariable=self.control_state,
                                               bg=PANEL, fg=AMBER, wraplength=430,
@@ -1066,6 +1089,15 @@ class App(tk.Tk):
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
+        marker_ready = (connected and self.run_csv.active is not None
+                        and self.auto_running)
+        if hasattr(self, "marker_start_btn"):
+            self.marker_start_btn.configure(
+                state="normal" if marker_ready and not self.marker_start_recorded
+                and not self.marker_end_recorded else "disabled")
+            self.marker_end_btn.configure(
+                state="normal" if marker_ready and not self.marker_end_recorded
+                else "disabled")
         locked = (self.run_csv.active is not None or self.auto_running
                   or self.start_pending or self.stop_ack_deadline is not None
                   or self.stop_verify_pending)
@@ -1193,6 +1225,11 @@ class App(tk.Tk):
             self.update_control_buttons()
             return
         self.last_csv_total = 0
+        self.marker_start_recorded = False
+        self.marker_end_recorded = False
+        self.marker_status.set("Mốc: chờ START (<) / END (>)")
+        self.run_origin_enc_l = None
+        self.run_origin_enc_r = None
         self.run_origin_esp_ms = None
         self.run_finish_esp_ms = None
         self.last_esp_elapsed_seconds = None
@@ -1253,6 +1290,9 @@ class App(tk.Tk):
             self.log(f"GPIO34 START: lỗi mở TXT: {exc}")
             return
         self.last_csv_total = 0
+        self.marker_start_recorded = False
+        self.marker_end_recorded = False
+        self.marker_status.set("Mốc: chờ START (<) / END (>)")
         self.stop_ack_deadline = None
         self.start_confirmed = True
         self.csv_status.set(f"CSV GHI: {recorder.path.name}")
@@ -1271,6 +1311,78 @@ class App(tk.Tk):
             self.update_control_buttons()
         else:
             self.finish_run_csv("STOP KHÔNG GỬI ĐƯỢC / CHƯA XÁC NHẬN DỪNG")
+
+    def handle_marker_shortcut(self, event):
+        """Map '<' and '>' to track markers without stealing text-entry input."""
+        char = getattr(event, "char", "")
+        keysym = getattr(event, "keysym", "")
+        if char not in ("<", ">") and keysym not in ("less", "greater"):
+            return None
+        try:
+            widget_class = event.widget.winfo_class()
+        except (AttributeError, tk.TclError):
+            widget_class = ""
+        if widget_class in ("Entry", "TEntry", "Text", "TCombobox",
+                            "Spinbox", "TSpinbox"):
+            return None
+        if char == "<" or keysym == "less":
+            self.mark_run_start()
+        else:
+            self.mark_run_end()
+        return "break"
+
+    def _record_run_marker(self, marker, symbol):
+        recorder = self.run_csv.active
+        if recorder is None or not self.auto_running:
+            self.log(f"Mốc {marker}: chỉ có thể đánh dấu khi AUTO đang chạy và CSV đang ghi.")
+            return False
+        if marker == "START" and (self.marker_start_recorded or self.marker_end_recorded):
+            self.log("Mốc START đã được ghi hoặc lượt chạy đã có END.")
+            return False
+        if marker == "END" and self.marker_end_recorded:
+            self.log("Mốc END đã được ghi cho lượt chạy này.")
+            return False
+        if marker == "END" and not self.marker_start_recorded:
+            self.log("Cảnh báo: đang ghi END trước START; vẫn lưu marker để không mất mốc.")
+        sample = self.last_sample
+        run_enc = None
+        if (sample is not None and self.run_origin_enc_l is not None
+                and self.run_origin_enc_r is not None):
+            run_enc = int(round(
+                ((int(sample[17]) - self.run_origin_enc_l) +
+                 (int(sample[18]) - self.run_origin_enc_r)) / 2.0))
+        map_id = self.selected_map if self.selected_map is not None else recorder.map_id
+        saved = recorder.submit_marker(
+            event_type="MANUAL_MARKER",
+            marker=marker,
+            marker_symbol=symbol,
+            marker_map=map_id,
+            marker_auto=self.auto_running,
+            marker_run_enc=run_enc,
+            led_feedback="",
+            sample=sample,
+        )
+        if not saved:
+            self.log(f"Mốc {marker}: không ghi được marker (hàng đợi CSV đầy hoặc recorder đã đóng).")
+            return False
+        if marker == "START":
+            self.marker_start_recorded = True
+            self.marker_status.set(
+                f"Mốc START đã ghi | runEnc={run_enc if run_enc is not None else '--'}")
+            self.log(f"ĐÃ GHI MỐC START (<) | MAP={map_id} | runEnc={run_enc}")
+        else:
+            self.marker_end_recorded = True
+            self.marker_status.set(
+                f"Mốc END đã ghi | runEnc={run_enc if run_enc is not None else '--'}")
+            self.log(f"ĐÃ GHI MỐC END (>) | MAP={map_id} | runEnc={run_enc}")
+        self.update_control_buttons()
+        return True
+
+    def mark_run_start(self):
+        return self._record_run_marker("START", "<")
+
+    def mark_run_end(self):
+        return self._record_run_marker("END", ">")
 
     def confirm_stopped(self, reason):
         # Only explicit ESP32 stop/finish ACK or STATUS with zero PWM
@@ -1335,6 +1447,11 @@ class App(tk.Tk):
         return [host_time, s[0], *adc, *cal, *bits, *s[17:27], word]
 
     def on_sample(self, s):
+        self.last_sample = tuple(s)
+        if s[26] == 1 and (self.run_origin_enc_l is None or self.run_origin_enc_r is None):
+            # Fallback if RUN_ORIGIN text was delayed or lost: anchor at first AUTO frame.
+            self.run_origin_enc_l = int(s[17])
+            self.run_origin_enc_r = int(s[18])
         self.hist.append(s)
         self.frames += 1
         row = self.sample_csv_row(s)
@@ -1371,6 +1488,11 @@ class App(tk.Tk):
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
+            enc_l0 = re.search(r"\bencL0=(-?\d+)\b", message)
+            enc_r0 = re.search(r"\bencR0=(-?\d+)\b", message)
+            if enc_l0 and enc_r0:
+                self.run_origin_enc_l = int(enc_l0.group(1))
+                self.run_origin_enc_r = int(enc_r0.group(1))
             start = re.search(r"\bt_ms=(\d+)\b", message)
             if start:
                 self.run_origin_esp_ms = int(start.group(1))
