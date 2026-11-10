@@ -8,7 +8,7 @@ An experimental **PWM command envelope**, not a physical speed controller. The s
 
 | Encoder from AUTO (signed mean ticks) | Forward PWM target |
 | --- | --- |
-| 0–BRAKE_START | `HS_PEAK` immediately from the first AUTO control update (no initial BASE → HS_PEAK ramp) |
+| 0–BRAKE_START | `HS_PEAK` from the first valid NORMAL_PID update after line lock (no initial BASE → HS_PEAK ramp) |
 | **1400–2300 when HS_PEAK=240–255** | linear very-early brake `HS_PEAK → min(110, HS_PEAK)` |
 | **1600–2300 when HS_PEAK=230–239** | linear early brake `HS_PEAK → min(110, HS_PEAK)` |
 | **1800–2300 when HS_PEAK=100–229** | standard brake `HS_PEAK → min(110, HS_PEAK)` |

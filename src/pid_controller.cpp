@@ -75,7 +75,7 @@ static float highSpeedForwardTarget(int32_t ticks, float basePwm) {
     // Never turn braking into acceleration if HS_PEAK is below 110.
     const float holdPwm = fminf(HS_CORNER_HOLD_PWM, peak);
     const int32_t brakeStart = highSpeedBrakeStart();
-    // Initial BASE -> HS_PEAK ramp removed: use HS_PEAK from AUTO start.
+    // Initial ramp removed: use HS_PEAK on the first valid NORMAL_PID update after line lock.
     if (ticks < brakeStart) return peak;
     if (ticks < HS_BRAKE_END_ENC) {
         return peak +
