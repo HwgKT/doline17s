@@ -554,6 +554,7 @@ bool pid_select_map(uint8_t mapId) {
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
+uint8_t pid_get_corner90_state(void) { return corner90Active; }
 
 // Set the Map 1 PID sensor selection profile only while stopped.
 // Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
