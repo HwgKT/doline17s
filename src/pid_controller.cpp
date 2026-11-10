@@ -129,8 +129,8 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
-// Fixed per-map BASE: no encoder-position scheduler, no late BOOST, and
-// no per-section PWM caps. The independent wheel PI remains active.
+// Map 1: BASE follows the app-configured HS_PEAK from 11,000 ticks onward.
+// No additional per-section PWM caps; wheel PI remains independently toggled.
 int32_t map1MaxProgress = 0;
 // Map 01 route lock assumes a repeatable START pose; enabled by default.
 bool map1RouteLockEnabled = false; // Temporarily disabled by default for PID/sensor-mask testing; ROUTE_LOCK:1 to enable.
