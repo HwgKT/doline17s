@@ -423,20 +423,22 @@ static void resetCornerController() {
     cornerRowSeen = false;
 }
 
-static void sampleCornerEncoders(uint32_t now) {
-    if (now - cornerEncoderSampleMs < CORNER_ENCODER_SAMPLE_MS) return;
+static bool sampleCornerEncoders(uint32_t now) {
+    if (now - cornerEncoderSampleMs < CORNER_ENCODER_SAMPLE_MS) return false;
     int32_t l = 0, r = 0;
     encoder_get_counts(&l, &r);
     const uint32_t dtMs = now - cornerEncoderSampleMs;
-    if (cornerEncoderSampleMs != 0 && dtMs <= 100) {
+    if (dtMs > 0 && dtMs <= 100) {
+        // Use per-wheel magnitudes: counter-rotation cannot cancel to zero.
         const float measured = 500.0f *
-            (float)((l - cornerEncoderPrevL) + (r - cornerEncoderPrevR)) /
-            (float)dtMs; // average signed forward ticks/sec
+            (fabsf((float)(l - cornerEncoderPrevL)) +
+             fabsf((float)(r - cornerEncoderPrevR))) / (float)dtMs;
         cornerForwardTps = 0.5f * cornerForwardTps + 0.5f * measured;
     }
     cornerEncoderSampleMs = now;
     cornerEncoderPrevL = l;
     cornerEncoderPrevR = r;
+    return true;
 }
 
 // Returns true when this function owns motor outputs for this PID cycle.
@@ -474,7 +476,8 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
         cornerDirection = cornerLeftWingFrames >= 2 ? -1 : 1;
         cornerPhase = CORNER_BRAKE;
         cornerPhaseSinceMs = now;
-        cornerEncoderSampleMs = 0;
+        encoder_get_counts(&cornerEncoderPrevL, &cornerEncoderPrevR);
+        cornerEncoderSampleMs = now;
         cornerBrakeSlowFrames = 0;
         cornerForwardTps = 0.0f;
         clearPidState();
@@ -485,7 +488,7 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
     if (cornerPhase == CORNER_BRAKE) {
         detectedCase = cornerDirection < 0
             ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
-        sampleCornerEncoders(now);
+        const bool newSpeedSample = sampleCornerEncoders(now);
         const uint32_t elapsed = now - cornerPhaseSinceMs;
         // Preserve a little forward motion at entry; stop both wheels as
         // soon as the asymmetric phase ends.
@@ -494,10 +497,11 @@ static bool processMap1Corner(uint16_t mask, uint8_t blackCount,
             else motor_set_speeds(CORNER_OUTER_BRAKE_PWM, 0);
         } else {
             motor_set_speeds(0, 0); // BTS7960 short-brake with EN held HIGH
-            if (cornerEncoderSampleMs != 0 &&
-                fabsf(cornerForwardTps) <= CORNER_FORWARD_STOP_TPS) {
-                if (cornerBrakeSlowFrames < 3) ++cornerBrakeSlowFrames;
-            } else cornerBrakeSlowFrames = 0;
+            if (newSpeedSample) {
+                if (cornerForwardTps <= CORNER_FORWARD_STOP_TPS) {
+                    if (cornerBrakeSlowFrames < 3) ++cornerBrakeSlowFrames;
+                } else cornerBrakeSlowFrames = 0;
+            }
             if (cornerBrakeSlowFrames >= 3) {
                 cornerPhase = CORNER_ROTATE;
                 cornerPhaseSinceMs = now;
