@@ -19,6 +19,7 @@ constexpr float VELOCITY_EMA_ALPHA = 0.40f;
 constexpr float MAX_PI_CORRECTION_PWM = 45.0f;
 constexpr float MAX_INTEGRAL_PWM = 35.0f;
 bool wheelMode = false;
+bool wheelNeedsInitialOutput = false;
 int16_t targetCommandL = 0, targetCommandR = 0;
 int32_t previousCountL = 0, previousCountR = 0;
 uint32_t previousSampleUs = 0;
@@ -145,12 +146,20 @@ void motor_set_speeds(int16_t speed_left, int16_t speed_right) {
     }
     targetCommandL = speed_left > 255 ? 255 : (speed_left < -255 ? -255 : speed_left);
     targetCommandR = speed_right > 255 ? 255 : (speed_right < -255 ? -255 : speed_right);
-    if (targetCommandL == 0 && targetCommandR == 0) motor_stop();
+    if (targetCommandL == 0 && targetCommandR == 0) {
+        motor_stop();
+    } else if (wheelNeedsInitialOutput) {
+        // Avoid 20 ms of stale SEARCH/pivot PWM when returning to line PID.
+        motor_set_left(targetCommandL);
+        motor_set_right(targetCommandR);
+        wheelNeedsInitialOutput = false;
+    }
 }
 
 void motor_set_wheel_speed_mode(bool enabled) {
     if (wheelMode == enabled) return;
     wheelMode = enabled;
+    wheelNeedsInitialOutput = enabled;
     targetCommandL = targetCommandR = 0;
     resetWheelState();
 }
