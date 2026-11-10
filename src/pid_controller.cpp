@@ -331,8 +331,8 @@ constexpr int32_t MAP1_X_TICKS[7] = {
     3800, 7400, 8350, 10500, 11300, 12800, 15000
 };
 constexpr float MAP1_SEGMENT_PWM[8] = {
-    130.0f, 130.0f, 130.0f, 200.0f,
-    200.0f, 200.0f, 200.0f, 200.0f
+    130.0f, 130.0f, 130.0f, 130.0f,
+    130.0f, 200.0f, 200.0f, 200.0f
 };
 
 static float map1CappedBase(int32_t progress) {
