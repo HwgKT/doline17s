@@ -23,6 +23,14 @@ constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual drivin
 // Both GUI and GPIO34 share the same AUTO safety/validation checks.
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
+// Stationary PID bench test; lift wheels before enabling.
+bool pidTestActive=false;
+float pidTestError=0, pidTestPreviousError=0, pidTestIntegral=0, pidTestD=0, pidTestOutput=0;
+bool pidTestHistory=false;
+uint32_t pidTestPrevUs=0, pidTestStartMs=0, pidTestLastReportMs=0;
+constexpr uint32_t PID_TEST_MAX_MS=45000;
+constexpr int16_t PID_TEST_MAX_PWM=100;
+constexpr float PID_TEST_CENTER_DEADBAND=5.0f;
 uint8_t manualSpeed=120;
 uint16_t streamHz=300;
 uint32_t streamPeriodUs=1000000UL/300;
@@ -56,8 +64,78 @@ void setButton34Phase(Button34Phase phase) {
            phase==BUTTON34_BLACK_CAPTURING);
 }
 void reply(const String &line) { btSendLine(line); }
+void pidTestStop() {
+  pidTestActive=false;
+  pidTestError=pidTestPreviousError=pidTestIntegral=pidTestD=pidTestOutput=0;
+  pidTestHistory=false;
+  pidTestPrevUs=0;
+  motor_stop();
+}
 void safeStop() {
+  pidTestStop();
   pid_set_auto_mode(false); motor_stop(); manualActive=false;
+}
+// Shares the nonlinear P, clamped I and filtered D law with normal line PID,
+// but removes BASE speed; left/right wheels counterrotate in this bench mode.
+void pidTestStep() {
+  if(!pidTestActive)return;
+  const uint32_t nowMs=millis();
+  if(nowMs-pidTestStartMs>=PID_TEST_MAX_MS ||
+     !sensor_adc_ready() || sensor_is_calibrating()){
+    pidTestStop();
+    reply("PID_TEST: AUTO_STOP_TIMEOUT_OR_SENSOR_FAULT");
+    return;
+  }
+  float pos=0;
+  uint8_t count=0;
+  const bool valid=pid_calculate_position(&pos,&count) && count>0 && count<=8;
+  if(!valid){
+    pidTestError=pidTestPreviousError=pidTestIntegral=pidTestD=pidTestOutput=0;
+    pidTestHistory=false;
+    motor_stop();
+  }else{
+    const uint32_t us=micros();
+    const float rawDt=(float)(us-pidTestPrevUs)*1.0e-6f;
+    const bool dtValid=pidTestHistory && rawDt>0.0f && rawDt<=0.1f;
+    const float dt=dtValid?rawDt:0.01f;
+    pidTestPrevUs=us;
+    pidTestError=pos;
+    if(fabsf(pos)<=PID_TEST_CENTER_DEADBAND){
+      pidTestIntegral=pidTestD=pidTestOutput=0;
+      pidTestHistory=false;
+      pidTestPreviousError=pos;
+      motor_stop();
+    }else{
+      const float p=pid_get_kp()*(1.0f+0.018f*fabsf(pos))*pos;
+      if((pidTestIntegral>0 && pos<0) || (pidTestIntegral<0 && pos>0))
+        pidTestIntegral*=0.5f;
+      pidTestIntegral=constrain(pidTestIntegral+pos*dt,-80.0f,80.0f);
+      const float i=pid_get_ki()*pidTestIntegral;
+      float d=0;
+      if(dtValid){
+        const float rawD=pid_get_kd()*(pos-pidTestPreviousError)/rawDt;
+        d=constrain(0.6f*rawD+0.4f*pidTestD,-200.0f,200.0f);
+      }
+      pidTestD=d;
+      pidTestPreviousError=pos;
+      pidTestHistory=true;
+      const float correction=constrain(p+i+d,
+                                      -(float)PID_TEST_MAX_PWM,
+                                       (float)PID_TEST_MAX_PWM);
+      pidTestOutput=correction;
+      const int16_t u=(int16_t)lroundf(correction);
+      motor_set_speeds(u,-u);
+    }
+  }
+  if(nowMs-pidTestLastReportMs>=100){
+    pidTestLastReportMs=nowMs;
+    char b[140];
+    snprintf(b,sizeof(b),
+      "PID_TEST_SAMPLE t=%lu valid=%u n=%u err=%.2f out=%.2f pwmL=%d pwmR=%d",
+      (unsigned long)(nowMs-pidTestStartMs),(unsigned)valid,(unsigned)count,
+      pidTestError,pidTestOutput,motor_get_left_speed(),motor_get_right_speed());
+    reply(b);
+  }
 }
 bool parseGain(const String &s,float &val) {
   if(!s.length())return false;
@@ -97,8 +175,34 @@ void command(const String &raw) {
   }
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
+  if(s=="PID_TEST"){
+    char b[120];
+    snprintf(b,sizeof(b),"PID_TEST: active=%u err=%.2f out=%.2f pwmL=%d pwmR=%d maxPWM=%d",
+             (unsigned)pidTestActive,pidTestError,pidTestOutput,
+             motor_get_left_speed(),motor_get_right_speed(),PID_TEST_MAX_PWM);
+    reply(b);return;
+  }
+  if(s=="PID_TEST:0" || s=="PID_TEST:OFF"){
+    pidTestStop();reply("PID_TEST: STOPPED");return;
+  }
+  if(s=="PID_TEST:1" || s=="PID_TEST:ON"){
+    if(estopLatched || pid_is_auto_mode() || manualActive || adcBenchActive() ||
+       sensor_is_calibrating() || !sensor_adc_ready() || !calibrationReady){
+      reply("ERR: PID_TEST_NEEDS_STOPPED_CALIBRATED_SAFE_ROBOT");return;
+    }
+    pidTestStop();
+    pidTestActive=true;pidTestStartMs=millis();
+    pidTestLastReportMs=pidTestStartMs;
+    pidTestPrevUs=micros();
+    reply("PID_TEST: STARTED (45s limit; lift wheels; STOP/ESTOP to exit)");
+    return;
+  }
+  if(pidTestActive && (s=="A" || s=="AUTO" || s=="START" ||
+     s.startsWith("AUTO:") || s=="F" || s=="B" || s=="L" || s=="R")){
+    reply("ERR: PID_TEST_ACTIVE_SEND_PID_TEST:0_FIRST");return;
+  }
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PID_TEST PID_TEST:1 PID_TEST:0 PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -535,7 +639,7 @@ void loop() {
   // GPIO34 physical 3-press workflow: WHITE -> BLACK -> START.
   // GPIO34 itself is debounced once per LOW press in sensor.cpp.
   if(sensor_start_button_pressed()){
-    if(pid_is_auto_mode() || manualActive){
+    if(pid_is_auto_mode() || manualActive || pidTestActive){
       reply("ERR: BUTTON34_REQUIRES_STOPPED");
     }else if(adcBenchActive()){
       reply("ERR: ADC_BENCH_ACTIVE");
@@ -567,7 +671,7 @@ void loop() {
   else if(wasCalibrating)sensor_update_calibration_loop();
   else sensor_read_all();
   perfRecord(PERF_ADC, micros()-stageStartUs);
-  if(!sensor_adc_ready() && (pid_is_auto_mode() || manualActive)){
+  if(!sensor_adc_ready() && (pid_is_auto_mode() || manualActive || pidTestActive)){
     safeStop();
     reply("ERR: ADC_READ_FAULT_MOTORS_STOPPED");
   }
@@ -587,7 +691,8 @@ void loop() {
     default: break;
   }
   updateLedIndicator(now);
-  if(pid_is_auto_mode()&&!sensor_is_calibrating()){
+  if(pidTestActive){stageStartUs=micros();pidTestStep();++pidCount;perfRecord(PERF_PID,micros()-stageStartUs);}
+  if(pid_is_auto_mode()&&!sensor_is_calibrating(){
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
