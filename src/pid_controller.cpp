@@ -189,14 +189,23 @@ uint16_t map2SensorMasks[PID_MAP2_SENSOR_MAX_STAGES] = {
 };
 uint8_t map2SensorStageCount = 4;
 int32_t map2SensorMaxTravel = 0;
-// MAP 2 sensor masks advance continuously at tick boundaries; no checkpoint stop.
-uint8_t map2SensorActiveStage = 0;
-uint8_t map2HoldState = 0; // Legacy telemetry: always RUN (0).
+// Map2 tick boundaries are checkpoints: pause forward motion, align to line,
+// require 10 ms of stable centered line + low encoder motion, then switch mask.
+// No sleeping inside PID loop. Map1 and Map3 are unaffected.
+uint8_t map2SensorActiveStage = 0; // 0..stageCount-1, latched at each checkpoint.
+uint8_t map2HoldState = 0; // 0=RUN, 1=ALIGN, 2=HOLD, 3=FAULT.
 // Map 3: continuous PID sensor masks; all physical sensor observations remain unmasked.
 int32_t map3SensorTickEnds[3] = {730, 1960, 2350};
 uint16_t map3SensorMasks[4] = {0xFF00U, 0xFFFFU, 0x01FFU, 0xFFFFU};
 int32_t map3SensorMaxTravel = 0;
 uint8_t map3SensorActiveStage = 0; // 0..3, advances at encoder thresholds without stopping.
+uint32_t map2HoldStartMs = 0, map2StableSinceMs = 0;
+int32_t map2StableEncL = 0, map2StableEncR = 0;
+constexpr uint32_t MAP2_STABLE_LINE_MS = 10;
+constexpr uint32_t MAP2_HOLD_TIMEOUT_MS = 1500;
+constexpr float MAP2_STABLE_LINE_ERROR = 12.0f;
+constexpr int16_t MAP2_ALIGN_PWM = 55;
+constexpr int32_t MAP2_STILL_ENCODER_TOLERANCE = 2;
 
 
 static int32_t map1SensorTravelTicks() {
@@ -215,10 +224,6 @@ static uint16_t map2PidSensorMask() {
     if (selectedMap != 2 || !autoMode) return 0xFFFFU;
     const int32_t traveled = map1SensorTravelTicks();
     if (traveled > map2SensorMaxTravel) map2SensorMaxTravel = traveled;
-    while (map2SensorActiveStage + 1U < map2SensorStageCount &&
-           map2SensorMaxTravel >= map2SensorTickEnds[map2SensorActiveStage]) {
-        ++map2SensorActiveStage;
-    }
     return map2SensorMasks[map2SensorActiveStage];
 }
 static uint16_t map3PidSensorMask() {
@@ -552,6 +557,8 @@ static void resetLineTracking() {
     map3SensorMaxTravel = 0;
     map3SensorActiveStage = 0;
     map2HoldState = 0;
+    map2HoldStartMs = map2StableSinceMs = 0;
+    map2StableEncL = map2StableEncR = 0;
      map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
@@ -813,7 +820,7 @@ void pid_get_map_speed_profile_v2(uint8_t mapId,uint8_t *stageCount,
         basePwm[i]=mapSegmentPwm[index][i];
 }
 // Mask changes affect only the Map 2 line-PID measurement, never physical
-// ADC/START/FINISH/corner evidence. Stage transitions do not stop the motors.
+// ADC/START/FINISH/corner evidence. The checkpoint FSM remains unchanged.
 bool pid_set_map2_sensor_profile_v2(uint8_t stageCount, const int32_t *endTicks,
                                     const uint16_t *masks) {
     if (autoMode || stageCount < 1 || stageCount > PID_MAP2_SENSOR_MAX_STAGES ||
@@ -832,6 +839,7 @@ bool pid_set_map2_sensor_profile_v2(uint8_t stageCount, const int32_t *endTicks,
     map2SensorActiveStage = 0;
     map2SensorMaxTravel = 0;
     map2HoldState = 0;
+    map2HoldStartMs = map2StableSinceMs = 0;
     return true;
 }
 void pid_get_map2_sensor_profile_v2(uint8_t *stageCount, int32_t *endTicks,
@@ -1318,6 +1326,76 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
 }
 
+// Returns true when Map 2 checkpoint owns motor commands for this cycle.
+// A position read from memory is never accepted as evidence of a centered line.
+static bool map2HoldLineStep(float position, uint8_t blackCount, bool good) {
+    if (selectedMap != 2 || map2HoldState == 0) return false;
+    if (map2HoldState == 3) {
+        currentCase = LINE_CASE_STOPPED;
+        motor_stop();
+        return true;
+    }
+    currentCase = LINE_CASE_MAP2_HOLD;
+    const uint32_t now = millis();
+    const uint16_t physical = sensor_get_line_bits();
+    const bool valid = good && blackCount >= 2 && blackCount <= 6 &&
+        (physical & TURN_CENTER_SENSOR_MASK) != 0U &&
+        (physical & 0xF00FU) == 0U;
+    const bool centered = valid && fabsf(position) <= MAP2_STABLE_LINE_ERROR;
+    if ((uint32_t)(now - map2HoldStartMs) >= MAP2_HOLD_TIMEOUT_MS) {
+        map2HoldState = 3;
+        motor_stop();
+        return true;
+    }
+    if (!centered) {
+        map2StableSinceMs = 0;
+        map2HoldState = 1;
+        if (!valid) {
+            motor_stop(); // No blind line search at a checkpoint.
+        } else if (position < 0.0f) {
+            motor_set_speeds(-MAP2_ALIGN_PWM, MAP2_ALIGN_PWM);
+        } else {
+            motor_set_speeds(MAP2_ALIGN_PWM, -MAP2_ALIGN_PWM);
+        }
+        return true;
+    }
+
+    // At center: stop the wheels and establish a NEW stable reference.
+    // Require encoder travel <=2 ticks over a continuous 10-ms window.
+    motor_stop();
+    int32_t left = 0, right = 0;
+    encoder_get_counts(&left, &right);
+    if (!map2StableSinceMs) {
+        map2HoldState = 2;
+        map2StableSinceMs = now;
+        map2StableEncL = left;
+        map2StableEncR = right;
+        return true;
+    }
+    if (labs((long)left-map2StableEncL) > MAP2_STILL_ENCODER_TOLERANCE ||
+        labs((long)right-map2StableEncR) > MAP2_STILL_ENCODER_TOLERANCE) {
+        map2StableSinceMs = now;
+        map2StableEncL = left;
+        map2StableEncR = right;
+        return true;
+    }
+    if ((uint32_t)(now-map2StableSinceMs) < MAP2_STABLE_LINE_MS) return true;
+    // Completed checkpoint. Switch stage only AFTER stable centered line.
+    if (map2SensorActiveStage + 1U < map2SensorStageCount) ++map2SensorActiveStage;
+    map2HoldState = 0;
+    map2StableSinceMs = 0;
+    turnState = TURN_NONE;
+    earlyTurnActive = false;
+    lineLocked = true;
+    missing = acquiring = false;
+    clearPidState();
+    derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+    reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+    resetWheelSpeedPid();
+    motor_stop(); // Normal line PID resumes in the next iteration.
+    return true;
+}
+
 void pid_line_follow_step(void) {
     if (!autoMode) return;
     float pos = 0;
@@ -1336,6 +1414,15 @@ void pid_line_follow_step(void) {
         const int32_t progress = runEncoderProgress();
         if (progress > map2MaxProgress) map2MaxProgress = progress;
     }
+    if (selectedMap == 2 && map2HoldState != 0) {
+        // Preserve FINISH detection even during checkpoint pauses.
+        if (finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU) {
+            currentCase = pid_detect_case(pos, blackCount);
+            motor_stop();
+            if (currentCase == LINE_CASE_STOPPED) return;
+        }
+        if (map2HoldLineStep(pos, blackCount, good)) return;
+    }
     // Physical position/blackCount continue to drive all existing FSM cases.
     // Only the NORMAL_PID steering error uses the encoder-selected subset.
     const uint16_t pidSensorMask = activePidSensorMask();
@@ -1346,6 +1433,19 @@ void pid_line_follow_step(void) {
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
+    if (selectedMap == 2 && map2HoldState == 0 &&
+        map2SensorActiveStage + 1U < map2SensorStageCount && finishDetectionArmed &&
+        currentCase == LINE_CASE_NORMAL_PID && lineLocked &&
+        turnState == TURN_NONE &&
+        map2SensorMaxTravel >= map2SensorTickEnds[map2SensorActiveStage]) {
+        map2HoldState = 1;
+        map2HoldStartMs = millis();
+        map2StableSinceMs = 0;
+        clearPidState();
+        resetWheelSpeedPid();
+        map2HoldLineStep(pos, blackCount, good);
+        return;
+    }
     if (map1Route.active && currentCase != LINE_CASE_STOPPED) {
         const bool validRouteLine =
             finishDetectionArmed && lineLocked &&
