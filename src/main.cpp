@@ -246,7 +246,11 @@ void command(const String &raw) {
     const int32_t baseTicks[3]={(int32_t)bt1,(int32_t)bt2,(int32_t)bt3};
     const uint8_t basePwms[4]={(uint8_t)b1,(uint8_t)b2,
                                (uint8_t)b3,(uint8_t)b4};
-    if(n!=14 || sm1==0 || sm2==0 || sm3==0 || sm4==0 ||
+    if(n!=14 || st1<=0 || st1>10000000L ||
+       st2<=0 || st2>10000000L || st3<=0 || st3>10000000L ||
+       bt1<=0 || bt1>10000000L || bt2<=0 || bt2>10000000L ||
+       bt3<=0 || bt3>10000000L ||
+       sm1==0 || sm2==0 || sm3==0 || sm4==0 ||
        sm1>0xFFFFU || sm2>0xFFFFU || sm3>0xFFFFU || sm4>0xFFFFU ||
        b1>255U || b2>255U || b3>255U || b4>255U ||
        !pid_set_map3_profile(sensorTicks,sensorMasks,baseTicks,basePwms)){
