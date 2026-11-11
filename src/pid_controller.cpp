@@ -170,6 +170,21 @@ int32_t map1SensorStage3Ticks = 1350;
 uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
+// Map 2 independent checkpoints. Defaults OFF until the operator sets
+// validated tick boundaries through MAP2_TICKS (no existing Map2 stages).
+constexpr uint8_t MAP2_MAX_TICK_STAGES = 8;
+int32_t map2TickEnds[MAP2_MAX_TICK_STAGES] = {};
+uint8_t map2TickCount = 0, map2TickStage = 0;
+int32_t map2MaxProgress = 0;
+enum Map2Checkpoint : uint8_t { MAP2_RUN, MAP2_SETTLE, MAP2_ALIGN, MAP2_FAULT };
+Map2Checkpoint map2Checkpoint = MAP2_RUN;
+uint32_t map2CheckpointSince = 0, map2StoppedSince = 0;
+int32_t map2PrevL = 0, map2PrevR = 0;
+uint8_t map2CenterSamples = 0;
+constexpr uint32_t MAP2_SETTLE_MS = 100, MAP2_SETTLE_TIMEOUT_MS = 1500;
+constexpr uint32_t MAP2_ALIGN_TIMEOUT_MS = 1800;
+constexpr int16_t MAP2_ALIGN_PWM = 65;
+
 
 static int32_t map1SensorTravelTicks() {
     int32_t left = 0, right = 0;
@@ -440,6 +455,12 @@ static void resetLineTracking() {
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
     map1SensorMaxTicks = 0;
+    map2TickStage = 0;
+    map2MaxProgress = 0;
+    map2Checkpoint = MAP2_RUN;
+    map2CheckpointSince = map2StoppedSince = 0;
+    map2PrevL = map2PrevR = 0;
+    map2CenterSamples = 0;
      map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
@@ -479,8 +500,10 @@ static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
     }
     const uint16_t mask = physicalMask & allowedMask;
     const uint8_t blackCount = bitCount16(mask);
-    if (selectedMap != 1 || map1MaxProgress < EARLY_TURN_MIN_TICKS ||
-        map1MaxProgress >= EARLY_TURN_MAX_TICKS ||
+    const int32_t turnProgress = selectedMap == 1 ? map1MaxProgress : map2MaxProgress;
+    if ((selectedMap != 1 && selectedMap != 2) ||
+        turnProgress < EARLY_TURN_MIN_TICKS ||
+        turnProgress >= EARLY_TURN_MAX_TICKS ||
         !finishDetectionArmed || earlyTurnActive || blackCount == 0) {
         edgeLeftSeeded = edgeRightSeeded = false;
         edgeLeftFrames = edgeRightFrames = 0;
@@ -643,6 +666,25 @@ void pid_set_auto_mode(bool enabled) {
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
+bool pid_set_map2_tick_stages(const int32_t *ticks, uint8_t count) {
+    if (autoMode || count > MAP2_MAX_TICK_STAGES || (count && !ticks))
+        return false;
+    for (uint8_t i=0; i<count; ++i) {
+        if (ticks[i] <= 0 || ticks[i] > 10000000 ||
+            (i && ticks[i] <= ticks[i-1])) return false;
+    }
+    for (uint8_t i=0; i<MAP2_MAX_TICK_STAGES; ++i)
+        map2TickEnds[i] = i < count ? ticks[i] : 0;
+    map2TickCount = count;
+    return true;
+}
+uint8_t pid_get_map2_tick_count(void) { return map2TickCount; }
+int32_t pid_get_map2_tick(uint8_t i) {
+    return i < map2TickCount ? map2TickEnds[i] : 0;
+}
+uint8_t pid_get_map2_tick_stage(void) { return map2TickStage; }
+uint8_t pid_get_map2_checkpoint_state(void) { return (uint8_t)map2Checkpoint; }
+
 bool pid_set_map1_route_lock(bool enabled) {
     if (autoMode) return false;
     map1RouteLockEnabled = enabled;
@@ -1115,6 +1157,80 @@ void pid_line_follow_step(void) {
         if (progress > map1MaxProgress) map1MaxProgress = progress;
     }
     const bool good = pid_calculate_position(&pos, &blackCount);
+    if (selectedMap == 2) {
+        const uint32_t now = millis();
+        const int32_t progress = runEncoderProgress();
+        if (progress > map2MaxProgress) map2MaxProgress = progress;
+        if (map2Checkpoint == MAP2_RUN && map2TickStage < map2TickCount &&
+            map2MaxProgress >= map2TickEnds[map2TickStage]) {
+            map2Checkpoint = MAP2_SETTLE;
+            map2CheckpointSince = now;
+            map2StoppedSince = 0;
+            map2CenterSamples = 0;
+            encoder_get_counts(&map2PrevL, &map2PrevR);
+            clearPidState();
+            resetWheelSpeedPid();
+        }
+        if (map2Checkpoint != MAP2_RUN) {
+            currentCase = LINE_CASE_STOPPED;
+            if (map2Checkpoint == MAP2_FAULT) {
+                motor_stop();
+                return;
+            }
+            if (map2Checkpoint == MAP2_SETTLE) {
+                motor_stop();  // PWM=0 coasts on this motor driver.
+                int32_t left=0, right=0;
+                encoder_get_counts(&left, &right);
+                const bool still = labs((long)left-map2PrevL) <= 1 &&
+                                   labs((long)right-map2PrevR) <= 1;
+                map2PrevL = left; map2PrevR = right;
+                if (!still) map2StoppedSince = 0;
+                else if (!map2StoppedSince) map2StoppedSince = now;
+                if (map2StoppedSince && now-map2StoppedSince >= MAP2_SETTLE_MS) {
+                    map2Checkpoint = MAP2_ALIGN;
+                    map2CheckpointSince = now;
+                } else if (now-map2CheckpointSince >= MAP2_SETTLE_TIMEOUT_MS)
+                    map2Checkpoint = MAP2_FAULT;
+                return;
+            }
+            // Never accept lastKnownPosition when all physical eyes are white.
+            const uint16_t mask = sensor_get_line_bits();
+            const bool center = good && blackCount >= 2 && blackCount <= 6 &&
+                (mask & TURN_CENTER_SENSOR_MASK) != 0 &&
+                (mask & 0xF00FU) == 0 &&
+                fabsf(pos) <= TURN_CENTERED_POSITION;
+            map2CenterSamples = center ? map2CenterSamples + 1 : 0;
+            if (map2CenterSamples >= 3) {
+                ++map2TickStage;
+                map2Checkpoint = MAP2_RUN;
+                lineLocked = true;
+                acquiring = missing = false;
+                turnState = TURN_NONE;
+                earlyTurnActive = false;
+                clearPidState();
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+                resetWheelSpeedPid();
+                motor_stop(); // Resume on the NEXT PID loop iteration.
+                return;
+            }
+            if (now-map2CheckpointSince >= MAP2_ALIGN_TIMEOUT_MS) {
+                map2Checkpoint = MAP2_FAULT;
+                motor_stop();
+                return;
+            }
+            if (!good || blackCount > 10) {
+                motor_stop(); // No trustworthy line; fail safely on timeout.
+            } else if (pos < -TURN_CENTERED_POSITION) {
+                motor_set_speeds(-MAP2_ALIGN_PWM, MAP2_ALIGN_PWM);
+            } else if (pos > TURN_CENTERED_POSITION) {
+                motor_set_speeds(MAP2_ALIGN_PWM, -MAP2_ALIGN_PWM);
+            } else {
+                motor_stop();
+            }
+            return;
+        }
+    }
     // Physical position/blackCount continue to drive all existing FSM cases.
     // Only the NORMAL_PID steering error uses the encoder-selected subset.
     const uint16_t pidSensorMask = map1PidSensorMask();
