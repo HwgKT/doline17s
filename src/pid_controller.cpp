@@ -140,13 +140,16 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
-// Fixed per-map BASE: no encoder-position scheduler, no late BOOST, and
-// no per-section PWM caps. The independent wheel PI remains active.
+// Per-map BASE scheduler restored from v5, preserving v6 wheel PID and Map 1 boost.
 // Map 1 only: arm the late BASE boost after 10,500 forward-progress ticks.
 constexpr int32_t MAP1_LATE_BOOST_START_TICKS = 10500;
 constexpr float MAP1_LATE_BOOST_CENTER_ERROR = 15.0f;
 int32_t map1MaxProgress = 0;
 bool map1LateBoostEngaged = false;
+int32_t mapProfileMaxProgress = 0;
+float mapScheduledBase = 130.0f;
+constexpr float MAP_BASE_RISE_PWM_PER_SEC = 250.0f;
+constexpr float MAP_BASE_FALL_PWM_PER_SEC = 500.0f;
 // Map 01 route lock assumes a repeatable START pose; enabled by default.
 bool map1RouteLockEnabled = false; // Temporarily disabled by default for PID/sensor-mask testing; ROUTE_LOCK:1 to enable.
 map1route::Tracker map1Route;
@@ -446,6 +449,53 @@ static void driveWheelSpeedCascade(int16_t nominalLeftPwm,
     motor_set_speeds(drivePwm[0], drivePwm[1]);
 }
 
+// X4 is moved ahead of the 10.5k right turn; X5 holds low speed through reacquisition;
+// X6 releases only after the dashed-line/U-turn region.
+// Independent eight-stage encoder/BASE profiles for MAP 1, MAP 2 and MAP 3.
+// X1..X7 are end boundaries; stage 8 continues from X7 to FINISH.
+// Maps 2/3 start with their previous constant BASE values, preserving behavior.
+int32_t mapSegmentTicks[3][PID_MAP_PROFILE_MAX_STAGES - 1] = {
+    {3800, 7800, 8350, 10300, 11400, 12800, 15000},
+    {3800, 7800, 8350, 10300, 11400, 12800, 15000},
+    {3800, 7800, 8350, 10300, 11400, 12800, 15000}
+};
+uint8_t mapSegmentPwm[3][PID_MAP_PROFILE_MAX_STAGES] = {
+    {140, 140, 140, 240, 140, 140, 210, 255},
+    {160, 160, 160, 160, 160, 160, 160, 160},
+    {150, 150, 150, 150, 150, 150, 150, 150}
+};
+uint8_t mapSegmentStageCount[3] = {8, 8, 8};
+
+static float mapScheduledTarget(int32_t progress) {
+    if (selectedMap < 1 || selectedMap > 3)
+        return (float)pidConfig.baseSpeed;
+    const uint8_t mapIndex = (uint8_t)(selectedMap - 1U);
+    uint8_t segment = 0;
+    const uint8_t stageCount = mapSegmentStageCount[mapIndex];
+    while (segment + 1U < stageCount &&
+           progress >= mapSegmentTicks[mapIndex][segment])
+        ++segment;
+    float target = (float)mapSegmentPwm[mapIndex][segment];
+    // Retain the existing opt-in Map 1 route-lock safety cap.
+    if (selectedMap == 1 && map1Route.active)
+        target = map1Route.baseCap(progress, target);
+    return target;
+}
+
+static float mapUpdateScheduledBase(int32_t progress, float absErr,
+                                    uint8_t blackCount, uint16_t mask, float dt) {
+    (void)absErr; (void)blackCount; (void)mask;
+    const float target = mapScheduledTarget(progress);
+    // Smooth transitions; encoder progress is monotonic within each AUTO run.
+    const float rate = target > mapScheduledBase
+                     ? MAP_BASE_RISE_PWM_PER_SEC : MAP_BASE_FALL_PWM_PER_SEC;
+    const float limit = rate * fminf(dt, 0.02f);
+    const float delta = target - mapScheduledBase;
+    if (delta > limit) mapScheduledBase += limit;
+    else if (delta < -limit) mapScheduledBase -= limit;
+    else mapScheduledBase = target;
+    return mapScheduledBase;
+}
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
     lastPTerm = lastITerm = lastDTerm = 0;
@@ -491,6 +541,9 @@ static void resetLineTracking() {
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
     map1LateBoostEngaged = false;
+    mapProfileMaxProgress = 0;
+    mapScheduledBase = selectedMap >= 1 && selectedMap <= 3
+        ? (float)mapSegmentPwm[selectedMap-1][0] : (float)pidConfig.baseSpeed;
     map1SensorMaxTicks = 0;
     map2MaxProgress = 0;
     map2SensorMaxTravel = 0;
@@ -726,10 +779,40 @@ bool pid_select_map(uint8_t mapId) {
         highSpeedPeakPwm = MAP_DEFAULT_HS_PEAK_PWM;
     }
     selectedMap = mapId;
+    mapScheduledBase = (float)mapSegmentPwm[mapId-1][0];
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
 
+bool pid_set_map_speed_profile_v2(uint8_t mapId,uint8_t stageCount,
+                                  const int32_t *endTicks,const uint8_t *basePwm){
+    if(autoMode || mapId<1 || mapId>3 || selectedMap!=mapId ||
+       stageCount<1 || stageCount>PID_MAP_PROFILE_MAX_STAGES || !basePwm ||
+       (stageCount>1 && !endTicks)) return false;
+    for(uint8_t i=0;i+1U<stageCount;++i){
+        if(endTicks[i]<=0 || endTicks[i]>10000000L ||
+           (i>0 && endTicks[i]<=endTicks[i-1])) return false;
+    }
+    for(uint8_t i=0;i<stageCount;++i)
+        if(basePwm[i]<45U || basePwm[i]>255U) return false;
+    const uint8_t index=mapId-1U;
+    for(uint8_t i=0;i+1U<stageCount;++i) mapSegmentTicks[index][i]=endTicks[i];
+    for(uint8_t i=0;i<stageCount;++i) mapSegmentPwm[index][i]=basePwm[i];
+    mapSegmentStageCount[index]=stageCount;
+    mapScheduledBase=(float)mapSegmentPwm[index][0];
+    return true;
+}
+void pid_get_map_speed_profile_v2(uint8_t mapId,uint8_t *stageCount,
+                                  int32_t *endTicks,uint8_t *basePwm){
+    if(mapId<1 || mapId>3) return;
+    const uint8_t index=mapId-1U;
+    const uint8_t count=mapSegmentStageCount[index];
+    if(stageCount) *stageCount=count;
+    if(endTicks) for(uint8_t i=0;i+1U<count;++i)
+        endTicks[i]=mapSegmentTicks[index][i];
+    if(basePwm) for(uint8_t i=0;i<count;++i)
+        basePwm[i]=mapSegmentPwm[index][i];
+}
 // Set the Map 1 PID sensor selection profile only while stopped.
 // Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks) {
@@ -1288,6 +1371,10 @@ void pid_line_follow_step(void) {
         const int32_t progress = runEncoderProgress();
         if (progress > map1MaxProgress) map1MaxProgress = progress;
     }
+    if (selectedMap >= 1 && selectedMap <= 3) {
+        const int32_t progress = runEncoderProgress();
+        if (progress > mapProfileMaxProgress) mapProfileMaxProgress = progress;
+    }
     const bool good = pid_calculate_position(&pos, &blackCount);
     // Map 2 progresses continuously; only retain ticks for early turn recognition.
     if (selectedMap == 2) {
@@ -1438,7 +1525,9 @@ void pid_line_follow_step(void) {
             fabsf(pidPosition) <= MAP1_LATE_BOOST_CENTER_ERROR;
         if (map1ReadyForBoost && centeredForBoost)
             map1LateBoostEngaged = true;
-        float base = (float)pidConfig.baseSpeed;
+        float base = mapUpdateScheduledBase(
+            mapProfileMaxProgress, fabsf(err), blackCount,
+            sensor_get_line_bits(), measuredDt);
         if (map1ReadyForBoost && centeredForBoost)
             base = (float)highSpeedPeakPwm;
         governedForwardSpeed = base;
@@ -1467,7 +1556,7 @@ void pid_line_follow_step(void) {
         const bool initialBlackPad =
             !finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU;
         const float crossingFactor = initialBlackPad ? 1.0f : 0.7f;
-        const int16_t speed = clampPwm((float)pidConfig.baseSpeed * crossingFactor);
+        const int16_t speed = clampPwm(mapScheduledBase * crossingFactor);
         motor_set_speeds(speed, speed);
     } else if (currentCase == LINE_CASE_GAP_BRIDGE) {
         motor_set_speeds(gapHoldPwm, gapHoldPwm);
