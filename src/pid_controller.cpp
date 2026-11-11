@@ -185,6 +185,11 @@ int32_t map2SensorMaxTravel = 0;
 // No sleeping inside PID loop. Map1 and Map3 are unaffected.
 uint8_t map2SensorActiveStage = 0; // 0..3, latched until checkpoint success.
 uint8_t map2HoldState = 0; // 0=RUN, 1=ALIGN, 2=HOLD, 3=FAULT.
+// Map 3: continuous PID sensor masks; all physical sensor observations remain unmasked.
+int32_t map3SensorTickEnds[3] = {730, 1960, 2350};
+uint16_t map3SensorMasks[4] = {0xFF00U, 0xFFFFU, 0x01FFU, 0xFFFFU};
+int32_t map3SensorMaxTravel = 0;
+uint8_t map3SensorActiveStage = 0; // 0..3, advances at encoder thresholds without stopping.
 uint32_t map2HoldStartMs = 0, map2StableSinceMs = 0;
 int32_t map2StableEncL = 0, map2StableEncR = 0;
 constexpr uint32_t MAP2_STABLE_LINE_MS = 10;
@@ -212,8 +217,20 @@ static uint16_t map2PidSensorMask() {
     if (traveled > map2SensorMaxTravel) map2SensorMaxTravel = traveled;
     return map2SensorMasks[map2SensorActiveStage];
 }
+static uint16_t map3PidSensorMask() {
+    if (selectedMap != 3 || !autoMode) return 0xFFFFU;
+    const int32_t traveled = map1SensorTravelTicks();
+    if (traveled > map3SensorMaxTravel) map3SensorMaxTravel = traveled;
+    // Advance monotonically; changing a PID mask never pauses or repositions the robot.
+    while (map3SensorActiveStage < 3 &&
+           map3SensorMaxTravel >= map3SensorTickEnds[map3SensorActiveStage]) {
+        ++map3SensorActiveStage;
+    }
+    return map3SensorMasks[map3SensorActiveStage];
+}
 static uint16_t activePidSensorMask() {
     if (selectedMap == 2) return map2PidSensorMask();
+    if (selectedMap == 3) return map3PidSensorMask();
     return map1PidSensorMask();
 }
 static uint16_t map1PidSensorMask() {
@@ -478,6 +495,8 @@ static void resetLineTracking() {
     map2MaxProgress = 0;
     map2SensorMaxTravel = 0;
     map2SensorActiveStage = 0;
+    map3SensorMaxTravel = 0;
+    map3SensorActiveStage = 0;
     map2HoldState = 0;
     map2HoldStartMs = map2StableSinceMs = 0;
     map2StableEncL = map2StableEncR = 0;
@@ -730,6 +749,26 @@ uint8_t pid_get_map2_hold_state(void) { return map2HoldState; }
 uint8_t pid_get_map2_sensor_stage(void) {
     if (selectedMap != 2) return 0;
     return map2SensorActiveStage + 1;
+}
+
+bool pid_set_map3_sensor_profile(const int32_t *ticks, const uint16_t *masks) {
+    if (autoMode || !ticks || !masks ||
+        ticks[0] <= 0 || ticks[1] <= ticks[0] ||
+        ticks[2] <= ticks[1] || ticks[2] > 10000000) return false;
+    for (uint8_t i = 0; i < 4; ++i) if (!masks[i]) return false;
+    for (uint8_t i = 0; i < 3; ++i) map3SensorTickEnds[i] = ticks[i];
+    for (uint8_t i = 0; i < 4; ++i) map3SensorMasks[i] = masks[i];
+    map3SensorMaxTravel = 0;
+    map3SensorActiveStage = 0;
+    return true;
+}
+void pid_get_map3_sensor_profile(int32_t *ticks, uint16_t *masks) {
+    if (ticks) for (uint8_t i = 0; i < 3; ++i) ticks[i] = map3SensorTickEnds[i];
+    if (masks) for (uint8_t i = 0; i < 4; ++i) masks[i] = map3SensorMasks[i];
+}
+uint8_t pid_get_map3_sensor_stage(void) {
+    if (selectedMap != 3) return 0;
+    return map3SensorActiveStage + 1;
 }
 
 bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
