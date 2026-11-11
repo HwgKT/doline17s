@@ -25,7 +25,8 @@ typedef enum
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
   LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
   LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
-  LINE_CASE_GAP_BRIDGE = 11 // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_GAP_BRIDGE = 11, // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_MAP2_CHECKPOINT = 12 // Map2 temporary boundary pause (AUTO remains active)
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
