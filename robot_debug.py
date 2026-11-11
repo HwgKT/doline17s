@@ -197,7 +197,7 @@ class App(tk.Tk):
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
         self.high_speed_peak = 220  # Expected startup default; read back from firmware.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
-        self.hs_late_start = 10000
+        self.hs_late_start = 10500
         self.hs_late_mode = False
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
@@ -207,7 +207,7 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: MAP 1 từ 10k tick | chờ ESP32 xác nhận")
+            value="HS: MAP 1 từ 10500 tick | chờ ESP32 xác nhận")
         self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
         self.sensor_profile = (350, 1500, 0x01FF, 0xFF80, 0xFFFF)
@@ -486,10 +486,10 @@ class App(tk.Tk):
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # MAP 1: HS_PEAK sets target BASE after 10k; others keep legacy HS.
+        # MAP 1: HS_PEAK becomes straight-line BASE from 10500 ticks; other maps unchanged.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK (10k+)", bg=PANEL,
+        self.label(hs_row, "HS_PEAK (10500+)", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.label(hs_row, textvariable=self.hs_peak_value_text,
                    bg=PANEL, fg=CYAN, font=("Consolas", 9),
