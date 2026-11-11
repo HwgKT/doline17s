@@ -239,7 +239,7 @@ class App(tk.Tk):
         self.map_speed_profiles = {
             1: {"ticks": list(default_ticks),
                 "bases": [140, 140, 140, 240, 140, 140, 210, 255]},
-            2: {"ticks": list(default_ticks), "bases": [160] * 8},
+            2: {"ticks": list(default_ticks), "bases": [130] * 8},
             3: {"ticks": list(default_ticks), "bases": [150] * 8},
         }
         self.map_profile_confirmed = {1: False, 2: False, 3: False}
@@ -1723,6 +1723,9 @@ class App(tk.Tk):
                 self.map2_test_status.set(
                     "MAP 2 PID THUẦN: đang hỏi firmware trên ESP32...")
                 self.send_command("MAP2_PID_TEST")
+                # MAP selection changes the ESP32's live BASE to its default.
+                # Read it back instead of leaving a stale PID Base on screen.
+                self.send_command("PID")
         self.update_control_buttons()
         return True
 
@@ -2117,7 +2120,8 @@ class App(tk.Tk):
                 self.map2_test_status.set(
                     f"MAP 2 PID THUẦN: ESP32 ĐÃ XÁC NHẬN | 16 mắt | "
                     f"BASE={base.group(1) if base else '?'} | "
-                    "không tick, checkpoint, cua/SEARCH | đặt xe trên line")
+                    "không tick, checkpoint, cua/SEARCH | "
+                    "BASE mặc định v4=130 | đặt xe trên line")
             else:
                 self.map2_test_status.set(
                     "MAP 2 PID THUẦN: ESP32 báo chế độ này chưa được bật.")
