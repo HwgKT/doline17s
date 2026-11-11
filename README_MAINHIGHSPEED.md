@@ -228,3 +228,44 @@ The legacy `SENSOR_PROFILE` command still addresses MAP 1.
 Only PID sensor position uses masks; ADC, corner detection, SEARCH, START
 and FINISH continue using unmasked sensor data.
 Profiles reside in ESP32 RAM and revert to defaults after reboot.
+
+
+## Variable-stage profiles per MAP (SPP V2)
+
+Each of MAP 1, MAP 2 and MAP 3 stores its own sensor-mask profile and its own
+BASE speed profile. Both editors expose a stage-count input from 1 to 8. The
+last stage always runs to FINISH; therefore only the first N-1 rows need an
+editable end-tick boundary. Tick boundaries must be strictly increasing and
+within 1..10,000,000.
+
+### PID sensor configuration
+
+Each stage contains one encoder end-tick boundary (except the final FINISH
+stage) and 16 independent sensor checkboxes S0..S15. The mask only filters the
+position measurement supplied to NORMAL PID. ADC acquisition, physical line
+classification, sharp-turn/SEARCH, START and FINISH continue using the full
+sensor set. MAP 1 boots with its previous three-stage profile (650, 1350 ticks;
+FFC0, 03FF, FFFF masks). MAP 2/3 boot with three all-sensor stages.
+
+Read: `MAP_SENSOR_PROFILE_V2:<mapId>`.
+Write: `MAP_SENSOR_PROFILE_V2:<mapId>,<count>,<endTick1>,<mask1Hex>,...,0,<maskNHex>`.
+Masks are four-digit hexadecimal values; the last stage end-tick is the
+literal zero sentinel meaning FINISH.
+
+### BASE speed configuration
+
+Each stage displays From Tick, To Tick and BASE PWM. The final row's To Tick
+is FINISH. The **BASE chung** input plus **BASE chung → tất cả** copies one
+validated PWM value (45..255) into every stage; the normal Apply action then
+sends the whole profile to the selected MAP.
+
+Read: `MAP_SPEED_PROFILE_V2:<mapId>`.
+Write: `MAP_SPEED_PROFILE_V2:<mapId>,<count>,<endTick1>,<base1>,...,0,<baseN>`.
+The final end-tick is the literal zero sentinel meaning FINISH.
+
+Both V2 writes require AUTO stopped and the requested MAP selected. The GUI
+reads profiles back from the ESP32 and requires the active MAP's sensor and
+BASE profiles to be confirmed before GUI START. Profiles are runtime RAM
+settings and revert to firmware defaults after ESP32 reboot. The older fixed
+three-stage sensor and fixed eight-stage BASE SPP commands remain for legacy
+clients; the GUI uses V2.
