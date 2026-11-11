@@ -510,121 +510,117 @@ void sendFrame(){
   t.mode=pid_is_auto_mode()?1:0;
   if(btSendTelemetry(t))++txCount;
 }
-// Passive wheel-reversal measurement. Never changes PID or motor outputs.
-// Signed encoder ticks/s; sample independently from the 100-Hz SPP CSV stream.
-constexpr uint32_t REVERSE_SAMPLE_MS = 20;
-constexpr uint32_t REVERSE_TIMEOUT_MS = 600;
-constexpr int16_t REVERSE_PWM_MIN = 60;
-constexpr float REVERSE_CONFIRMED_TPS = 100.0f;
-struct ReverseTrace {
-  int8_t lastDirection = 0;
-  uint32_t lastDirectionMs = 0;
-  int16_t lastMeaningfulPwm = 0;
+// Passive 5-ms encoder sampling. Motor reversal timestamps are captured at
+// motor_set_left/right, not inferred from the slower telemetry stream.
+constexpr uint32_t REV_SAMPLE_US = 5000U;
+constexpr uint32_t REV_TIMEOUT_US = 600000U;
+constexpr float REV_STABLE_TPS = 100.0f;
+struct WheelReverseTrace {
   bool active = false;
-  int8_t targetDirection = 0;
-  uint32_t startedMs = 0;
-  int32_t startedEncoder = 0;
-  int16_t previousPwm = 0, requestedPwm = 0;
-  uint32_t zeroCrossMs = 0;
-  bool zeroCrossSeen = false;
-  float beforeTps = 0.0f;
-  uint8_t confirmedSamples = 0;
+  int8_t target = 0;
+  MotorReverseEvent command{};
+  float vBefore = 0, vAfter = 0;
+  float v10 = 0, v20 = 0, v50 = 0, v100 = 0;
+  bool got10 = false, got20 = false, got50 = false, got100 = false;
+  int32_t zeroMs = -1;
+  uint8_t stableCount = 0;
 };
-ReverseTrace wheelReverse[2];
-uint32_t reverseSampleMs = 0;
-int32_t reverseLastEncoder[2] = {0, 0};
-float reverseSpeedTps[2] = {0.0f, 0.0f};
-bool reverseSpeedValid = false;
+WheelReverseTrace reverseTrace[2];
+uint32_t reverseLastSampleUs = 0;
+int32_t reverseLastEnc[2] = {0, 0};
+float reverseVelocity[2] = {0, 0};
+bool reverseVelocityReady = false;
+
+void reportWheelReverse(uint8_t wheel, const char *result, uint32_t nowUs, int32_t encoder) {
+  WheelReverseTrace &tr = reverseTrace[wheel];
+  if (!tr.active) return;
+  const uint32_t elapsedMs = (uint32_t)(nowUs - tr.command.t_us) / 1000U;
+  if (btConnected()) {
+    sppLogPrintf(
+      "[WHEEL_REV] wheel=%c result=%s t0_us=%lu dt_ms=%lu "
+      "pwm_prev=%d pwm_req=%d v_before=%.1f v_after=%.1f "
+      "zero_ms=%ld v10=%.1f v20=%.1f v50=%.1f v100=%.1f delta_enc=%ld",
+      wheel == 0 ? 'L' : 'R', result,
+      (unsigned long)tr.command.t_us, (unsigned long)elapsedMs,
+      (int)tr.command.pwm_prev, (int)tr.command.pwm_req,
+      (double)tr.vBefore, (double)tr.vAfter, (long)tr.zeroMs,
+      (double)tr.v10, (double)tr.v20, (double)tr.v50,
+      (double)tr.v100, (long)(encoder - tr.command.encoder));
+  }
+  tr.active = false;
+}
 
 void traceWheelReversals() {
+  const uint32_t nowUs = micros();
+  int32_t encoder[2] = {0, 0};
+  encoder_get_counts(&encoder[0], &encoder[1]);
   if (!pid_is_auto_mode()) {
-    wheelReverse[0] = ReverseTrace{};
-    wheelReverse[1] = ReverseTrace{};
-    reverseSpeedValid = false;
-    reverseSampleMs = millis();
-    encoder_get_counts(&reverseLastEncoder[0], &reverseLastEncoder[1]);
+    for (uint8_t w = 0; w < 2; ++w) {
+      if (reverseTrace[w].active)
+        reportWheelReverse(w, "AUTO_END", nowUs, encoder[w]);
+      reverseTrace[w] = WheelReverseTrace{};
+      MotorReverseEvent unused{};
+      while (motor_take_reverse_event(w, &unused)) {}
+    }
+    reverseLastSampleUs = nowUs;
+    reverseLastEnc[0] = encoder[0];
+    reverseLastEnc[1] = encoder[1];
+    reverseVelocityReady = false;
     return;
   }
 
-  const uint32_t now = millis();
-  int32_t encoder[2];
-  encoder_get_counts(&encoder[0], &encoder[1]);
-  const uint32_t dtMs = now - reverseSampleMs;
-  const float speedBeforeSample[2] = {reverseSpeedTps[0], reverseSpeedTps[1]};
-  const bool hadPriorSpeedSample = reverseSpeedValid;
-  bool sampled = false;
-  if (dtMs >= REVERSE_SAMPLE_MS) {
-    if (dtMs <= 100) {
-      for (uint8_t w = 0; w < 2; ++w)
-        reverseSpeedTps[w] = 1000.0f * (float)(encoder[w] - reverseLastEncoder[w]) / (float)dtMs;
-      reverseSpeedValid = true;
-      sampled = true;
-    } else {
-      reverseSpeedValid = false;
+  // Start a trace on the *actual* motor command edge.
+  for (uint8_t w = 0; w < 2; ++w) {
+    MotorReverseEvent event{};
+    if (motor_take_reverse_event(w, &event)) {
+      if (reverseTrace[w].active)
+        reportWheelReverse(w, "SUPERSEDED", nowUs, encoder[w]);
+      WheelReverseTrace &tr = reverseTrace[w];
+      tr = WheelReverseTrace{};
+      tr.active = true;
+      tr.command = event;
+      tr.target = event.pwm_req > 0 ? 1 : -1;
+      // Velocity is from the prior completed encoder interval, never future data.
+      tr.vBefore = reverseVelocityReady ? reverseVelocity[w] : 0.0f;
     }
-    reverseSampleMs = now;
-    reverseLastEncoder[0] = encoder[0];
-    reverseLastEncoder[1] = encoder[1];
   }
 
-  const int16_t pwm[2] = {motor_get_left_speed(), motor_get_right_speed()};
+  const uint32_t elapsedUs = (uint32_t)(nowUs - reverseLastSampleUs);
+  if (elapsedUs < REV_SAMPLE_US) return;
+  const bool valid = elapsedUs <= 30000U;
   for (uint8_t w = 0; w < 2; ++w) {
-    ReverseTrace &tr = wheelReverse[w];
-    const int8_t direction = pwm[w] >= REVERSE_PWM_MIN ? 1 :
-                             pwm[w] <= -REVERSE_PWM_MIN ? -1 : 0;
-    // A sustained opposite PWM request is not required for detection:
-    // retain the prior direction through a brief zero-PWM brake.
-    if (!tr.active && direction != 0 && tr.lastDirection != 0 &&
-        direction != tr.lastDirection && now - tr.lastDirectionMs <= 300) {
-      tr.active = true;
-      tr.targetDirection = direction;
-      tr.startedMs = now;
-      tr.startedEncoder = encoder[w];
-      tr.previousPwm = tr.lastMeaningfulPwm;
-      tr.requestedPwm = pwm[w];
-      tr.beforeTps = hadPriorSpeedSample ? speedBeforeSample[w] : 0.0f;
-      tr.zeroCrossSeen = false;
-      tr.confirmedSamples = 0;
-    }
+    if (valid)
+      reverseVelocity[w] =
+        (float)(encoder[w] - reverseLastEnc[w]) * 1000000.0f / (float)elapsedUs;
+  }
+  reverseLastSampleUs = nowUs;
+  reverseLastEnc[0] = encoder[0];
+  reverseLastEnc[1] = encoder[1];
+  reverseVelocityReady = valid;
+  if (!valid) return;
 
-    if (tr.active) {
-      if (sampled && !tr.zeroCrossSeen && reverseSpeedTps[w] * tr.targetDirection >= 0.0f) {
-        tr.zeroCrossSeen = true;
-        tr.zeroCrossMs = now - tr.startedMs;
-      }
-      if (sampled && reverseSpeedTps[w] * tr.targetDirection >= REVERSE_CONFIRMED_TPS) {
-        if (tr.confirmedSamples < 2) ++tr.confirmedSamples;
-      } else if (sampled) {
-        tr.confirmedSamples = 0;
-      }
-      const bool done = tr.confirmedSamples >= 2;
-      const bool timeout = now - tr.startedMs >= REVERSE_TIMEOUT_MS;
-      // Report an abandoned reversal separately: don't call it a motor failure.
-      const bool cancelled = direction != 0 && direction != tr.targetDirection;
-      if (done || timeout || cancelled) {
-        if (btConnected()) {
-          sppLogPrintf(
-            "[WHEEL_REV] wheel=%c result=%s t0_ms=%lu dt_ms=%lu "
-            "pwm_prev=%d pwm_req=%d zero_ms=%ld "
-            "v_before=%.1f v_after=%.1f delta_enc=%ld t_ms=%lu",
-            w == 0 ? 'L' : 'R',
-            done ? "DONE" : cancelled ? "CANCEL" : "TIMEOUT",
-            (unsigned long)tr.startedMs, (unsigned long)(now - tr.startedMs),
-            (int)tr.previousPwm, (int)tr.requestedPwm,
-            tr.zeroCrossSeen ? (long)tr.zeroCrossMs : -1L, (double)tr.beforeTps,
-            (double)(reverseSpeedValid ? reverseSpeedTps[w] : 0.0f),
-            (long)(encoder[w] - tr.startedEncoder), (unsigned long)now);
-        }
-        tr.active = false;
-        tr.confirmedSamples = 0;
-      }
+  for (uint8_t w = 0; w < 2; ++w) {
+    WheelReverseTrace &tr = reverseTrace[w];
+    if (!tr.active) continue;
+    const uint32_t ageUs = (uint32_t)(nowUs - tr.command.t_us);
+    const uint32_t ageMs = ageUs / 1000U;
+    const float v = reverseVelocity[w];
+    tr.vAfter = v;
+    if (!tr.got10 && ageMs >= 10) { tr.v10 = v; tr.got10 = true; }
+    if (!tr.got20 && ageMs >= 20) { tr.v20 = v; tr.got20 = true; }
+    if (!tr.got50 && ageMs >= 50) { tr.v50 = v; tr.got50 = true; }
+    if (!tr.got100 && ageMs >= 100) { tr.v100 = v; tr.got100 = true; }
+    if (tr.zeroMs < 0 && v * tr.target >= 0.0f)
+      tr.zeroMs = (int32_t)ageMs;
+    if (v * tr.target >= REV_STABLE_TPS) {
+      if (tr.stableCount < 2) ++tr.stableCount;
+    } else {
+      tr.stableCount = 0;
     }
-
-    if (direction != 0) {
-      tr.lastDirection = direction;
-      tr.lastDirectionMs = now;
-      tr.lastMeaningfulPwm = pwm[w];
-    }
+    if (tr.stableCount >= 2)
+      reportWheelReverse(w, "DONE", nowUs, encoder[w]);
+    else if (ageUs >= REV_TIMEOUT_US)
+      reportWheelReverse(w, "TIMEOUT", nowUs, encoder[w]);
   }
 }
 
