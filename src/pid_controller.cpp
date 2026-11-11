@@ -48,6 +48,7 @@ constexpr int16_t LINE_SEARCH_PWM = 90;
 // Map 1 early corner: fixed SEARCH-style pivot, stronger reverse inner wheel.
 // No change to ordinary SEARCH or line PID. Disabled for the first 2000 ticks.
 constexpr int32_t EARLY_TURN_MIN_TICKS = 2000;
+constexpr int32_t EARLY_TURN_MAX_TICKS = 12000; // exclusive: no new early turns at >=12000
 constexpr int16_t EARLY_TURN_INNER_REVERSE_PWM = 100;
 constexpr int16_t EARLY_TURN_OUTER_FORWARD_PWM = 90;
 constexpr uint32_t EARLY_TURN_TREND_WINDOW_MS = 150;
@@ -460,6 +461,7 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
 static int8_t detectEarlyEdgeTurn(uint16_t mask, uint8_t blackCount,
                                    uint32_t now) {
     if (selectedMap != 1 || map1MaxProgress < EARLY_TURN_MIN_TICKS ||
+        map1MaxProgress >= EARLY_TURN_MAX_TICKS ||
         !finishDetectionArmed || earlyTurnActive || blackCount == 0 ||
         blackCount > 6 || (mask & 0x000FU && mask & 0xF000U)) {
         edgeLeftSeeded = edgeRightSeeded = false;
