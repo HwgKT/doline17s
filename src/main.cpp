@@ -510,6 +510,111 @@ void sendFrame(){
   t.mode=pid_is_auto_mode()?1:0;
   if(btSendTelemetry(t))++txCount;
 }
+// Passive wheel-reversal measurement. Never changes PID or motor outputs.
+// Signed encoder ticks/s; sample independently from the 100-Hz SPP CSV stream.
+constexpr uint32_t REVERSE_SAMPLE_MS = 20;
+constexpr uint32_t REVERSE_TIMEOUT_MS = 600;
+constexpr int16_t REVERSE_PWM_MIN = 60;
+constexpr float REVERSE_CONFIRMED_TPS = 100.0f;
+struct ReverseTrace {
+  int8_t lastDirection = 0;
+  uint32_t lastDirectionMs = 0;
+  bool active = false;
+  int8_t targetDirection = 0;
+  uint32_t startedMs = 0;
+  int32_t startedEncoder = 0;
+  int16_t previousPwm = 0, requestedPwm = 0;
+  float beforeTps = 0.0f;
+  uint8_t confirmedSamples = 0;
+};
+ReverseTrace wheelReverse[2];
+uint32_t reverseSampleMs = 0;
+int32_t reverseLastEncoder[2] = {0, 0};
+float reverseSpeedTps[2] = {0.0f, 0.0f};
+bool reverseSpeedValid = false;
+
+void traceWheelReversals() {
+  if (!pid_is_auto_mode()) {
+    wheelReverse[0] = ReverseTrace{};
+    wheelReverse[1] = ReverseTrace{};
+    reverseSpeedValid = false;
+    reverseSampleMs = millis();
+    encoder_get_counts(&reverseLastEncoder[0], &reverseLastEncoder[1]);
+    return;
+  }
+
+  const uint32_t now = millis();
+  int32_t encoder[2];
+  encoder_get_counts(&encoder[0], &encoder[1]);
+  const uint32_t dtMs = now - reverseSampleMs;
+  bool sampled = false;
+  if (dtMs >= REVERSE_SAMPLE_MS) {
+    if (dtMs <= 100) {
+      for (uint8_t w = 0; w < 2; ++w)
+        reverseSpeedTps[w] = 1000.0f * (float)(encoder[w] - reverseLastEncoder[w]) / (float)dtMs;
+      reverseSpeedValid = true;
+      sampled = true;
+    } else {
+      reverseSpeedValid = false;
+    }
+    reverseSampleMs = now;
+    reverseLastEncoder[0] = encoder[0];
+    reverseLastEncoder[1] = encoder[1];
+  }
+
+  const int16_t pwm[2] = {motor_get_left_speed(), motor_get_right_speed()};
+  for (uint8_t w = 0; w < 2; ++w) {
+    ReverseTrace &tr = wheelReverse[w];
+    const int8_t direction = pwm[w] >= REVERSE_PWM_MIN ? 1 :
+                             pwm[w] <= -REVERSE_PWM_MIN ? -1 : 0;
+    // A sustained opposite PWM request is not required for detection:
+    // retain the prior direction through a brief zero-PWM brake.
+    if (!tr.active && direction != 0 && tr.lastDirection != 0 &&
+        direction != tr.lastDirection && now - tr.lastDirectionMs <= 300) {
+      tr.active = true;
+      tr.targetDirection = direction;
+      tr.startedMs = now;
+      tr.startedEncoder = encoder[w];
+      tr.previousPwm = tr.lastDirection * REVERSE_PWM_MIN;
+      tr.requestedPwm = pwm[w];
+      tr.beforeTps = reverseSpeedValid ? reverseSpeedTps[w] : 0.0f;
+      tr.confirmedSamples = 0;
+    }
+
+    if (tr.active) {
+      if (sampled && reverseSpeedTps[w] * tr.targetDirection >= REVERSE_CONFIRMED_TPS) {
+        if (tr.confirmedSamples < 2) ++tr.confirmedSamples;
+      } else if (sampled) {
+        tr.confirmedSamples = 0;
+      }
+      const bool done = tr.confirmedSamples >= 2;
+      const bool timeout = now - tr.startedMs >= REVERSE_TIMEOUT_MS;
+      // Report an abandoned reversal separately: don't call it a motor failure.
+      const bool cancelled = direction != 0 && direction != tr.targetDirection;
+      if (done || timeout || cancelled) {
+        if (btConnected()) {
+          sppLogPrintf(
+            "[WHEEL_REV] wheel=%c result=%s t0_ms=%lu dt_ms=%lu pwm_req=%d "
+            "v_before=%.1f v_after=%.1f delta_enc=%ld t_ms=%lu",
+            w == 0 ? 'L' : 'R',
+            done ? "DONE" : cancelled ? "CANCEL" : "TIMEOUT",
+            (unsigned long)tr.startedMs, (unsigned long)(now - tr.startedMs),
+            (int)tr.requestedPwm, (double)tr.beforeTps,
+            (double)(reverseSpeedValid ? reverseSpeedTps[w] : 0.0f),
+            (long)(encoder[w] - tr.startedEncoder), (unsigned long)now);
+        }
+        tr.active = false;
+        tr.confirmedSamples = 0;
+      }
+    }
+
+    if (direction != 0) {
+      tr.lastDirection = direction;
+      tr.lastDirectionMs = now;
+    }
+  }
+}
+
 } // namespace
 
 void setup() {
@@ -688,6 +793,7 @@ void loop() {
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
+  traceWheelReversals();
   // No stale bursts; bounded nonblocking enqueue at the selected stream rate.
   const uint32_t txNow=micros();
   if(streamPeriodUs&&!adcBenchActive()){
