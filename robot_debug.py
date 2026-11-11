@@ -338,6 +338,15 @@ class App(tk.Tk):
             command=lambda: self.send_command("SENSOR_PROFILE"))
         self.sensor_profile_read_btn.pack(side="right")
 
+        map2_pure_note = tk.Frame(self, bg=PANEL, padx=8, pady=2)
+        map2_pure_note.pack(fill="x", padx=8, pady=(0, 2))
+        self.label(
+            map2_pure_note,
+            "MAP 2 TEST: PID thuần, 16 mắt, BASE từ ô PID; "
+            "không dùng mask/tick, BASE/tick, checkpoint, cua hoặc SEARCH. "
+            "Đặt xe trên line trước khi START.",
+            bg=PANEL, fg=AMBER, font=("Consolas", 9)
+        ).pack(anchor="w")
         map2_sensor_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
         map2_sensor_bar.pack(fill="x", padx=8, pady=(0, 2))
         self.map2_sensor_btn = ttk.Button(
@@ -1210,8 +1219,8 @@ class App(tk.Tk):
             bg=PANEL, fg=MUTED, wraplength=1250, justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 4))
         self.label(
-            win, "MAP 2: tại mỗi mốc tick, căn line rồi giữ ổn định 10 ms "
-            "trước khi chuyển sang giai đoạn tiếp theo.",
+            win, "MAP 2 PID THUẦN đang BẬT: mắt/tick và checkpoint "
+            "được lưu nhưng KHÔNG sử dụng cho điều khiển.",
             bg=PANEL, fg=AMBER, wraplength=1250, justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 4))
         stages_frame = tk.Frame(win, bg=PANEL, padx=8)
