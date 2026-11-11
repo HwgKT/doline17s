@@ -74,6 +74,10 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
+// Map 1: read / set 8 per-segment BASE PWM values via SPP while STOPPED.
+// The 7 encoder boundaries remain firmware-defined and read-only.
+bool pid_set_map1_base_profile(const uint8_t *basePwm);
+void pid_get_map1_speed_profile(int32_t *xTicks, uint8_t *basePwm);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
