@@ -233,8 +233,8 @@ class App(tk.Tk):
             value="PID mắt: chờ ESP32 (mặc định 650 / 1350 ticks)")
         self.sensor_profile_window = None
         # Eight Map 1 BASE targets; encoder X thresholds are read back from ESP32.
-        self.map1_x_ticks = [3800, 7400, 8350, 10500, 11300, 12800, 15000]
-        self.map1_base_values = [140, 140, 140, 240, 210, 240, 210, 255]
+        self.map1_x_ticks = [3800, 7800, 8350, 10300, 11400, 12800, 15000]
+        self.map1_base_values = [140, 140, 140, 240, 140, 140, 210, 255]
         self.map1_base_confirmed = False
         self.map1_base_pending = None
         self.map1_base_window = None
