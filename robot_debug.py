@@ -1220,9 +1220,10 @@ class App(tk.Tk):
             bg=PANEL, fg=MUTED, wraplength=1250, justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 4))
         self.label(
-            win, "MAP 2 PID THUẦN: 16 mắt, PWM mỗi bánh 0..255 (không lùi); "
-            "START từ vạch đen, tiến BASE đến khi nhận line; "
-            "mắt/tick và checkpoint không dùng.",
+            win, "MAP 2 PID + SEARCH: 16 mắt, PWM mỗi bánh 0..255 "
+            "(không lùi); START đen tiến BASE; mất line 30ms bắt đầu "
+            "SEARCH một bánh tiến 90PWM, tối đa 2s, trở lại PID sau "
+            "3 mẫu hợp lệ. Mắt/tick và checkpoint không dùng.",
             bg=PANEL, fg=AMBER, wraplength=1250, justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 4))
         stages_frame = tk.Frame(win, bg=PANEL, padx=8)
@@ -2118,17 +2119,18 @@ class App(tk.Tk):
             enabled = re.search(r"\bENABLED=(\d+)\b", message)
             base = re.search(r"\bBASE=(\d+)\b", message)
             mode_current = ("START=BASE_UNTIL_LINE" in message and
-                            "PWM=0..255" in message)
+                            "PWM=0..255" in message and
+                            "SEARCH=FORWARD_ONLY_90" in message)
             if enabled and enabled.group(1) == "1" and mode_current:
                 self.map2_test_status.set(
-                    f"MAP 2 PID THUẦN: ESP32 ĐÃ XÁC NHẬN | 16 mắt | "
+                    f"MAP 2 PID: ESP32 ĐÃ XÁC NHẬN | 16 mắt | "
                     f"BASE={base.group(1) if base else '?'} | "
-                    "bánh chỉ tiến/dừng | START đen: tiến BASE đến line | "
-                    "không checkpoint/SEARCH")
+                    "bánh chỉ tiến/dừng | START đen: tiến BASE | "
+                    "SEARCH tối đa 2s, xác nhận 3 mẫu")
             elif enabled and enabled.group(1) == "1":
                 self.map2_test_status.set(
-                    "MAP 2 PID THUẦN: firmware cũ; chưa hỗ trợ "
-                    "START từ vạch đen và chặn đảo chiều. Hãy nạp lại v7.")
+                    "MAP 2 PID: firmware cũ; chưa hỗ trợ SEARCH "
+                    "chỉ tiến/dừng. Hãy nạp lại v7.")
             else:
                 self.map2_test_status.set(
                     "MAP 2 PID THUẦN: ESP32 báo chế độ này chưa được bật.")
