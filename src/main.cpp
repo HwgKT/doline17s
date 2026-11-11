@@ -118,7 +118,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP_SPEED_PROFILE_V2 MAP_SPEED_PROFILE_V2:map,count,endTick,base,... MAP_SENSOR_PROFILE_V2:2 MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP_SPEED_PROFILE_V2 MAP_SPEED_PROFILE_V2:map,count,endTick,base,... MAP2_PID_TEST MAP_SENSOR_PROFILE_V2:2 MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -198,6 +198,15 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  if(s=="MAP2_PID_TEST"){
+    char b[200];
+    snprintf(b,sizeof(b),
+      "MAP2_PID_TEST: ENABLED=%u BASE=%d MASK=FFFF STAGES=OFF "
+      "BASE_TICKS=OFF CHECKPOINT=OFF CORNER=OFF SEARCH=OFF "
+      "DASHED=OFF WHEEL_PID=OFF START=LINE_ONLY LOSS_STOP_MS=30",
+      pid_map2_pure_pid_test_enabled()?1U:0U,pid_get_base_speed());
+    reply(b);return;
+  }
   // Variable-length BASE profile; the final stage uses endTick=0 (FINISH).
   if(s.startsWith("MAP_SPEED_PROFILE_V2:")){
     const String payload=s.substring(String("MAP_SPEED_PROFILE_V2:").length());
