@@ -497,8 +497,18 @@ bool pid_set_map1_base_profile(const uint8_t *basePwm) {
     for (uint8_t i = 0; i < 8; ++i) {
         if (basePwm[i] < 45U) return false;
     }
+    bool uniform = true;
+    for (uint8_t i = 1; i < 8; ++i)
+        if (basePwm[i] != basePwm[0]) uniform = false;
     for (uint8_t i = 0; i < 8; ++i)
         map1SegmentPwm[i] = basePwm[i];
+    // NORMAL_PID on this v2-compatible branch deliberately uses a single
+    // pidConfig.baseSpeed, not the old encoder scheduler. A uniform profile
+    // must update that live BASE, otherwise the SPP ACK would be misleading.
+    if (uniform) {
+        pidConfig.baseSpeed = (int16_t)basePwm[0];
+        map1ScheduledBase = (float)basePwm[0];
+    }
     return true;
 }
 
