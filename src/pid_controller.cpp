@@ -798,6 +798,7 @@ uint8_t pid_get_map3_base_stage(void) {
     if (map3MaxTravelTicks < map3BaseTickEnds[2]) return 3;
     return 4;
 }
+int32_t pid_get_map3_travel_ticks(void) { return map3MaxTravelTicks; }
 int16_t pid_get_active_base_speed(void) { return activeBaseSpeed(); }
 uint8_t pid_get_map2_hold_state(void) { return map2HoldState; }
 uint8_t pid_get_map2_sensor_stage(void) {
