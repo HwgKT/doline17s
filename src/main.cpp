@@ -63,19 +63,36 @@ void setButton34Phase(Button34Phase phase) {
            phase==BUTTON34_BLACK_CAPTURING);
 }
 void reply(const String &line) { btSendLine(line); }
-void pidTestStop() {
-  pidTestActive=false;
+// States: 0 tracking, 1 loss debounce, 2 searching, 3 search timed out.
+uint8_t pidTestRecoveryState=0;
+int8_t pidTestLastSide=0, pidTestSearchSide=0;
+uint8_t pidTestReacquireFrames=0;
+uint32_t pidTestLossSinceMs=0, pidTestSearchSinceMs=0;
+constexpr uint32_t PID_TEST_LOSS_CONFIRM_MS=30;
+constexpr uint32_t PID_TEST_SEARCH_MAX_MS=2000;
+constexpr int16_t PID_TEST_SEARCH_PWM=70;
+void pidTestResetPid() {
   pidTestError=pidTestPreviousError=pidTestIntegral=pidTestD=pidTestOutput=0;
   pidTestHistory=false;
   pidTestPrevUs=0;
+}
+void pidTestStop() {
+  pidTestActive=false;
+  pidTestResetPid();
+  pidTestRecoveryState=0;
+  pidTestLastSide=pidTestSearchSide=0;
+  pidTestReacquireFrames=0;
+  pidTestLossSinceMs=pidTestSearchSinceMs=0;
   motor_stop();
 }
 void safeStop() {
   pidTestStop();
   pid_set_auto_mode(false); motor_stop(); manualActive=false;
 }
-// Shares the nonlinear P, clamped I and filtered D law with normal line PID,
-// but removes BASE speed; left/right wheels counterrotate in this bench mode.
+// Bench test is purely differential, with no BASE speed or map/route logic.
+// SEARCH uses the last valid line side; a bounded sweep changes direction
+// once and then returns to the original side. A search timeout latches STOP
+// until a valid line is observed again, preventing continuous blind spinning.
 void pidTestStep() {
   if(!pidTestActive)return;
   const uint32_t nowMs=millis();
@@ -87,51 +104,103 @@ void pidTestStep() {
   float pos=0;
   uint8_t count=0;
   const bool valid=pid_calculate_position(&pos,&count) && count>0 && count<=8;
-  if(!valid){
-    pidTestError=pidTestPreviousError=pidTestIntegral=pidTestD=pidTestOutput=0;
-    pidTestHistory=false;
-    motor_stop();
-  }else{
-    const uint32_t us=micros();
-    const float rawDt=(float)(us-pidTestPrevUs)*1.0e-6f;
-    const bool dtValid=pidTestHistory && rawDt>0.0f && rawDt<=0.1f;
-    const float dt=dtValid?rawDt:0.01f;
-    pidTestPrevUs=us;
-    pidTestError=pos;
-    if(fabsf(pos)<=PID_TEST_CENTER_DEADBAND){
-      pidTestIntegral=pidTestD=pidTestOutput=0;
-      pidTestHistory=false;
-      pidTestPreviousError=pos;
+  if(valid){
+    pidTestLossSinceMs=0;
+    if(pidTestRecoveryState!=0){
       motor_stop();
-    }else{
-      const float p=pid_get_kp()*(1.0f+0.018f*fabsf(pos))*pos;
-      if((pidTestIntegral>0 && pos<0) || (pidTestIntegral<0 && pos>0))
-        pidTestIntegral*=0.5f;
-      pidTestIntegral=constrain(pidTestIntegral+pos*dt,-80.0f,80.0f);
-      const float i=pid_get_ki()*pidTestIntegral;
-      float d=0;
-      if(dtValid){
-        const float rawD=pid_get_kd()*(pos-pidTestPreviousError)/rawDt;
-        d=constrain(0.6f*rawD+0.4f*pidTestD,-200.0f,200.0f);
+      pidTestResetPid();
+      if(++pidTestReacquireFrames>=3){
+        pidTestRecoveryState=0;
+        pidTestReacquireFrames=0;
+        pidTestSearchSide=0;
+        reply("PID_TEST_RECOVERY: REACQUIRED");
       }
-      pidTestD=d;
-      pidTestPreviousError=pos;
-      pidTestHistory=true;
-      const float correction=constrain(p+i+d,
-                                      -(float)PID_TEST_MAX_PWM,
-                                       (float)PID_TEST_MAX_PWM);
-      pidTestOutput=correction;
-      const int16_t u=(int16_t)lroundf(correction);
-      motor_set_speeds(u,-u);
+    }else{
+      pidTestError=pos;
+      if(pos>PID_TEST_CENTER_DEADBAND)pidTestLastSide=1;
+      else if(pos< -PID_TEST_CENTER_DEADBAND)pidTestLastSide=-1;
+      const uint32_t us=micros();
+      const float rawDt=(float)(us-pidTestPrevUs)*1.0e-6f;
+      const bool dtValid=pidTestHistory && rawDt>0.0f && rawDt<=0.1f;
+      const float dt=dtValid?rawDt:0.01f;
+      pidTestPrevUs=us;
+      if(fabsf(pos)<=PID_TEST_CENTER_DEADBAND){
+        pidTestIntegral=pidTestD=pidTestOutput=0;
+        pidTestHistory=false;
+        pidTestPreviousError=pos;
+        motor_stop();
+      }else{
+        const float p=pid_get_kp()*(1.0f+0.018f*fabsf(pos))*pos;
+        if((pidTestIntegral>0 && pos<0) || (pidTestIntegral<0 && pos>0))
+          pidTestIntegral*=0.5f;
+        pidTestIntegral=constrain(pidTestIntegral+pos*dt,-80.0f,80.0f);
+        const float i=pid_get_ki()*pidTestIntegral;
+        float d=0;
+        if(dtValid){
+          const float rawD=pid_get_kd()*(pos-pidTestPreviousError)/rawDt;
+          d=constrain(0.6f*rawD+0.4f*pidTestD,-200.0f,200.0f);
+        }
+        pidTestD=d;
+        pidTestPreviousError=pos;
+        pidTestHistory=true;
+        const float correction=constrain(p+i+d,
+                                        -(float)PID_TEST_MAX_PWM,
+                                         (float)PID_TEST_MAX_PWM);
+        pidTestOutput=correction;
+        const int16_t u=(int16_t)lroundf(correction);
+        motor_set_speeds(u,-u);
+      }
+    }
+  }else{
+    pidTestReacquireFrames=0;
+    if(pidTestRecoveryState==0){
+      pidTestRecoveryState=1;
+      pidTestLossSinceMs=nowMs;
+      motor_stop();
+      pidTestResetPid();
+    }else if(pidTestRecoveryState==1){
+      motor_stop();
+      if(nowMs-pidTestLossSinceMs>=PID_TEST_LOSS_CONFIRM_MS){
+        if(pidTestLastSide==0){
+          pidTestRecoveryState=3;
+          reply("PID_TEST_RECOVERY: NO_DIRECTION_STOP");
+        }else{
+          pidTestRecoveryState=2;
+          pidTestSearchSinceMs=nowMs;
+          pidTestSearchSide=pidTestLastSide;
+          reply(pidTestSearchSide>0 ? "PID_TEST_RECOVERY: SEARCH_RIGHT" :
+                                      "PID_TEST_RECOVERY: SEARCH_LEFT");
+        }
+      }
+    }else if(pidTestRecoveryState==2){
+      const uint32_t elapsed=nowMs-pidTestSearchSinceMs;
+      if(elapsed>=PID_TEST_SEARCH_MAX_MS){
+        pidTestRecoveryState=3;
+        pidTestSearchSide=0;
+        motor_stop();
+        reply("PID_TEST_RECOVERY: TIMEOUT_STOP");
+      }else{
+        // 0..350 ms towards last side, 350..1100 ms reverse,
+        // 1100..2000 ms last side again. No forward translation.
+        const int8_t direction=(elapsed<350 || elapsed>=1100)
+                                 ?pidTestLastSide:-pidTestLastSide;
+        pidTestSearchSide=direction;
+        const int16_t pwm=PID_TEST_SEARCH_PWM*direction;
+        motor_set_speeds(pwm,-pwm);
+      }
+    }else{
+      // Timed-out recovery is latched; don't rearm while line remains missing.
+      motor_stop();
     }
   }
   if(nowMs-pidTestLastReportMs>=100){
     pidTestLastReportMs=nowMs;
-    char b[140];
+    char b[160];
     snprintf(b,sizeof(b),
-      "PID_TEST_SAMPLE t=%lu valid=%u n=%u err=%.2f out=%.2f pwmL=%d pwmR=%d",
+      "PID_TEST_SAMPLE t=%lu valid=%u n=%u err=%.2f out=%.2f pwmL=%d pwmR=%d recovery=%u side=%d",
       (unsigned long)(nowMs-pidTestStartMs),(unsigned)valid,(unsigned)count,
-      pidTestError,pidTestOutput,motor_get_left_speed(),motor_get_right_speed());
+      pidTestError,pidTestOutput,motor_get_left_speed(),motor_get_right_speed(),
+      (unsigned)pidTestRecoveryState,(int)pidTestSearchSide);
     reply(b);
   }
 }
@@ -175,9 +244,10 @@ void command(const String &raw) {
   if(s=="PING"){reply("PONG");return;}
   if(s=="PID_TEST"){
     char b[120];
-    snprintf(b,sizeof(b),"PID_TEST: active=%u err=%.2f out=%.2f pwmL=%d pwmR=%d maxPWM=%d",
+    snprintf(b,sizeof(b),"PID_TEST: active=%u err=%.2f out=%.2f pwmL=%d pwmR=%d maxPWM=%d recovery=%u",
              (unsigned)pidTestActive,pidTestError,pidTestOutput,
-             motor_get_left_speed(),motor_get_right_speed(),PID_TEST_MAX_PWM);
+             motor_get_left_speed(),motor_get_right_speed(),PID_TEST_MAX_PWM,
+             (unsigned)pidTestRecoveryState);
     reply(b);return;
   }
   if(s=="PID_TEST:0" || s=="PID_TEST:OFF"){
@@ -192,7 +262,7 @@ void command(const String &raw) {
     pidTestActive=true;pidTestStartMs=millis();
     pidTestLastReportMs=pidTestStartMs;
     pidTestPrevUs=micros();
-    reply("PID_TEST: STARTED (continuous; lift wheels; STOP/ESTOP to exit)");
+    reply("PID_TEST: STARTED (recovery enabled; no auto timeout; lift wheels)");
     return;
   }
   if(pidTestActive && (s=="A" || s=="AUTO" || s=="START" ||
