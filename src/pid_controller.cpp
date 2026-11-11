@@ -141,7 +141,10 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1000, 1700}  // MAP 3
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
-constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
+// Map 2 pure PID test uses the same default straight-line BASE as
+// mainHighSpeedv4 Map 1 (130 PWM). Map 1 and Map 3 defaults are unchanged.
+constexpr int16_t MAP2_V4_SPEED_BASE_PWM = 130;
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, MAP2_V4_SPEED_BASE_PWM, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // Per-map BASE scheduler restored from v5, preserving v6 wheel PID and Map 1 boost.
 // Map 1 only: arm the late BASE boost after 10,500 forward-progress ticks.
@@ -463,7 +466,9 @@ static void driveWheelSpeedCascade(int16_t nominalLeftPwm,
 // X6 releases only after the dashed-line/U-turn region.
 // Independent eight-stage encoder/BASE profiles for MAP 1, MAP 2 and MAP 3.
 // X1..X7 are end boundaries; stage 8 continues from X7 to FINISH.
-// Maps 2/3 start with their previous constant BASE values, preserving behavior.
+// Map 2's dormant staged BASE mirrors the v4 MAP 1 baseline (130).
+// Its staged scheduler remains bypassed in MAP2_PURE_PID_TEST_ENABLED.
+ // Map 3 keeps its own original 150 PWM baseline.
 int32_t mapSegmentTicks[3][PID_MAP_PROFILE_MAX_STAGES - 1] = {
     {3800, 7800, 8350, 10300, 11400, 12800, 15000},
     {3800, 7800, 8350, 10300, 11400, 12800, 15000},
@@ -471,7 +476,7 @@ int32_t mapSegmentTicks[3][PID_MAP_PROFILE_MAX_STAGES - 1] = {
 };
 uint8_t mapSegmentPwm[3][PID_MAP_PROFILE_MAX_STAGES] = {
     {140, 140, 140, 240, 140, 140, 210, 255},
-    {160, 160, 160, 160, 160, 160, 160, 160},
+    {130, 130, 130, 130, 130, 130, 130, 130},
     {150, 150, 150, 150, 150, 150, 150, 150}
 };
 uint8_t mapSegmentStageCount[3] = {8, 8, 8};
@@ -1615,7 +1620,10 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Tick/BASE stage profile exclusively sets the normal BASE PWM.
+        // Map 2 test: replicate v4 Map 1 normal-PID PWM path exactly:
+        // fixed live pidConfig.baseSpeed + signed line-PID correction,
+        // NOT the encoder stage profile. Preserve manual BASE changes.
+        // Other maps keep their existing BASE scheduling.
         float base = (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED)
             ? (float)pidConfig.baseSpeed
             : mapUpdateScheduledBase(
