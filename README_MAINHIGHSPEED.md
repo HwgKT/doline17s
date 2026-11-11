@@ -212,3 +212,19 @@ The LED is shared with Bluetooth status: while waiting for each calibration pres
 The firmware defaults to MAP 1 at boot. To use MAP 2 or MAP 3, connect the Python app and select MAP 2/3 before physical START; it sends `MAP:2` / `MAP:3`. Physical START still sends `BUTTON34: START_REQUEST`, `MODE: AUTO PID`, and `RUN_ORIGIN map=N` through SPP. When the app is connected and has loaded `CAL_DUMP`, it automatically saves CSV/TXT into the matching `logs/map_NN` folder. Without SPP, the robot can start independently, but no PC log is recorded.
 
 The existing STOP rule (16 black sensors for three consecutive controller samples), HS_PEAK BRAKE windows (1400 / 1600 / 1800 to 2300), HOLD PWM 110 and default PID gains remain unchanged.
+
+
+### Independent PID sensor configuration per MAP
+
+Each MAP has independent T1/T2 thresholds and three 16-bit PID-only masks.
+MAP 1 defaults to T1=650, T2=1350; masks FFC0/03FF/FFFF.
+MAP 2/3 default to T1=650, T2=1350; masks FFFF/FFFF/FFFF.
+The speed Tick/BASE profiles also remain independently stored per MAP.
+
+Read: `MAP_SENSOR_PROFILE:<mapId>`.
+Write: `MAP_SENSOR_PROFILE:<mapId>,T1,T2,M1,M2,M3` (hex masks).
+Writes require a stopped robot and the specified MAP selected.
+The legacy `SENSOR_PROFILE` command still addresses MAP 1.
+Only PID sensor position uses masks; ADC, corner detection, SEARCH, START
+and FINISH continue using unmasked sensor data.
+Profiles reside in ESP32 RAM and revert to defaults after reboot.

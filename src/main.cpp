@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 MAP_SPEED_PROFILE:map MAP_SPEED_PROFILE:map,x1,...,x7,b1,...,b8 MAP1_SPEED_PROFILE MAP1_SPEED_PROFILE:x1,...,x7,b1,...,b8 MAP1_BASE_PROFILE MAP1_BASE_PROFILE:b1,...,b8 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 MAP_SPEED_PROFILE:map MAP_SPEED_PROFILE:map,x1,...,x7,b1,...,b8 MAP1_SPEED_PROFILE MAP1_SPEED_PROFILE:x1,...,x7,b1,...,b8 MAP1_BASE_PROFILE MAP1_BASE_PROFILE:b1,...,b8 MAP_SENSOR_PROFILE:map MAP_SENSOR_PROFILE:map,t1,t2,m1,m2,m3 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -304,6 +304,40 @@ void command(const String &raw) {
       reply("ERR: MAP1_BASE_PROFILE_REJECTED");return;
     }
     command("MAP1_BASE_PROFILE");return;
+  }
+
+  // Independent MAP sensor profiles; three PID-only masks per map.
+  if(s.startsWith("MAP_SENSOR_PROFILE:")){
+    const String payload=s.substring(19);
+    if(payload.indexOf(',')<0){
+      int mapId=payload.toInt();
+      if(payload!=String(mapId) || mapId<1 || mapId>3){
+        reply("ERR: MAP_SENSOR_PROFILE_MAP");return;
+      }
+      int32_t t1=0,t2=0;uint16_t m1=0,m2=0,m3=0;
+      pid_get_map_sensor_profile((uint8_t)mapId,&t1,&t2,&m1,&m2,&m3);
+      char b[145];
+      snprintf(b,sizeof(b),"MAP_SENSOR_PROFILE MAP=%d T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
+               mapId,(long)t1,(long)t2,(unsigned)m1,(unsigned)m2,(unsigned)m3);
+      reply(b);return;
+    }
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP_SENSOR_PROFILE_STOP_REQUIRED");return;
+    }
+    int mapId=0;long t1=0,t2=0;unsigned m1=0,m2=0,m3=0;char extra=0;
+    int n=sscanf(payload.c_str(),"%d,%ld,%ld,%x,%x,%x %c",
+                 &mapId,&t1,&t2,&m1,&m2,&m3,&extra);
+    if(n!=6){reply("ERR: MAP_SENSOR_PROFILE_FORMAT");return;}
+    if(mapId<1 || mapId>3 || pid_get_selected_map()!=mapId){
+      reply("ERR: MAP_SENSOR_PROFILE_SELECT_MAP");return;
+    }
+    if(t1<=0 || t2<=t1 || t2>10000000L ||
+       m1==0 || m2==0 || m3==0 || m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU ||
+       !pid_set_map_sensor_profile((uint8_t)mapId,(int32_t)t1,(int32_t)t2,
+                                   (uint16_t)m1,(uint16_t)m2,(uint16_t)m3)){
+      reply("ERR: MAP_SENSOR_PROFILE_INVALID");return;
+    }
+    command(String("MAP_SENSOR_PROFILE:")+String(mapId));return;
   }
 
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
