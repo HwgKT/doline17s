@@ -992,8 +992,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint16_t mask = sensor_get_line_bits();
 
     // Map 2 pure-PID experiment: no corner, SEARCH, dashed-gap, checkpoint,
-    // stage-mask or speed-scheduler FSM. START must be positioned ON a
-    // centered narrow line; motor stays at zero until line is confirmed.
+    // stage-mask or speed-scheduler FSM. START may be on an all-black pad:
+    // advance straight at full configured BASE until a centered, narrow line
+    // is confirmed. FINISH remains disarmed while leaving the START pad.
     if (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED) {
         if (!finishDetectionArmed) {
             const bool centeredTrack =
@@ -1017,10 +1018,12 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 startPadExitCandidate = false;
             }
             if (!finishDetectionArmed) {
-                // Do not coast off a black START pad or search without line.
+                // Map 2: keep driving straight at live BASE while leaving the
+                // all-black START pad (or a short white gap before the line).
+                // Fail safe instead of driving blind indefinitely.
                 if ((uint32_t)(now - autoStartedMs) >= STARTUP_LOSS_GRACE_MS)
                     return LINE_CASE_STOPPED;
-                return LINE_CASE_LOST_LINE; // Stops both motor PWM outputs.
+                return LINE_CASE_STARTUP_COAST;
             }
         }
         // Retain physical all-16-black FINISH, confirmed over three samples.
@@ -1639,11 +1642,16 @@ void pid_line_follow_step(void) {
 
         float leftCommand = base + correction;
         float rightCommand = base - correction;
-        // With wheel PI disabled, output the line PID's signed PWM directly.
-        // The wheel-speed feedback implementation remains available for re-enable.
-        const int16_t leftPwm = clampPwmSigned(leftCommand);
-        const int16_t rightPwm = clampPwmSigned(rightCommand);
-        if (WHEEL_PID_ENABLED) {
+        // Map 2 pure PID: each wheel can only move FORWARD or STOP.
+        // When PID demands a negative PWM, clamp that wheel to zero
+        // instead of reversing it. Map 1/3 keep signed PWM behavior.
+        const bool map2ForwardOnly = selectedMap == 2 &&
+                                     MAP2_PURE_PID_TEST_ENABLED;
+        const int16_t leftPwm = map2ForwardOnly
+            ? clampPwm(leftCommand) : clampPwmSigned(leftCommand);
+        const int16_t rightPwm = map2ForwardOnly
+            ? clampPwm(rightCommand) : clampPwmSigned(rightCommand);
+        if (WHEEL_PID_ENABLED && !map2ForwardOnly) {
             driveWheelSpeedCascade(leftPwm, rightPwm);
         } else {
             motor_set_speeds(leftPwm, rightPwm);
@@ -1671,8 +1679,12 @@ void pid_line_follow_step(void) {
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {
-        const int16_t speed = pidConfig.baseSpeed < DROPOUT_FORWARD_PWM
-            ? pidConfig.baseSpeed : DROPOUT_FORWARD_PWM;
+        // Map 2 START coasts on both wheels at the full live BASE, never
+        // the legacy 95-PWM dropout limit, until PID line acquisition.
+        const int16_t speed = (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED)
+            ? clampPwm((float)pidConfig.baseSpeed)
+            : (pidConfig.baseSpeed < DROPOUT_FORWARD_PWM
+                ? pidConfig.baseSpeed : DROPOUT_FORWARD_PWM);
         motor_set_speeds(speed, speed);
     } else {
         clearPidState();
