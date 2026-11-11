@@ -160,6 +160,8 @@ void pidTestStep() {
       pidTestResetPid();
     }else if(pidTestRecoveryState==1){
       motor_stop();
+      // An interrupted debounce must restart at the next missing sample.
+      if(pidTestLossSinceMs==0)pidTestLossSinceMs=nowMs;
       if(nowMs-pidTestLossSinceMs>=PID_TEST_LOSS_CONFIRM_MS){
         if(pidTestLastSide==0){
           pidTestRecoveryState=3;
