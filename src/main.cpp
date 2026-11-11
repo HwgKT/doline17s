@@ -202,9 +202,10 @@ void command(const String &raw) {
     char b[240];
     snprintf(b,sizeof(b),
       "MAP2_PID_TEST: ENABLED=%u BASE=%d MASK=FFFF STAGES=OFF "
-      "BASE_TICKS=OFF CHECKPOINT=OFF CORNER=OFF SEARCH=OFF "
-      "DASHED=OFF WHEEL_PID=OFF START=BASE_UNTIL_LINE PWM=0..255 "
-      "LOSS_STOP_MS=30 START_TIMEOUT_MS=5000 V4_BASELINE=130",
+      "CHECKPOINT=OFF EARLY_TURN=OFF "
+      "SEARCH=FORWARD_ONLY_90 SEARCH_MS=2000 REACQ_FRAMES=3 "
+      "START=BASE_UNTIL_LINE PWM=0..255 LOSS_MS=30 "
+      "START_TIMEOUT_MS=5000 V4_BASELINE=130",
       pid_map2_pure_pid_test_enabled()?1U:0U,pid_get_base_speed());
     reply(b);return;
   }
