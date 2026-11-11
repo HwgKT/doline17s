@@ -164,13 +164,20 @@ static int32_t runEncoderProgress() {
     return (int32_t)(sum / 2);
 }
 
-// Per-MAP PID masks; physical line/ADC data are never masked.
-int32_t mapSensorThresholds[3][2]={{650,1350},{650,1350},{650,1350}};
-uint16_t mapSensorMasks[3][3]={
-    {0xFFC0U,0x03FFU,0xFFFFU},
-    {0xFFFFU,0xFFFFU,0xFFFFU},
-    {0xFFFFU,0xFFFFU,0xFFFFU}
+// Variable-length per-MAP profiles. UI currently supports 1..8 stages.
+// Each stage except the last has an end-tick boundary; last stage runs to FINISH.
+constexpr uint8_t MAP_PROFILE_MAX_STAGES = 8U;
+int32_t mapSensorEndTicks[3][MAP_PROFILE_MAX_STAGES - 1] = {
+    {650, 1350, 0, 0, 0, 0, 0},
+    {650, 1350, 0, 0, 0, 0, 0},
+    {650, 1350, 0, 0, 0, 0, 0}
 };
+uint16_t mapSensorMasks[3][MAP_PROFILE_MAX_STAGES] = {
+    {0xFFC0U, 0x03FFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU},
+    {0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU},
+    {0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU}
+};
+uint8_t mapSensorStageCount[3] = {3, 3, 3};
 constexpr uint16_t FULL_PID_SENSOR_MASK=0xFFFFU;
 int32_t mapSensorMaxTicks=0;
 
@@ -190,9 +197,11 @@ static uint16_t activePidSensorMask(){
     const int32_t ticks=mapSensorTravelTicks();
     if(ticks>mapSensorMaxTicks) mapSensorMaxTicks=ticks;
     const uint8_t i=selectedMap-1U;
-    if(mapSensorMaxTicks<mapSensorThresholds[i][0]) return mapSensorMasks[i][0];
-    if(mapSensorMaxTicks<mapSensorThresholds[i][1]) return mapSensorMasks[i][1];
-    return mapSensorMasks[i][2];
+    uint8_t stage=0;
+    const uint8_t count=mapSensorStageCount[i];
+    while(stage+1U<count &&
+          mapSensorMaxTicks>=mapSensorEndTicks[i][stage]) ++stage;
+    return mapSensorMasks[i][stage];
 }
 
 // Compute only the PID measurement from enabled sensors. The original
@@ -328,23 +337,26 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 // Independent eight-stage encoder/BASE profiles for MAP 1, MAP 2 and MAP 3.
 // X1..X7 are end boundaries; stage 8 continues from X7 to FINISH.
 // Maps 2/3 start with their previous constant BASE values, preserving behavior.
-int32_t mapSegmentTicks[3][7] = {
+int32_t mapSegmentTicks[3][MAP_PROFILE_MAX_STAGES - 1] = {
     {3800, 7800, 8350, 10300, 11400, 12800, 15000},
     {3800, 7800, 8350, 10300, 11400, 12800, 15000},
     {3800, 7800, 8350, 10300, 11400, 12800, 15000}
 };
-uint8_t mapSegmentPwm[3][8] = {
+uint8_t mapSegmentPwm[3][MAP_PROFILE_MAX_STAGES] = {
     {140, 140, 140, 240, 140, 140, 210, 255},
     {160, 160, 160, 160, 160, 160, 160, 160},
     {150, 150, 150, 150, 150, 150, 150, 150}
 };
+uint8_t mapSegmentStageCount[3] = {8, 8, 8};
 
 static float mapScheduledTarget(int32_t progress) {
     if (selectedMap < 1 || selectedMap > 3)
         return (float)pidConfig.baseSpeed;
     const uint8_t mapIndex = (uint8_t)(selectedMap - 1U);
     uint8_t segment = 0;
-    while (segment < 7 && progress >= mapSegmentTicks[mapIndex][segment])
+    const uint8_t stageCount = mapSegmentStageCount[mapIndex];
+    while (segment + 1U < stageCount &&
+           progress >= mapSegmentTicks[mapIndex][segment])
         ++segment;
     float target = (float)mapSegmentPwm[mapIndex][segment];
     // Retain the existing opt-in Map 1 route-lock safety cap.
@@ -524,27 +536,49 @@ bool pid_select_map(uint8_t mapId) {
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
 
-// Independent PID mask configurations for each MAP; all writes atomic while stopped.
+// Variable-stage PID sensor profiles. The last stage has no end boundary.
+bool pid_set_map_sensor_profile_v2(uint8_t mapId,uint8_t stageCount,
+                                   const int32_t *endTicks,const uint16_t *masks){
+    if(autoMode || mapId<1 || mapId>3 || selectedMap!=mapId ||
+       stageCount<1 || stageCount>MAP_PROFILE_MAX_STAGES || !masks ||
+       (stageCount>1 && !endTicks)) return false;
+    for(uint8_t i=0;i+1U<stageCount;++i){
+        if(endTicks[i]<=0 || endTicks[i]>10000000L ||
+           (i>0 && endTicks[i]<=endTicks[i-1])) return false;
+    }
+    for(uint8_t i=0;i<stageCount;++i) if(masks[i]==0U) return false;
+    const uint8_t index=mapId-1U;
+    for(uint8_t i=0;i+1U<stageCount;++i) mapSensorEndTicks[index][i]=endTicks[i];
+    for(uint8_t i=0;i<stageCount;++i) mapSensorMasks[index][i]=masks[i];
+    mapSensorStageCount[index]=stageCount;
+    return true;
+}
+void pid_get_map_sensor_profile_v2(uint8_t mapId,uint8_t *stageCount,
+                                   int32_t *endTicks,uint16_t *masks){
+    if(mapId<1 || mapId>3) return;
+    const uint8_t index=mapId-1U;
+    const uint8_t count=mapSensorStageCount[index];
+    if(stageCount) *stageCount=count;
+    if(endTicks) for(uint8_t i=0;i+1U<count;++i)
+        endTicks[i]=mapSensorEndTicks[index][i];
+    if(masks) for(uint8_t i=0;i<count;++i)
+        masks[i]=mapSensorMasks[index][i];
+}
+// Legacy fixed-three-stage API remains available to older SPP clients.
 bool pid_set_map_sensor_profile(uint8_t mapId,int32_t t1,int32_t t2,
                                 uint16_t m1,uint16_t m2,uint16_t m3){
-    if(autoMode || mapId<1 || mapId>3 || selectedMap!=mapId ||
-       t1<=0 || t2<=t1 || t2>10000000 || !m1 || !m2 || !m3) return false;
-    uint8_t i=mapId-1U;
-    mapSensorThresholds[i][0]=t1;mapSensorThresholds[i][1]=t2;
-    mapSensorMasks[i][0]=m1;mapSensorMasks[i][1]=m2;mapSensorMasks[i][2]=m3;
-    return true;
+    const int32_t ticks[2]={t1,t2}; const uint16_t masks[3]={m1,m2,m3};
+    return pid_set_map_sensor_profile_v2(mapId,3,ticks,masks);
 }
 void pid_get_map_sensor_profile(uint8_t mapId,int32_t *t1,int32_t *t2,
                                 uint16_t *m1,uint16_t *m2,uint16_t *m3){
+    int32_t ticks[2]={0,0}; uint16_t masks[3]={0,0,0};
     if(mapId<1 || mapId>3) return;
-    uint8_t i=mapId-1U;
-    if(t1) *t1=mapSensorThresholds[i][0];
-    if(t2) *t2=mapSensorThresholds[i][1];
-    if(m1) *m1=mapSensorMasks[i][0];
-    if(m2) *m2=mapSensorMasks[i][1];
-    if(m3) *m3=mapSensorMasks[i][2];
+    if(mapSensorStageCount[mapId-1U]!=3U) return;
+    pid_get_map_sensor_profile_v2(mapId,nullptr,ticks,masks);
+    if(t1) *t1=ticks[0]; if(t2) *t2=ticks[1];
+    if(m1) *m1=masks[0]; if(m2) *m2=masks[1]; if(m3) *m3=masks[2];
 }
-// Retain the legacy MAP 1 commands for existing users.
 bool pid_set_map1_sensor_profile(int32_t t1,int32_t t2,
                                  uint16_t m1,uint16_t m2,uint16_t m3){
     return pid_set_map_sensor_profile(1,t1,t2,m1,m2,m3);
@@ -554,41 +588,43 @@ void pid_get_map1_sensor_profile(int32_t *t1,int32_t *t2,
     pid_get_map_sensor_profile(1,t1,t2,m1,m2,m3);
 }
 
-bool pid_set_map_speed_profile(uint8_t mapId, const int32_t *xTicks,
-                               const uint8_t *basePwm) {
-    if (autoMode || mapId < 1 || mapId > 3 || selectedMap != mapId ||
-        !xTicks || !basePwm) return false;
-
-    // Validate the entire profile before modifying any map's live settings.
-    for (uint8_t i = 0; i < 7; ++i) {
-        if (xTicks[i] <= 0 || xTicks[i] > 10000000L ||
-            (i > 0 && xTicks[i] <= xTicks[i - 1])) return false;
+bool pid_set_map_speed_profile_v2(uint8_t mapId,uint8_t stageCount,
+                                  const int32_t *endTicks,const uint8_t *basePwm){
+    if(autoMode || mapId<1 || mapId>3 || selectedMap!=mapId ||
+       stageCount<1 || stageCount>MAP_PROFILE_MAX_STAGES || !basePwm ||
+       (stageCount>1 && !endTicks)) return false;
+    for(uint8_t i=0;i+1U<stageCount;++i){
+        if(endTicks[i]<=0 || endTicks[i]>10000000L ||
+           (i>0 && endTicks[i]<=endTicks[i-1])) return false;
     }
-    for (uint8_t i = 0; i < 8; ++i) {
-        if (basePwm[i] < 45U) return false;
-    }
-
-    const uint8_t mapIndex = (uint8_t)(mapId - 1U);
-    for (uint8_t i = 0; i < 7; ++i)
-        mapSegmentTicks[mapIndex][i] = xTicks[i];
-    for (uint8_t i = 0; i < 8; ++i)
-        mapSegmentPwm[mapIndex][i] = basePwm[i];
-    mapScheduledBase = (float)mapSegmentPwm[mapIndex][0];
+    for(uint8_t i=0;i<stageCount;++i)
+        if(basePwm[i]<45U || basePwm[i]>255U) return false;
+    const uint8_t index=mapId-1U;
+    for(uint8_t i=0;i+1U<stageCount;++i) mapSegmentTicks[index][i]=endTicks[i];
+    for(uint8_t i=0;i<stageCount;++i) mapSegmentPwm[index][i]=basePwm[i];
+    mapSegmentStageCount[index]=stageCount;
+    mapScheduledBase=(float)mapSegmentPwm[index][0];
     return true;
 }
-
-void pid_get_map_speed_profile(uint8_t mapId, int32_t *xTicks,
-                               uint8_t *basePwm) {
-    if (mapId < 1 || mapId > 3) return;
-    const uint8_t mapIndex = (uint8_t)(mapId - 1U);
-    if (xTicks) {
-        for (uint8_t i = 0; i < 7; ++i)
-            xTicks[i] = mapSegmentTicks[mapIndex][i];
-    }
-    if (basePwm) {
-        for (uint8_t i = 0; i < 8; ++i)
-            basePwm[i] = mapSegmentPwm[mapIndex][i];
-    }
+void pid_get_map_speed_profile_v2(uint8_t mapId,uint8_t *stageCount,
+                                  int32_t *endTicks,uint8_t *basePwm){
+    if(mapId<1 || mapId>3) return;
+    const uint8_t index=mapId-1U;
+    const uint8_t count=mapSegmentStageCount[index];
+    if(stageCount) *stageCount=count;
+    if(endTicks) for(uint8_t i=0;i+1U<count;++i)
+        endTicks[i]=mapSegmentTicks[index][i];
+    if(basePwm) for(uint8_t i=0;i<count;++i)
+        basePwm[i]=mapSegmentPwm[index][i];
+}
+// Legacy API uses the original fixed eight-stage profile.
+bool pid_set_map_speed_profile(uint8_t mapId,const int32_t *xTicks,
+                               const uint8_t *basePwm){
+    return pid_set_map_speed_profile_v2(mapId,8,xTicks,basePwm);
+}
+void pid_get_map_speed_profile(uint8_t mapId,int32_t *xTicks,uint8_t *basePwm){
+    if(mapId<1 || mapId>3 || mapSegmentStageCount[mapId-1U]!=8U) return;
+    pid_get_map_speed_profile_v2(mapId,nullptr,xTicks,basePwm);
 }
 
 // Backward-compatible Map 1 API used by legacy SPP clients.

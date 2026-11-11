@@ -41,16 +41,16 @@ class IndependentMapSettingsTest(unittest.TestCase):
         self.assertIn('for bit, state in enumerate(states)', c)
         self.assertIn('text=f"S{bit}"', c)
         self.assertIn('MAP_SENSOR_PROFILE_V2:{target},{count}', c)
-        self.assertIn('self.sensor_profiles[target]', c)
+        self.assertIn("self.sensor_profiles[target]", c)
 
     def test_base_editor_has_stage_count_and_common_base(self):
         c = (ROOT / "robot_debug.py").read_text(encoding="utf-8")
         self.assertIn('text="Số giai đoạn:"', c)
         self.assertIn("BASE chung (45–255)", c)
         self.assertIn("def apply_common_base():", c)
-        self.assertIn("for v in base_vars:", c)
+        self.assertIn("for var in base_vars:", c)
         self.assertIn('MAP_SPEED_PROFILE_V2:', c)
-        self.assertIn("end_tick, base =", c)
+        self.assertIn("end_tick, base = int(fields[2+2*i]), int(fields[3+2*i])", c)
 
     def test_start_requires_active_map_profiles_to_be_confirmed(self):
         c = (ROOT / "robot_debug.py").read_text(encoding="utf-8")
