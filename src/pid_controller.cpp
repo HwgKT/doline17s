@@ -441,6 +441,7 @@ static void resetLineTracking() {
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
     map1SensorMaxTicks = 0;
+    map2MaxProgress = 0;
      map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
