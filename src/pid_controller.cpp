@@ -184,6 +184,9 @@ uint8_t map2CenterSamples = 0;
 constexpr uint32_t MAP2_SETTLE_MS = 100, MAP2_SETTLE_TIMEOUT_MS = 1500;
 constexpr uint32_t MAP2_ALIGN_TIMEOUT_MS = 1800;
 constexpr int16_t MAP2_ALIGN_PWM = 65;
+constexpr int16_t MAP2_ALIGN_MIN_PWM = 28;
+constexpr float MAP2_HOLD_CENTER_ERROR = 8.0f;
+constexpr uint8_t MAP2_CENTER_CONFIRM_FRAMES = 5;
 
 
 static int32_t map1SensorTravelTicks() {
@@ -325,6 +328,15 @@ static uint8_t bitCount16(uint16_t value) {
 }
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
+}
+// Map2-only proportional heading correction while zero forward PWM.
+// Uses the same -75..75 weighted sensor position as normal line PID.
+static int16_t map2HoldPwm(float position) {
+    float power = (float)MAP2_ALIGN_MIN_PWM + 0.55f *
+                  (fabsf(position) - MAP2_HOLD_CENTER_ERROR);
+    power = fmaxf((float)MAP2_ALIGN_MIN_PWM,
+                  fminf((float)MAP2_ALIGN_PWM, power));
+    return (int16_t)power;
 }
 static void resetWheelSpeedPid() {
     wheelFeedbackReady = false;
@@ -1178,30 +1190,62 @@ void pid_line_follow_step(void) {
                 motor_stop();
                 return;
             }
+
+            // Keep tracking the PHYSICAL line throughout stopping and
+            // alignment. With common-mode PWM=0, a small signed differential
+            // correction rotates the robot in place; it does NOT drive it
+            // forward along the track after the tick boundary.
+            const uint16_t mask = sensor_get_line_bits();
+            const bool valid = good && blackCount >= 1 && blackCount <= 6 &&
+                               (mask & 0xF00FU) == 0;
+            const bool centered = valid && blackCount >= 2 &&
+                (mask & TURN_CENTER_SENSOR_MASK) != 0 &&
+                fabsf(pos) <= MAP2_HOLD_CENTER_ERROR;
+            int32_t left=0, right=0;
+            encoder_get_counts(&left, &right);
+            const bool still = labs((long)left-map2PrevL) <= 1 &&
+                               labs((long)right-map2PrevR) <= 1;
+            map2PrevL = left;
+            map2PrevR = right;
+
             if (map2Checkpoint == MAP2_SETTLE) {
-                motor_stop();  // PWM=0 coasts on this motor driver.
-                int32_t left=0, right=0;
-                encoder_get_counts(&left, &right);
-                const bool still = labs((long)left-map2PrevL) <= 1 &&
-                                   labs((long)right-map2PrevR) <= 1;
-                map2PrevL = left; map2PrevR = right;
-                if (!still) map2StoppedSince = 0;
-                else if (!map2StoppedSince) map2StoppedSince = now;
-                if (map2StoppedSince && now-map2StoppedSince >= MAP2_SETTLE_MS) {
+                // Briefly settle forward momentum; do not hand control back to
+                // ordinary forward PID at the stage transition.
+                // A visible off-center line is actively steered even here.
+                if (valid && fabsf(pos) > MAP2_HOLD_CENTER_ERROR) {
+                    const int16_t power = map2HoldPwm(pos);
+                    if (pos < 0) motor_set_speeds(-power, power);
+                    else motor_set_speeds(power, -power);
+                } else {
+                    motor_stop();
+                }
+                if (still) {
+                    if (!map2StoppedSince) map2StoppedSince = now;
+                } else {
+                    map2StoppedSince = 0;
+                }
+                if (map2StoppedSince &&
+                    now-map2StoppedSince >= MAP2_SETTLE_MS) {
                     map2Checkpoint = MAP2_ALIGN;
                     map2CheckpointSince = now;
-                } else if (now-map2CheckpointSince >= MAP2_SETTLE_TIMEOUT_MS)
+                    map2CenterSamples = 0;
+                } else if (now-map2CheckpointSince >= MAP2_SETTLE_TIMEOUT_MS) {
                     map2Checkpoint = MAP2_FAULT;
+                    motor_stop();
+                }
                 return;
             }
-            // Never accept lastKnownPosition when all physical eyes are white.
-            const uint16_t mask = sensor_get_line_bits();
-            const bool center = good && blackCount >= 2 && blackCount <= 6 &&
-                (mask & TURN_CENTER_SENSOR_MASK) != 0 &&
-                (mask & 0xF00FU) == 0 &&
-                fabsf(pos) <= TURN_CENTERED_POSITION;
-            map2CenterSamples = center ? map2CenterSamples + 1 : 0;
-            if (map2CenterSamples >= 3) {
+
+            // ALIGN: heading correction only, not forward travel. Release
+            // requires both a fresh centered measurement AND stationary
+            // encoders; a momentary line crossing cannot release this stage.
+            if (centered && still) {
+                if (map2CenterSamples < MAP2_CENTER_CONFIRM_FRAMES)
+                    ++map2CenterSamples;
+            } else {
+                map2CenterSamples = 0;
+            }
+            if (map2CenterSamples >= MAP2_CENTER_CONFIRM_FRAMES) {
                 ++map2TickStage;
                 map2Checkpoint = MAP2_RUN;
                 lineLocked = true;
@@ -1212,7 +1256,7 @@ void pid_line_follow_step(void) {
                 derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
                 reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
                 resetWheelSpeedPid();
-                motor_stop(); // Resume on the NEXT PID loop iteration.
+                motor_stop(); // Resume normal Map2 PID on next cycle.
                 return;
             }
             if (now-map2CheckpointSince >= MAP2_ALIGN_TIMEOUT_MS) {
@@ -1220,14 +1264,13 @@ void pid_line_follow_step(void) {
                 motor_stop();
                 return;
             }
-            if (!good || blackCount > 10) {
-                motor_stop(); // No trustworthy line; fail safely on timeout.
-            } else if (pos < -TURN_CENTERED_POSITION) {
-                motor_set_speeds(-MAP2_ALIGN_PWM, MAP2_ALIGN_PWM);
-            } else if (pos > TURN_CENTERED_POSITION) {
-                motor_set_speeds(MAP2_ALIGN_PWM, -MAP2_ALIGN_PWM);
-            } else {
+            if (!valid || fabsf(pos) <= MAP2_HOLD_CENTER_ERROR) {
+                // No line -> no blind search. Centered -> zero motor torque.
                 motor_stop();
+            } else {
+                const int16_t power = map2HoldPwm(pos);
+                if (pos < 0) motor_set_speeds(-power, power);
+                else motor_set_speeds(power, -power);
             }
             return;
         }
