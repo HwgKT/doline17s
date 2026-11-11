@@ -558,9 +558,7 @@ void command(const String &raw) {
   if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
     int v;int sep=s.indexOf(':');
     if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
-    // A BASE above HS_PEAK makes the trapezoid undefined. Reject instead
-    // of silently turning a supposedly lower peak into a higher target.
-    if(v>pid_get_high_speed_peak()){reply("ERR: BASE_GT_HS_PEAK");return;}
+    // BASE and per-map staged BASE no longer depend on HS_PEAK.
     pid_set_base_speed(v);manualSpeed=(uint8_t)v;
     reply(String("SPEED SET: ")+v);return;
   }
@@ -584,7 +582,7 @@ void connectionState(uint32_t now) {
     if(connected){
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
-      command("HS_PEAK");
+      // No automatic HS_PEAK handshake for normal operation.
     }else{
       safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
       btDropPendingTelemetry(); // no replay after reconnect
