@@ -330,15 +330,14 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 constexpr int32_t MAP1_X_TICKS[7] = {
     3800, 7400, 8350, 10500, 11300, 12800, 15000
 };
-constexpr float MAP1_SEGMENT_PWM[8] = {
-    140.0f, 140.0f, 140.0f, 240.0f,
-    210.0f, 240.0f, 210.0f, 255.0f
+uint8_t map1SegmentPwm[8] = {
+    140, 140, 140, 240, 210, 240, 210, 255
 };
 
 static float map1CappedBase(int32_t progress) {
     uint8_t segment = 0;
     while (segment < 7 && progress >= MAP1_X_TICKS[segment]) ++segment;
-    float target = MAP1_SEGMENT_PWM[segment];
+    float target = (float)map1SegmentPwm[segment];
     // Retain the existing opt-in route-lock safety cap.
     if (map1Route.active) target = map1Route.baseCap(progress, target);
     return target;
@@ -535,6 +534,26 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask1) *mask1 = map1SensorStageMasks[0];
     if (mask2) *mask2 = map1SensorStageMasks[1];
     if (mask3) *mask3 = map1SensorStageMasks[2];
+}
+bool pid_set_map1_base_profile(const uint8_t *basePwm) {
+    if (autoMode || selectedMap != 1 || !basePwm) return false;
+    for (uint8_t i = 0; i < 8; ++i) {
+        if (basePwm[i] < 45U) return false;
+    }
+    for (uint8_t i = 0; i < 8; ++i)
+        map1SegmentPwm[i] = basePwm[i];
+    return true;
+}
+
+void pid_get_map1_speed_profile(int32_t *xTicks, uint8_t *basePwm) {
+    if (xTicks) {
+        for (uint8_t i = 0; i < 7; ++i)
+            xTicks[i] = MAP1_X_TICKS[i];
+    }
+    if (basePwm) {
+        for (uint8_t i = 0; i < 8; ++i)
+            basePwm[i] = map1SegmentPwm[i];
+    }
 }
 uint8_t pid_get_high_speed_stage(void) {
     if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 && autoMode &&
