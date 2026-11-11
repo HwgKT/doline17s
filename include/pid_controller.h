@@ -74,9 +74,14 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
-// Map 1 eight-segment BASE schedule. Readback includes X1..X7 encoder
-// boundaries; writes change BASE only and require MAP 1 + AUTO disabled.
-// Values are runtime RAM settings and reset to firmware defaults on reboot.
+// Independent eight-segment encoder/BASE schedules for MAP 1, 2 and 3.
+// Seven end-tick boundaries and eight BASE values per map.
+// Writes require the requested MAP selected and AUTO disabled.
+bool pid_set_map_speed_profile(uint8_t mapId, const int32_t *xTicks,
+                               const uint8_t *basePwm);
+void pid_get_map_speed_profile(uint8_t mapId, int32_t *xTicks,
+                               uint8_t *basePwm);
+// Backward-compatible Map 1 API for legacy SPP clients.
 bool pid_set_map1_base_profile(const uint8_t *basePwm);
 bool pid_set_map1_speed_profile(const int32_t *xTicks,
                                 const uint8_t *basePwm);
