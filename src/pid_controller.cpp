@@ -1172,7 +1172,8 @@ void pid_line_follow_step(void) {
             resetWheelSpeedPid();
         }
         if (map2Checkpoint != MAP2_RUN) {
-            currentCase = LINE_CASE_STOPPED;
+            currentCase = map2Checkpoint == MAP2_FAULT ?
+                LINE_CASE_STOPPED : LINE_CASE_MAP2_CHECKPOINT;
             if (map2Checkpoint == MAP2_FAULT) {
                 motor_stop();
                 return;
@@ -1416,6 +1417,7 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
         case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
         case LINE_CASE_GAP_BRIDGE: return "CASE 11: Map GAP bridge 100ms";
+        case LINE_CASE_MAP2_CHECKPOINT: return "CASE 12: Map 2 tick checkpoint";
         default: return "Khong Xac Dinh";
     }
 }
