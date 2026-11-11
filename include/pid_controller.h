@@ -80,6 +80,11 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map2_sensor_stage(void);
+// Map 3: four continuously selected PID eye-mask stages, no checkpoint stops.
+// Three ordered positive encoder thresholds and four nonzero masks; AUTO must be off to edit.
+bool pid_set_map3_sensor_profile(const int32_t *ticks, const uint16_t *masks);
+void pid_get_map3_sensor_profile(int32_t *ticks, uint16_t *masks);
+uint8_t pid_get_map3_sensor_stage(void);
 // Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
 uint8_t pid_get_map2_hold_state(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
