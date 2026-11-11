@@ -593,7 +593,10 @@ void pid_get_map_speed_profile(uint8_t mapId, int32_t *xTicks,
 
 // Backward-compatible Map 1 API used by legacy SPP clients.
 bool pid_set_map1_base_profile(const uint8_t *basePwm) {
-    int32_t ticks[7];
+    // Legacy BASE-only command assumes the original fixed eight-stage profile.
+    // Reject it after a V2 stage-count change rather than reusing stale ticks.
+    if (mapSegmentStageCount[0] != 8U) return false;
+    int32_t ticks[7] = {0};
     pid_get_map_speed_profile(1, ticks, nullptr);
     return pid_set_map_speed_profile(1, ticks, basePwm);
 }

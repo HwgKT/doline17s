@@ -67,8 +67,13 @@ bool pid_is_auto_mode(void);
 // Set track profile before AUTO. Valid MAP values: 1, 2, 3.
 bool pid_select_map(uint8_t mapId);
 uint8_t pid_get_selected_map(void);
-// Independent encoder thresholds and three 16-bit PID sensor masks per MAP.
-// Writes require AUTO disabled and the requested MAP selected. Physical ADC/FSM remains unmasked.
+// Variable-length per-MAP sensor and BASE profiles (1..8 stages).
+#define PID_MAP_PROFILE_MAX_STAGES 8U
+bool pid_set_map_sensor_profile_v2(uint8_t mapId, uint8_t stageCount,
+                                   const int32_t *endTicks, const uint16_t *masks);
+void pid_get_map_sensor_profile_v2(uint8_t mapId, uint8_t *stageCount,
+                                   int32_t *endTicks, uint16_t *masks);
+// Legacy fixed-three-stage sensor profile.
 bool pid_set_map_sensor_profile(uint8_t mapId, int32_t stage2, int32_t stage3,
                                 uint16_t mask1, uint16_t mask2, uint16_t mask3);
 void pid_get_map_sensor_profile(uint8_t mapId, int32_t *stage2, int32_t *stage3,
@@ -78,9 +83,13 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
-// Independent eight-segment encoder/BASE schedules for MAP 1, 2 and 3.
-// Seven end-tick boundaries and eight BASE values per map.
-// Writes require the requested MAP selected and AUTO disabled.
+// Variable-length encoder/BASE schedules for MAP 1, 2 and 3 (1..8 stages).
+// Each stage except the last has an end-tick boundary; last runs to FINISH.
+bool pid_set_map_speed_profile_v2(uint8_t mapId, uint8_t stageCount,
+                                  const int32_t *endTicks, const uint8_t *basePwm);
+void pid_get_map_speed_profile_v2(uint8_t mapId, uint8_t *stageCount,
+                                  int32_t *endTicks, uint8_t *basePwm);
+// Legacy fixed-eight-stage API retained for older clients.
 bool pid_set_map_speed_profile(uint8_t mapId, const int32_t *xTicks,
                                const uint8_t *basePwm);
 void pid_get_map_speed_profile(uint8_t mapId, int32_t *xTicks,
