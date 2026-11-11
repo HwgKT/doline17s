@@ -105,6 +105,19 @@ bool pid_finish_detection_armed(void);
 uint32_t pid_get_confirmed_line_loss_count(void);
 uint32_t pid_get_line_reacquisition_count(void);
 
+// Shared PID core state. AUTO and stationary bench test have independent
+// histories, but execute exactly the same PID computation.
+typedef struct {
+  float integral;
+  float previous_error;
+  float previous_d;
+  uint8_t derivative_valid;
+  uint8_t warmup_frames;
+} PID_CoreState_t;
+float pid_compute_shared(float error, float dt, bool dt_valid,
+                         PID_CoreState_t *state,
+                         float *p_term, float *i_term, float *d_term);
+
 // =================== CÁC HÀM XỬ LÝ CHÍNH ===================
 
 /**
