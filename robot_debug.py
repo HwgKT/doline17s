@@ -1974,6 +1974,10 @@ class App(tk.Tk):
             self.map_profile_pending = None
             self.map_profile_confirmed[1] = False
             self.map_profile_status.set("MAP 1 BASE: ESP32 từ chối — xem Terminal")
+        if (message.startswith("MAP_SPEED_PROFILE_V2:") or
+                message.startswith("MAP_SPEED_PROFILE ") or
+                message.startswith("ERR: MAP_SPEED_PROFILE_")):
+            self.update_control_buttons()
         m2 = re.fullmatch(
             r"MAP2_SENSOR_PROFILE T1=(\d+) T2=(\d+) T3=(\d+) "
             r"M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) "
