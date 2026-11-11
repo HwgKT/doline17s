@@ -74,6 +74,11 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
+// Map 2: 4 PID eye-mask stages selected by three encoder thresholds.
+// 3 ordered positive ticks and 4 nonzero masks. AUTO must be off.
+bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
+void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
+uint8_t pid_get_map2_sensor_stage(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
