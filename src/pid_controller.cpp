@@ -54,6 +54,8 @@ constexpr int16_t EARLY_TURN_INNER_REVERSE_PWM = 100;
 constexpr int16_t EARLY_TURN_OUTER_FORWARD_PWM = 90;
 constexpr uint32_t EARLY_TURN_TREND_WINDOW_MS = 150;
 constexpr uint8_t EARLY_TURN_EDGE_CONFIRM_FRAMES = 3;
+// Fallback: two consecutive isolated-edge samples after a recent center trace.
+constexpr uint8_t EARLY_TURN_DIRECT_EDGE_FRAMES = 2;
 // MAP 1 experiment: faster pivot only at the long left corner near 1,311 ticks.
 constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 90;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
@@ -269,6 +271,9 @@ uint32_t edgeLeftSeedMs = 0, edgeRightSeedMs = 0;
 float edgeLeftSeedCentroid = 0.0f, edgeRightSeedCentroid = 0.0f;
 uint8_t edgeLeftFrames = 0, edgeRightFrames = 0;
 uint16_t edgeTrackSensorMask = 0;
+bool edgeRecentCenterLeft = false, edgeRecentCenterRight = false;
+uint32_t edgeRecentCenterLeftMs = 0, edgeRecentCenterRightMs = 0;
+uint8_t directLeftEdgeFrames = 0, directRightEdgeFrames = 0;
 uint32_t autoStartedMs = 0;
 uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
@@ -409,6 +414,8 @@ static void resetLineTracking() {
     edgeLeftSeeded = edgeRightSeeded = false;
     edgeLeftFrames = edgeRightFrames = 0;
     edgeTrackSensorMask = 0;
+    edgeRecentCenterLeft = edgeRecentCenterRight = false;
+    directLeftEdgeFrames = directRightEdgeFrames = 0;
     turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
     derivativeWarmupFrames = 0;
@@ -466,13 +473,62 @@ static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
         edgeTrackSensorMask = allowedMask;
         edgeLeftSeeded = edgeRightSeeded = false;
         edgeLeftFrames = edgeRightFrames = 0;
+        edgeRecentCenterLeft = edgeRecentCenterRight = false;
+        directLeftEdgeFrames = directRightEdgeFrames = 0;
     }
     const uint16_t mask = physicalMask & allowedMask;
     const uint8_t blackCount = bitCount16(mask);
     if (selectedMap != 1 || map1MaxProgress < EARLY_TURN_MIN_TICKS ||
         map1MaxProgress >= EARLY_TURN_MAX_TICKS ||
-        !finishDetectionArmed || earlyTurnActive || blackCount == 0 ||
-        blackCount > 6 || ((mask & 0x000FU) && (mask & 0xF000U))) {
+        !finishDetectionArmed || earlyTurnActive || blackCount == 0) {
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+        edgeRecentCenterLeft = edgeRecentCenterRight = false;
+        directLeftEdgeFrames = directRightEdgeFrames = 0;
+        return 0;
+    }
+
+    // Remember the central track even if a wide line (>6 eyes) interrupts
+    // the old centroid-trend logic. All bits obey the active encoder mask.
+    const bool oppositeEdges = ((mask & 0x000FU) && (mask & 0xF000U));
+    if (!oppositeEdges && (mask & 0x01F0U) && !(mask & 0x000FU)) {
+        edgeRecentCenterLeft = true;
+        edgeRecentCenterLeftMs = now;
+    }
+    if (!oppositeEdges && (mask & 0x0F80U) && !(mask & 0xF000U)) {
+        edgeRecentCenterRight = true;
+        edgeRecentCenterRightMs = now;
+    }
+    if (edgeRecentCenterLeft &&
+        (uint32_t)(now - edgeRecentCenterLeftMs) > EARLY_TURN_TREND_WINDOW_MS)
+        edgeRecentCenterLeft = false;
+    if (edgeRecentCenterRight &&
+        (uint32_t)(now - edgeRecentCenterRightMs) > EARLY_TURN_TREND_WINDOW_MS)
+        edgeRecentCenterRight = false;
+
+    // Isolated cluster: only the two or more adjacent outer enabled eyes
+    // are black; enabled central/opposite eyes are white. Confirm twice.
+    const bool isolatedLeft =
+        !oppositeEdges && edgeRecentCenterLeft &&
+        (mask & 0xFFF0U) == 0U &&
+        bitCount16(mask & 0x000FU) >= 2 &&
+        hasAdjacentLineSensors(mask);
+    const bool isolatedRight =
+        !oppositeEdges && edgeRecentCenterRight &&
+        (mask & 0x0FFFU) == 0U &&
+        bitCount16(mask & 0xF000U) >= 2 &&
+        hasAdjacentLineSensors(mask);
+    directLeftEdgeFrames = isolatedLeft
+        ? (uint8_t)(directLeftEdgeFrames < EARLY_TURN_DIRECT_EDGE_FRAMES
+            ? directLeftEdgeFrames + 1 : EARLY_TURN_DIRECT_EDGE_FRAMES) : 0;
+    directRightEdgeFrames = isolatedRight
+        ? (uint8_t)(directRightEdgeFrames < EARLY_TURN_DIRECT_EDGE_FRAMES
+            ? directRightEdgeFrames + 1 : EARLY_TURN_DIRECT_EDGE_FRAMES) : 0;
+    if (directLeftEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) return -1;
+    if (directRightEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) return 1;
+
+    // Retain old centroid-trend rules for narrow unambiguous lines.
+    if (blackCount > 6 || oppositeEdges) {
         edgeLeftSeeded = edgeRightSeeded = false;
         edgeLeftFrames = edgeRightFrames = 0;
         return 0;
