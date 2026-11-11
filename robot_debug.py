@@ -218,6 +218,10 @@ class App(tk.Tk):
         self.map2_sensor_profile = ([1000, 2000, 3000], [0xFFFF] * 4)
         self.map2_sensor_confirmed = False
         self.map2_sensor_pending = None
+        self.map2_sensor_pending_at = None
+        self.map2_sensor_verify_retry = 0
+        self.map2_sensor_read_pending_at = None
+        self.map2_sensor_read_requested = False
         self.map2_sensor_editor_refresh = None
         self.map2_sensor_status = tk.StringVar(value="MAP 2 mắt PID: chờ ESP32")
         self.map2_sensor_window = None
@@ -345,7 +349,7 @@ class App(tk.Tk):
                        side="left", fill="x", expand=True)
         self.map2_sensor_read_btn = ttk.Button(
             map2_sensor_bar, text="Đọc từ ESP32",
-            command=lambda: self.send_command("MAP_SENSOR_PROFILE_V2:2"))
+            command=lambda: self.read_map2_sensor_profile(overwrite_editor=True))
         self.map2_sensor_read_btn.pack(side="right")
 
         map3_sensor_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
@@ -773,7 +777,11 @@ class App(tk.Tk):
         self.send_command("SENSOR_PROFILE")
         self.map2_sensor_confirmed = False
         self.map2_sensor_pending = None
-        self.send_command("MAP_SENSOR_PROFILE_V2:2")
+        self.map2_sensor_pending_at = None
+        self.map2_sensor_verify_retry = 0
+        self.map2_sensor_read_pending_at = None
+        self.map2_sensor_read_requested = False
+        self.read_map2_sensor_profile()
         for map_id in (1, 2, 3):
             self.read_map_speed_profile(map_id)
         self.map3_sensor_confirmed = False
@@ -804,6 +812,10 @@ class App(tk.Tk):
         self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
         self.map2_sensor_confirmed = False
         self.map2_sensor_pending = None
+        self.map2_sensor_pending_at = None
+        self.map2_sensor_verify_retry = 0
+        self.map2_sensor_read_pending_at = None
+        self.map2_sensor_read_requested = False
         self.map2_sensor_status.set("MAP 2 mắt PID: mất kết nối ESP32")
         self.map3_sensor_confirmed = False
         self.map3_sensor_status.set("MAP 3 mắt PID: mất kết nối ESP32")
@@ -845,6 +857,16 @@ class App(tk.Tk):
             self.log(f"Lỗi gửi: {exc}")
             self.disconnect()
             return False
+
+    def read_map2_sensor_profile(self, overwrite_editor=False):
+        """Request actual Map 2 profile; explicit Read may replace unsaved UI edits."""
+        if not self.send_command("MAP_SENSOR_PROFILE_V2:2"):
+            return False
+        self.map2_sensor_read_pending_at = time.monotonic()
+        self.map2_sensor_read_requested = (
+            self.map2_sensor_read_requested or overwrite_editor)
+        self.map2_sensor_status.set("MAP 2 mắt PID: đang đọc cấu hình từ ESP32...")
+        return True
 
     def _can_reset_encoder(self):
         return (self.reader is not None and self.reader.is_alive()
@@ -1302,8 +1324,8 @@ class App(tk.Tk):
         def read_profile():
             if self.map2_sensor_pending is not None:
                 feedback.set("Đang chờ ESP32 xác nhận cấu hình vừa gửi.")
-            elif self.send_command("MAP_SENSOR_PROFILE_V2:2"):
-                feedback.set("Đang đọc cấu hình MAP 2 từ ESP32...")
+            elif self.read_map2_sensor_profile(overwrite_editor=True):
+                feedback.set("Đang đọc lại từ ESP32; sẽ thay các chỉnh sửa chưa áp dụng.")
             else:
                 feedback.set("Chưa kết nối Bluetooth SPP.")
 
@@ -1341,6 +1363,10 @@ class App(tk.Tk):
                 str(part) for part in pairs)
             if self.send_command(command):
                 self.map2_sensor_pending = (list(ticks), list(masks))
+                self.map2_sensor_pending_at = time.monotonic()
+                self.map2_sensor_verify_retry = 0
+                self.map2_sensor_read_pending_at = None
+                self.map2_sensor_read_requested = False
                 self.map2_sensor_confirmed = False
                 dirty[0] = False
                 self.map2_sensor_status.set("MAP 2 mắt PID: chờ ESP32 đọc lại cấu hình...")
@@ -1356,10 +1382,10 @@ class App(tk.Tk):
             self.map2_sensor_editor_refresh = None
             win.destroy()
 
-        def refresh():
-            if win.winfo_exists() and not dirty[0]:
+        def refresh(force=False):
+            if win.winfo_exists() and (force or not dirty[0]):
                 populate()
-                feedback.set("Đã nhận cấu hình MAP 2 từ ESP32.")
+                feedback.set("Đã nạp cấu hình MAP 2 thực tế từ ESP32.")
 
         self.map2_sensor_editor_refresh = refresh
         actions = tk.Frame(win, bg=PANEL, padx=12, pady=8)
@@ -2090,7 +2116,12 @@ class App(tk.Tk):
                     pending = self.map2_sensor_pending
                     matches = (pending is None or
                                (pending[0] == ticks and pending[1] == masks))
+                    force_refresh = self.map2_sensor_read_requested
                     self.map2_sensor_pending = None
+                    self.map2_sensor_pending_at = None
+                    self.map2_sensor_verify_retry = 0
+                    self.map2_sensor_read_pending_at = None
+                    self.map2_sensor_read_requested = False
                     self.map2_sensor_confirmed = matches
                     if matches:
                         self.map2_sensor_status.set(
@@ -2101,20 +2132,39 @@ class App(tk.Tk):
                             "MAP 2 mắt PID: phản hồi ESP32 KHÁC cấu hình gửi")
                     if self.map2_sensor_editor_refresh is not None:
                         try:
-                            self.map2_sensor_editor_refresh()
+                            self.map2_sensor_editor_refresh(force_refresh)
                         except tk.TclError:
                             self.map2_sensor_editor_refresh = None
             except (ValueError, IndexError) as exc:
                 self.map2_sensor_confirmed = False
                 self.map2_sensor_pending = None
+                self.map2_sensor_pending_at = None
+                self.map2_sensor_verify_retry = 0
+                self.map2_sensor_read_pending_at = None
+                self.map2_sensor_read_requested = False
                 self.map2_sensor_status.set(
                     "MAP 2 mắt PID: dữ liệu trả về không hợp lệ")
                 self.log(f"MAP 2 sensor profile readback error: {exc}")
         elif message.startswith("ERR: MAP_SENSOR_PROFILE_V2_"):
             self.map2_sensor_confirmed = False
             self.map2_sensor_pending = None
+            self.map2_sensor_pending_at = None
+            self.map2_sensor_verify_retry = 0
+            self.map2_sensor_read_pending_at = None
+            self.map2_sensor_read_requested = False
+            self.map2_sensor_status.set(f"MAP 2 mắt PID: ESP32 từ chối — {message}")
+        elif (message.startswith("ERR: UNKNOWN_COMMAND")
+              and "MAP_SENSOR_PROFILE_V2" in message):
+            self.map2_sensor_confirmed = False
+            self.map2_sensor_pending = None
+            self.map2_sensor_pending_at = None
+            self.map2_sensor_verify_retry = 0
+            self.map2_sensor_read_pending_at = None
+            self.map2_sensor_read_requested = False
             self.map2_sensor_status.set(
-                "MAP 2 mắt PID: ESP32 từ chối — xem Terminal")
+                "MAP 2: firmware chưa hỗ trợ V2; nạp ESP32 từ mainHighSpeedv7.")
+            self.log("MAP2: ESP32 đang chạy firmware cũ (UNKNOWN_COMMAND). "
+                     "Cần build/upload firmware mainHighSpeedv7, không chỉ git pull.")
         m2 = re.fullmatch(
             r"MAP2_SENSOR_PROFILE T1=(\d+) T2=(\d+) T3=(\d+) "
             r"M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) "
@@ -2562,6 +2612,35 @@ class App(tk.Tk):
             self.update_view(last)
         now = time.monotonic()
         self.update_run_timer_display(now)
+        # A successful serial write is NOT proof that the ESP32 accepted the
+        # new profile. Retry one explicit readback before failing a write.
+        if (self.map2_sensor_pending is not None and
+                self.map2_sensor_pending_at is not None and
+                now - self.map2_sensor_pending_at >= 2.5):
+            if self.map2_sensor_verify_retry == 0:
+                self.map2_sensor_verify_retry = 1
+                self.map2_sensor_pending_at = now
+                self.log("MAP 2 mắt PID: thiếu ACK; gửi yêu cầu đọc lại để đối chiếu.")
+                self.send_command("MAP_SENSOR_PROFILE_V2:2")
+            else:
+                self.map2_sensor_pending = None
+                self.map2_sensor_pending_at = None
+                self.map2_sensor_verify_retry = 0
+                self.map2_sensor_read_pending_at = None
+                self.map2_sensor_confirmed = False
+                self.map2_sensor_status.set(
+                    "MAP 2 mắt PID: không có ACK. Kiểm tra firmware v7 trên ESP32.")
+                self.log("MAP 2: timeout xác nhận ghi cấu hình; chưa coi là đã áp dụng.")
+        if (self.map2_sensor_pending is None and
+                self.map2_sensor_read_pending_at is not None and
+                now - self.map2_sensor_read_pending_at >= 3.0):
+            self.map2_sensor_read_pending_at = None
+            self.map2_sensor_read_requested = False
+            self.map2_sensor_confirmed = False
+            self.map2_sensor_status.set(
+                "MAP 2: không nhận phản hồi V2 từ ESP32; kiểm tra firmware và SPP.")
+            self.log("MAP 2: timeout đọc MAP_SENSOR_PROFILE_V2:2. "
+                     "Kiểm tra ESP32 đã flash v7 hay chưa.")
         if (self.hs_peak_pending is not None and self.hs_peak_pending_at is not None
                 and now - self.hs_peak_pending_at >= 3.0):
             expected = self.hs_peak_pending
