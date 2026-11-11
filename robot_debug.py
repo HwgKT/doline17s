@@ -313,8 +313,6 @@ class App(tk.Tk):
                    font=("Consolas", 8)).pack(side="left", padx=(5, 0))
         self.label(diag_bar, textvariable=self.loop_debug, fg=CYAN, bg=PANEL,
                    font=("Consolas", 9, "bold")).pack(anchor="w", padx=8, pady=(1, 0))
-        self.label(diag_bar, textvariable=self.high_speed_status, fg=AMBER, bg=PANEL,
-                   font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.route_status, fg=CYAN, bg=PANEL,
                    font=("Consolas", 8, "bold")).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
@@ -363,7 +361,7 @@ class App(tk.Tk):
         self.map3_sensor_read_btn.pack(side="right")
 
         # Calibration is a prerequisite for START. Keep its controls visible at
-        # minimum window size rather than below the non-scrollable HS_PEAK panel.
+        # minimum window size rather than below the control panel.
         cal_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
         cal_bar.pack(fill="x", padx=8, pady=(0, 2))
         self.label(cal_bar, "Calibration — 16 mắt / NVS", bg=PANEL,
@@ -525,36 +523,6 @@ class App(tk.Tk):
             var = tk.StringVar(value=initial)
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
-
-        # MAP 1: HS_PEAK becomes straight-line BASE from 10500 ticks; other maps unchanged.
-        hs_row = tk.Frame(panel, bg=PANEL)
-        hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK (10500+)", bg=PANEL,
-                   font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
-        self.label(hs_row, textvariable=self.hs_peak_value_text,
-                   bg=PANEL, fg=CYAN, font=("Consolas", 9),
-                   anchor="e").pack(side="right")
-        self.hs_peak_slider = ttk.Scale(
-            hs_row, from_=100, to=255, variable=self.hs_peak_var,
-            command=self.preview_hs_peak)
-        self.hs_peak_slider.pack(side="left", fill="x", expand=True, padx=(4, 6))
-        hs_actions = tk.Frame(panel, bg=PANEL)
-        hs_actions.pack(fill="x", pady=(0, 1))
-        self.hs_peak_widgets = [self.hs_peak_slider]
-        for val in (180, 220, 255):
-            button = ttk.Button(hs_actions, text=str(val), width=4,
-                                command=lambda v=val: self.preset_hs_peak(v))
-            button.pack(side="left", expand=True, padx=1)
-            self.hs_peak_widgets.append(button)
-        self.hs_peak_apply_btn = ttk.Button(
-            hs_actions, text="Áp dụng HS", width=10, command=self.apply_hs_peak)
-        self.hs_peak_apply_btn.pack(side="left", expand=True, padx=1)
-        self.hs_peak_read_btn = ttk.Button(
-            hs_actions, text="Đọc HS", width=7, command=self.read_hs_peak)
-        self.hs_peak_read_btn.pack(side="left", expand=True, padx=1)
-        self.label(panel, textvariable=self.hs_peak_feedback,
-                   bg=PANEL, fg=MUTED, font=("Segoe UI", 8),
-                   anchor="w").pack(fill="x", pady=(0, 1))
 
         map_base_row = tk.Frame(panel, bg=PANEL)
         map_base_row.pack(fill="x", pady=(3, 2))
@@ -798,7 +766,6 @@ class App(tk.Tk):
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
-        self.send_command("HS_PEAK")
         self.send_command("ROUTE_LOCK")
         self.sensor_profile_confirmed = False
         self.send_command("SENSOR_PROFILE")
@@ -1511,9 +1478,6 @@ class App(tk.Tk):
 
     def apply_pwm(self):
         pwm = max(0, min(255, round(self.pwm_var.get())))
-        if self.hs_peak_confirmed is not None and pwm > self.hs_peak_confirmed:
-            self.log(f"BASE {pwm} vượt HS_PEAK {self.hs_peak_confirmed}; tăng HS_PEAK trước.")
-            return
         if self.send_command(f"V:{pwm}"):
             self.pid_vars["Base"].set(str(pwm))
 
@@ -1531,9 +1495,6 @@ class App(tk.Tk):
                 raise ValueError("Kp, Ki, Kd phải là số hữu hạn từ 0 đến 50")
             if str(base) != base_s or not 0 <= base <= 255:
                 raise ValueError("Base phải là số nguyên từ 0 đến 255")
-            if self.hs_peak_confirmed is not None and base > self.hs_peak_confirmed:
-                raise ValueError(
-                    f"BASE={base} vượt HS_PEAK={self.hs_peak_confirmed}; tăng HS trước")
         except ValueError as exc:
             self.log(f"Thông số PID không hợp lệ: {exc}")
             return False
@@ -1585,9 +1546,6 @@ class App(tk.Tk):
                      and not self.auto_running and self.run_csv.active is None
                      and self.stop_ack_deadline is None
                      and not self.stop_verify_pending
-                     and self.hs_peak_pending is None
-                     and self.hs_peak_confirmed is not None
-                     and not self.hs_peak_dirty
                      and self.calibration_ok and self.selected_map is not None
                      and self.map_profile_pending is None
                      and self.map_profile_confirmed.get(self.selected_map, False)
@@ -1611,16 +1569,6 @@ class App(tk.Tk):
         if hasattr(self, "reset_encoder_btn"):
             self.reset_encoder_btn.configure(
                 state="normal" if self._can_reset_encoder() else "disabled")
-        if hasattr(self, "hs_peak_widgets"):
-            editable = self._can_edit_hs_peak() and self.hs_peak_pending is None
-            for widget in self.hs_peak_widgets:
-                widget.configure(state="normal" if editable else "disabled")
-            self.hs_peak_apply_btn.configure(
-                state="normal" if editable else "disabled")
-            self.hs_peak_read_btn.configure(
-                state="normal" if connected and self.hs_peak_pending is None
-                else "disabled")
-
     def set_auto_running(self, running):
         now = time.monotonic()
         if running and not self.auto_running:
@@ -1674,10 +1622,6 @@ class App(tk.Tk):
                 or self.map_profile_pending is not None):
             self.log("Chưa xác nhận cấu hình BASE của MAP đang chọn.")
             self.read_map_speed_profile(self.selected_map)
-            return
-        if (self.hs_peak_confirmed is None or self.hs_peak_pending is not None
-                or self.hs_peak_dirty):
-            self.log("Chưa xác nhận HS_PEAK: chọn Áp dụng HS hoặc Đọc HS trước START.")
             return
         if (self.estop_latched is not False or self.auto_running or self.start_pending
                 or self.stop_ack_deadline is not None or self.stop_verify_pending):
