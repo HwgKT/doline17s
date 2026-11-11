@@ -326,12 +326,13 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 // Map 1 eight-segment open-loop PWM BASE schedule, using monotonic
 // encoder progress relative to AUTO start. X1..X7 are estimated landmarks
 // from track geometry and recorded runs (including a ~15766-tick finish).
-// Especially X6/X7 require on-track validation before competition.
+// X4 is moved ahead of the 10.5k right turn; X5 holds low speed through reacquisition;
+// X6 releases only after the dashed-line/U-turn region.
 constexpr int32_t MAP1_X_TICKS[7] = {
-    3800, 7400, 8350, 10500, 11300, 12800, 15000
+    3800, 7800, 8350, 10300, 11400, 12800, 15000
 };
 uint8_t map1SegmentPwm[8] = {
-    140, 140, 140, 240, 210, 240, 210, 255
+    140, 140, 140, 240, 140, 140, 210, 255
 };
 
 static float map1CappedBase(int32_t progress) {
