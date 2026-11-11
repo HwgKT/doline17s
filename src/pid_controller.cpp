@@ -178,15 +178,21 @@ uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
-// Map 2: four independent PID eye groups and three monotonic tick thresholds.
-// Defaults all 16 eyes in every stage; does not affect physical observations.
-int32_t map2SensorTickEnds[3] = {1000, 2000, 3000};
-uint16_t map2SensorMasks[4] = {0xFFFFU,0xFFFFU,0xFFFFU,0xFFFFU};
+// Map 2: 1..8 independent PID masks, with N-1 ordered tick boundaries.
+// The initial four-stage profile is retained for backward compatibility.
+int32_t map2SensorTickEnds[PID_MAP2_SENSOR_MAX_STAGES - 1] = {
+    1000, 2000, 3000
+};
+uint16_t map2SensorMasks[PID_MAP2_SENSOR_MAX_STAGES] = {
+    0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU,
+    0xFFFFU, 0xFFFFU, 0xFFFFU, 0xFFFFU
+};
+uint8_t map2SensorStageCount = 4;
 int32_t map2SensorMaxTravel = 0;
 // Map2 tick boundaries are checkpoints: pause forward motion, align to line,
 // require 10 ms of stable centered line + low encoder motion, then switch mask.
 // No sleeping inside PID loop. Map1 and Map3 are unaffected.
-uint8_t map2SensorActiveStage = 0; // 0..3, latched until checkpoint success.
+uint8_t map2SensorActiveStage = 0; // 0..stageCount-1, latched at each checkpoint.
 uint8_t map2HoldState = 0; // 0=RUN, 1=ALIGN, 2=HOLD, 3=FAULT.
 // Map 3: continuous PID sensor masks; all physical sensor observations remain unmasked.
 int32_t map3SensorTickEnds[3] = {730, 1960, 2350};
@@ -813,20 +819,46 @@ void pid_get_map_speed_profile_v2(uint8_t mapId,uint8_t *stageCount,
     if(basePwm) for(uint8_t i=0;i<count;++i)
         basePwm[i]=mapSegmentPwm[index][i];
 }
-// Set the Map 1 PID sensor selection profile only while stopped.
-// Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
-bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks) {
-    if (autoMode || !ticks || !masks ||
-        ticks[0] <= 0 || ticks[1] <= ticks[0] ||
-        ticks[2] <= ticks[1] || ticks[2] > 10000000) return false;
-    for (uint8_t i=0;i<4;++i) if (!masks[i]) return false;
-    for (uint8_t i=0;i<3;++i) map2SensorTickEnds[i] = ticks[i];
-    for (uint8_t i=0;i<4;++i) map2SensorMasks[i] = masks[i];
+// Mask changes affect only the Map 2 line-PID measurement, never physical
+// ADC/START/FINISH/corner evidence. The checkpoint FSM remains unchanged.
+bool pid_set_map2_sensor_profile_v2(uint8_t stageCount, const int32_t *endTicks,
+                                    const uint16_t *masks) {
+    if (autoMode || stageCount < 1 || stageCount > PID_MAP2_SENSOR_MAX_STAGES ||
+        !masks || (stageCount > 1 && !endTicks)) return false;
+    for (uint8_t i = 0; i + 1U < stageCount; ++i) {
+        if (endTicks[i] <= 0 || endTicks[i] > 10000000L ||
+            (i > 0 && endTicks[i] <= endTicks[i - 1U])) return false;
+    }
+    for (uint8_t i = 0; i < stageCount; ++i)
+        if (masks[i] == 0U) return false;
+    for (uint8_t i = 0; i + 1U < stageCount; ++i)
+        map2SensorTickEnds[i] = endTicks[i];
+    for (uint8_t i = 0; i < stageCount; ++i)
+        map2SensorMasks[i] = masks[i];
+    map2SensorStageCount = stageCount;
+    map2SensorActiveStage = 0;
+    map2SensorMaxTravel = 0;
+    map2HoldState = 0;
+    map2HoldStartMs = map2StableSinceMs = 0;
     return true;
 }
+void pid_get_map2_sensor_profile_v2(uint8_t *stageCount, int32_t *endTicks,
+                                    uint16_t *masks) {
+    if (stageCount) *stageCount = map2SensorStageCount;
+    if (endTicks)
+        for (uint8_t i = 0; i + 1U < map2SensorStageCount; ++i)
+            endTicks[i] = map2SensorTickEnds[i];
+    if (masks)
+        for (uint8_t i = 0; i < map2SensorStageCount; ++i)
+            masks[i] = map2SensorMasks[i];
+}
+// Backward-compatible four-stage setter/getter for existing SPP clients.
+bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks) {
+    return pid_set_map2_sensor_profile_v2(4, ticks, masks);
+}
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks) {
-    if (ticks) for (uint8_t i=0;i<3;++i) ticks[i]=map2SensorTickEnds[i];
-    if (masks) for (uint8_t i=0;i<4;++i) masks[i]=map2SensorMasks[i];
+    if (ticks) for (uint8_t i = 0; i < 3; ++i) ticks[i] = map2SensorTickEnds[i];
+    if (masks) for (uint8_t i = 0; i < 4; ++i) masks[i] = map2SensorMasks[i];
 }
 uint8_t pid_get_map2_hold_state(void) { return map2HoldState; }
 uint8_t pid_get_map2_sensor_stage(void) {
@@ -1349,7 +1381,7 @@ static bool map2HoldLineStep(float position, uint8_t blackCount, bool good) {
     }
     if ((uint32_t)(now-map2StableSinceMs) < MAP2_STABLE_LINE_MS) return true;
     // Completed checkpoint. Switch stage only AFTER stable centered line.
-    if (map2SensorActiveStage < 3) ++map2SensorActiveStage;
+    if (map2SensorActiveStage + 1U < map2SensorStageCount) ++map2SensorActiveStage;
     map2HoldState = 0;
     map2StableSinceMs = 0;
     turnState = TURN_NONE;
@@ -1402,7 +1434,7 @@ void pid_line_follow_step(void) {
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
     if (selectedMap == 2 && map2HoldState == 0 &&
-        map2SensorActiveStage < 3 && finishDetectionArmed &&
+        map2SensorActiveStage + 1U < map2SensorStageCount && finishDetectionArmed &&
         currentCase == LINE_CASE_NORMAL_PID && lineLocked &&
         turnState == TURN_NONE &&
         map2SensorMaxTravel >= map2SensorTickEnds[map2SensorActiveStage]) {
