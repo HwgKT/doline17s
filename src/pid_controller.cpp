@@ -142,7 +142,11 @@ constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // Fixed per-map BASE: no encoder-position scheduler, no late BOOST, and
 // no per-section PWM caps. The independent wheel PI remains active.
+// Map 1 only: arm the late BASE boost after 10,500 forward-progress ticks.
+constexpr int32_t MAP1_LATE_BOOST_START_TICKS = 10500;
+constexpr float MAP1_LATE_BOOST_CENTER_ERROR = 15.0f;
 int32_t map1MaxProgress = 0;
+bool map1LateBoostEngaged = false;
 // Map 01 route lock assumes a repeatable START pose; enabled by default.
 bool map1RouteLockEnabled = false; // Temporarily disabled by default for PID/sensor-mask testing; ROUTE_LOCK:1 to enable.
 map1route::Tracker map1Route;
@@ -469,6 +473,7 @@ static void resetLineTracking() {
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
+    map1LateBoostEngaged = false;
     map1SensorMaxTicks = 0;
     map2MaxProgress = 0;
     map2SensorMaxTravel = 0;
@@ -749,7 +754,10 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask3) *mask3 = map1SensorStageMasks[2];
 }
 uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
-int32_t pid_get_map1_late_boost_start(void) { return 0; }
+int32_t pid_get_map1_late_boost_start(void) {
+    return selectedMap == 1 ? MAP1_LATE_BOOST_START_TICKS : 0;
+}
+bool pid_is_map1_late_boost_engaged(void) { return map1LateBoostEngaged; }
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
         return false;
@@ -1380,9 +1388,20 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Fixed BASE across all encoder ticks. Steering still comes from
-        // the line PID; wheel PI later translates speed targets into PWM.
+        // Map 1 only: once 10,500 forward-progress ticks have been reached,
+        // boost the base PWM to HS_PEAK on a confirmed centered line.
+        // The boost remains armed until the next AUTO start, but is applied
+        // only while the line is centered; corners retain the configured BASE.
+        // Maps 2 and 3 always keep the regular BASE.
+        const bool map1ReadyForBoost = selectedMap == 1 &&
+            map1MaxProgress >= MAP1_LATE_BOOST_START_TICKS;
+        const bool centeredForBoost = pidMeasurementGood &&
+            fabsf(pidPosition) <= MAP1_LATE_BOOST_CENTER_ERROR;
+        if (map1ReadyForBoost && centeredForBoost)
+            map1LateBoostEngaged = true;
         float base = (float)pidConfig.baseSpeed;
+        if (map1ReadyForBoost && centeredForBoost)
+            base = (float)highSpeedPeakPwm;
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
