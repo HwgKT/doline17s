@@ -1220,8 +1220,9 @@ class App(tk.Tk):
             bg=PANEL, fg=MUTED, wraplength=1250, justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 4))
         self.label(
-            win, "MAP 2 PID THUẦN đang BẬT: mắt/tick và checkpoint "
-            "được lưu nhưng KHÔNG sử dụng cho điều khiển.",
+            win, "MAP 2 PID THUẦN: 16 mắt, PWM mỗi bánh 0..255 (không lùi); "
+            "START từ vạch đen, tiến BASE đến khi nhận line; "
+            "mắt/tick và checkpoint không dùng.",
             bg=PANEL, fg=AMBER, wraplength=1250, justify="left"
         ).pack(anchor="w", padx=12, pady=(0, 4))
         stages_frame = tk.Frame(win, bg=PANEL, padx=8)
@@ -2116,12 +2117,18 @@ class App(tk.Tk):
         if message.startswith("MAP2_PID_TEST:"):
             enabled = re.search(r"\bENABLED=(\d+)\b", message)
             base = re.search(r"\bBASE=(\d+)\b", message)
-            if enabled and enabled.group(1) == "1":
+            mode_current = ("START=BASE_UNTIL_LINE" in message and
+                            "PWM=0..255" in message)
+            if enabled and enabled.group(1) == "1" and mode_current:
                 self.map2_test_status.set(
                     f"MAP 2 PID THUẦN: ESP32 ĐÃ XÁC NHẬN | 16 mắt | "
                     f"BASE={base.group(1) if base else '?'} | "
-                    "không tick, checkpoint, cua/SEARCH | "
-                    "BASE mặc định v4=130 | đặt xe trên line")
+                    "bánh chỉ tiến/dừng | START đen: tiến BASE đến line | "
+                    "không checkpoint/SEARCH")
+            elif enabled and enabled.group(1) == "1":
+                self.map2_test_status.set(
+                    "MAP 2 PID THUẦN: firmware cũ; chưa hỗ trợ "
+                    "START từ vạch đen và chặn đảo chiều. Hãy nạp lại v7.")
             else:
                 self.map2_test_status.set(
                     "MAP 2 PID THUẦN: ESP32 báo chế độ này chưa được bật.")
