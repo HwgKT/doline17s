@@ -1615,7 +1615,7 @@ class App(tk.Tk):
             self.map3_profile_status.set(
                 "MAP 3: ESP32 từ chối cấu hình — xem Terminal")
         map3_stage = re.fullmatch(
-            r"MAP3_STAGE sensor=(\d+) base=(\d+) runEnc=(-?\d+) "
+            r"MAP3_STAGE sensor=(\d+) base=(\d+) travel=(\d+) "
             r"basePWM=(\d+) t_ms=(\d+)", message)
         if map3_stage:
             self.map3_profile_status.set(
