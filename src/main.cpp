@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -178,6 +178,38 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // MAP 2: four masks, three tick boundaries; HEX masks like SENSOR_PROFILE.
+  if(s=="MAP2_SENSOR_PROFILE"){
+    int32_t t[3]={}; uint16_t m[4]={};
+    pid_get_map2_sensor_profile(t,m);
+    char b[165];
+    snprintf(b,sizeof(b),
+      "MAP2_SENSOR_PROFILE T1=%ld T2=%ld T3=%ld M1=%04X M2=%04X M3=%04X M4=%04X STAGE=%u",
+      (long)t[0],(long)t[1],(long)t[2],
+      (unsigned)m[0],(unsigned)m[1],(unsigned)m[2],(unsigned)m[3],
+      (unsigned)pid_get_map2_sensor_stage());
+    reply(b);return;
+  }
+  if(s.startsWith("MAP2_SENSOR_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP2_SENSOR_PROFILE_REQUIRES_STOPPED");return;
+    }
+    long t1=0,t2=0,t3=0;
+    unsigned m1=0,m2=0,m3=0,m4=0;
+    char tail=0;
+    const int n=sscanf(s.c_str()+20,"%ld,%ld,%ld,%x,%x,%x,%x %c",
+      &t1,&t2,&t3,&m1,&m2,&m3,&m4,&tail);
+    const int32_t ticks[3]={(int32_t)t1,(int32_t)t2,(int32_t)t3};
+    const uint16_t masks[4]={(uint16_t)m1,(uint16_t)m2,
+                             (uint16_t)m3,(uint16_t)m4};
+    if(n!=7 || t1<=0 || t2<=t1 || t3<=t2 || t3>10000000L ||
+       m1==0 || m2==0 || m3==0 || m4==0 ||
+       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU || m4>0xFFFFU ||
+       !pid_set_map2_sensor_profile(ticks,masks)){
+      reply("ERR: MAP2_SENSOR_PROFILE_INVALID");return;
+    }
+    command("MAP2_SENSOR_PROFILE");return;
+  }
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
   // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
   if(s=="SENSOR_PROFILE"){
