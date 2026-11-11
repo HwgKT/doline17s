@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 MAP1_SPEED_PROFILE MAP1_SPEED_PROFILE:x1,...,x7,b1,...,b8 MAP1_BASE_PROFILE MAP1_BASE_PROFILE:b1,...,b8 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 MAP_SPEED_PROFILE:map MAP_SPEED_PROFILE:map,x1,...,x7,b1,...,b8 MAP1_SPEED_PROFILE MAP1_SPEED_PROFILE:x1,...,x7,b1,...,b8 MAP1_BASE_PROFILE MAP1_BASE_PROFILE:b1,...,b8 MAP_SENSOR_PROFILE:map MAP_SENSOR_PROFILE:map,t1,t2,m1,m2,m3 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -157,6 +157,62 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Independent profile for MAP 1/2/3.
+  // Read: MAP_SPEED_PROFILE:<mapId>
+  // Write: MAP_SPEED_PROFILE:<mapId>,x1,...,x7,b1,...,b8
+  if(s.startsWith("MAP_SPEED_PROFILE:")){
+    const String payload=s.substring(18);
+    if(payload.indexOf(',')<0){
+      const int mapId=payload.toInt();
+      if(payload!=String(mapId) || mapId<1 || mapId>3){
+        reply("ERR: MAP_SPEED_PROFILE_MAP_RANGE_1_3");return;
+      }
+      int32_t x[7]={0};
+      uint8_t base[8]={0};
+      pid_get_map_speed_profile((uint8_t)mapId,x,base);
+      char b[240];
+      snprintf(b,sizeof(b),
+        "MAP_SPEED_PROFILE MAP=%d X1=%ld X2=%ld X3=%ld X4=%ld X5=%ld X6=%ld X7=%ld "
+        "B1=%u B2=%u B3=%u B4=%u B5=%u B6=%u B7=%u B8=%u",
+        mapId,(long)x[0],(long)x[1],(long)x[2],(long)x[3],(long)x[4],(long)x[5],(long)x[6],
+        (unsigned)base[0],(unsigned)base[1],(unsigned)base[2],(unsigned)base[3],
+        (unsigned)base[4],(unsigned)base[5],(unsigned)base[6],(unsigned)base[7]);
+      reply(b);return;
+    }
+
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP_SPEED_PROFILE_REQUIRES_STOPPED");return;
+    }
+    int value[16]={0};
+    char trailing=0;
+    const int count=sscanf(payload.c_str(),
+      "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d %c",
+      &value[0],&value[1],&value[2],&value[3],
+      &value[4],&value[5],&value[6],&value[7],
+      &value[8],&value[9],&value[10],&value[11],
+      &value[12],&value[13],&value[14],&value[15],&trailing);
+    if(count!=16){
+      reply("ERR: MAP_SPEED_PROFILE_FORMAT");return;
+    }
+    const int mapId=value[0];
+    if(mapId<1 || mapId>3 || pid_get_selected_map()!=mapId){
+      reply("ERR: MAP_SPEED_PROFILE_SELECT_REQUESTED_MAP_FIRST");return;
+    }
+    int32_t x[7];
+    uint8_t base[8];
+    for(uint8_t i=0;i<7;++i) x[i]=(int32_t)value[i+1];
+    for(uint8_t i=0;i<8;++i){
+      if(value[i+8]<45 || value[i+8]>255){
+        reply("ERR: MAP_SPEED_PROFILE_BASE_RANGE_45_255");return;
+      }
+      base[i]=(uint8_t)value[i+8];
+    }
+    if(!pid_set_map_speed_profile((uint8_t)mapId,x,base)){
+      reply("ERR: MAP_SPEED_PROFILE_INVALID_TICKS_OR_STATE");return;
+    }
+    command(String("MAP_SPEED_PROFILE:")+String(mapId));return;
+  }
+
   // Full Map 1 speed profile: seven editable end-tick boundaries + eight BASE values.
   // Stage starts are implicit: 0, X1, X2, ... X7; stage 8 runs to FINISH.
   if(s=="MAP1_SPEED_PROFILE"){
@@ -248,6 +304,40 @@ void command(const String &raw) {
       reply("ERR: MAP1_BASE_PROFILE_REJECTED");return;
     }
     command("MAP1_BASE_PROFILE");return;
+  }
+
+  // Independent MAP sensor profiles; three PID-only masks per map.
+  if(s.startsWith("MAP_SENSOR_PROFILE:")){
+    const String payload=s.substring(19);
+    if(payload.indexOf(',')<0){
+      int mapId=payload.toInt();
+      if(payload!=String(mapId) || mapId<1 || mapId>3){
+        reply("ERR: MAP_SENSOR_PROFILE_MAP");return;
+      }
+      int32_t t1=0,t2=0;uint16_t m1=0,m2=0,m3=0;
+      pid_get_map_sensor_profile((uint8_t)mapId,&t1,&t2,&m1,&m2,&m3);
+      char b[145];
+      snprintf(b,sizeof(b),"MAP_SENSOR_PROFILE MAP=%d T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
+               mapId,(long)t1,(long)t2,(unsigned)m1,(unsigned)m2,(unsigned)m3);
+      reply(b);return;
+    }
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP_SENSOR_PROFILE_STOP_REQUIRED");return;
+    }
+    int mapId=0;long t1=0,t2=0;unsigned m1=0,m2=0,m3=0;char extra=0;
+    int n=sscanf(payload.c_str(),"%d,%ld,%ld,%x,%x,%x %c",
+                 &mapId,&t1,&t2,&m1,&m2,&m3,&extra);
+    if(n!=6){reply("ERR: MAP_SENSOR_PROFILE_FORMAT");return;}
+    if(mapId<1 || mapId>3 || pid_get_selected_map()!=mapId){
+      reply("ERR: MAP_SENSOR_PROFILE_SELECT_MAP");return;
+    }
+    if(t1<=0 || t2<=t1 || t2>10000000L ||
+       m1==0 || m2==0 || m3==0 || m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU ||
+       !pid_set_map_sensor_profile((uint8_t)mapId,(int32_t)t1,(int32_t)t2,
+                                   (uint16_t)m1,(uint16_t)m2,(uint16_t)m3)){
+      reply("ERR: MAP_SENSOR_PROFILE_INVALID");return;
+    }
+    command(String("MAP_SENSOR_PROFILE:")+String(mapId));return;
   }
 
   // Read/update all three Map 1 PID sensor masks without opening a terminal.

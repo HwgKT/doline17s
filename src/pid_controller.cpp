@@ -143,7 +143,8 @@ constexpr uint32_t MAP1_REACQUIRE_HOLD_MS = 80;
 constexpr float MAP1_BASE_RISE_PWM_PER_SEC = 250.0f;
 constexpr float MAP1_BASE_FALL_PWM_PER_SEC = 500.0f;
 int32_t map1MaxProgress = 0;
-float map1ScheduledBase = 130.0f;
+int32_t mapProfileMaxProgress = 0;
+float mapScheduledBase = 130.0f;
 uint32_t map1LastUnsafeMs = 0;
 uint32_t map1CenteredSinceMs = 0;
 bool map1BoostActive = false;
@@ -163,17 +164,15 @@ static int32_t runEncoderProgress() {
     return (int32_t)(sum / 2);
 }
 
-// PID-only sensor selection for Map 1. Keep physical ADC/line bits unmasked
-// for START, FINISH, SEARCH, corner detection, and Route Lock observations.
-// Encoder origins are captured at AUTO start (pid_set_auto_mode).
-// User-configurable through SENSOR_PROFILE SPP commands while stopped.
-// Values persist across AUTO runs but return to defaults after reboot.
-int32_t map1SensorStage2Ticks = 650;
-int32_t map1SensorStage3Ticks = 1350;
-// Stage 1: S6-S15; stage 2: S0-S9; stage 3: all 16 sensors.
-uint16_t map1SensorStageMasks[3] = {0xFFC0U, 0x03FFU, 0xFFFFU};
-constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
-int32_t map1SensorMaxTicks = 0;
+// Per-MAP PID masks; physical line/ADC data are never masked.
+int32_t mapSensorThresholds[3][2]={{650,1350},{650,1350},{650,1350}};
+uint16_t mapSensorMasks[3][3]={
+    {0xFFC0U,0x03FFU,0xFFFFU},
+    {0xFFFFU,0xFFFFU,0xFFFFU},
+    {0xFFFFU,0xFFFFU,0xFFFFU}
+};
+constexpr uint16_t FULL_PID_SENSOR_MASK=0xFFFFU;
+int32_t mapSensorMaxTicks=0;
 
 static int32_t map1SensorTravelTicks() {
     int32_t left = 0, right = 0;
@@ -186,16 +185,14 @@ static int32_t map1SensorTravelTicks() {
     return average > INT32_MAX ? INT32_MAX : (int32_t)average;
 }
 
-static uint16_t map1PidSensorMask() {
-    if (selectedMap != 1 || !autoMode) return MAP1_SENSOR_MASK_STAGE3;
-    const int32_t traveled = map1SensorTravelTicks();
-    // A pivot or a temporary reversal must not reactivate a previous group.
-    if (traveled > map1SensorMaxTicks) map1SensorMaxTicks = traveled;
-    if (map1SensorMaxTicks < map1SensorStage2Ticks)
-        return map1SensorStageMasks[0];
-    if (map1SensorMaxTicks < map1SensorStage3Ticks)
-        return map1SensorStageMasks[1];
-    return map1SensorStageMasks[2];
+static uint16_t activePidSensorMask(){
+    if(!autoMode || selectedMap<1 || selectedMap>3) return FULL_PID_SENSOR_MASK;
+    const int32_t ticks=map1SensorTravelTicks();
+    if(ticks>mapSensorMaxTicks) mapSensorMaxTicks=ticks;
+    const uint8_t i=selectedMap-1U;
+    if(mapSensorMaxTicks<mapSensorThresholds[i][0]) return mapSensorMasks[i][0];
+    if(mapSensorMaxTicks<mapSensorThresholds[i][1]) return mapSensorMasks[i][1];
+    return mapSensorMasks[i][2];
 }
 
 // Compute only the PID measurement from enabled sensors. The original
@@ -328,35 +325,47 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 // from track geometry and recorded runs (including a ~15766-tick finish).
 // X4 is moved ahead of the 10.5k right turn; X5 holds low speed through reacquisition;
 // X6 releases only after the dashed-line/U-turn region.
-int32_t map1SegmentTicks[7] = {
-    3800, 7800, 8350, 10300, 11400, 12800, 15000
+// Independent eight-stage encoder/BASE profiles for MAP 1, MAP 2 and MAP 3.
+// X1..X7 are end boundaries; stage 8 continues from X7 to FINISH.
+// Maps 2/3 start with their previous constant BASE values, preserving behavior.
+int32_t mapSegmentTicks[3][7] = {
+    {3800, 7800, 8350, 10300, 11400, 12800, 15000},
+    {3800, 7800, 8350, 10300, 11400, 12800, 15000},
+    {3800, 7800, 8350, 10300, 11400, 12800, 15000}
 };
-uint8_t map1SegmentPwm[8] = {
-    140, 140, 140, 240, 140, 140, 210, 255
+uint8_t mapSegmentPwm[3][8] = {
+    {140, 140, 140, 240, 140, 140, 210, 255},
+    {160, 160, 160, 160, 160, 160, 160, 160},
+    {150, 150, 150, 150, 150, 150, 150, 150}
 };
 
-static float map1CappedBase(int32_t progress) {
+static float mapScheduledTarget(int32_t progress) {
+    if (selectedMap < 1 || selectedMap > 3)
+        return (float)pidConfig.baseSpeed;
+    const uint8_t mapIndex = (uint8_t)(selectedMap - 1U);
     uint8_t segment = 0;
-    while (segment < 7 && progress >= map1SegmentTicks[segment]) ++segment;
-    float target = (float)map1SegmentPwm[segment];
-    // Retain the existing opt-in route-lock safety cap.
-    if (map1Route.active) target = map1Route.baseCap(progress, target);
+    while (segment < 7 && progress >= mapSegmentTicks[mapIndex][segment])
+        ++segment;
+    float target = (float)mapSegmentPwm[mapIndex][segment];
+    // Retain the existing opt-in Map 1 route-lock safety cap.
+    if (selectedMap == 1 && map1Route.active)
+        target = map1Route.baseCap(progress, target);
     return target;
 }
 
-static float map1UpdateScheduledBase(int32_t progress, float absErr,
-                                     uint8_t blackCount, uint16_t mask, float dt) {
+static float mapUpdateScheduledBase(int32_t progress, float absErr,
+                                    uint8_t blackCount, uint16_t mask, float dt) {
     (void)absErr; (void)blackCount; (void)mask;
-    const float target = map1CappedBase(progress);
+    const float target = mapScheduledTarget(progress);
     // Smooth transitions; encoder progress is monotonic within each AUTO run.
-    const float rate = target > map1ScheduledBase
+    const float rate = target > mapScheduledBase
                      ? MAP1_BASE_RISE_PWM_PER_SEC : MAP1_BASE_FALL_PWM_PER_SEC;
     const float limit = rate * fminf(dt, 0.02f);
-    const float delta = target - map1ScheduledBase;
-    if (delta > limit) map1ScheduledBase += limit;
-    else if (delta < -limit) map1ScheduledBase -= limit;
-    else map1ScheduledBase = target;
-    return map1ScheduledBase;
+    const float delta = target - mapScheduledBase;
+    if (delta > limit) mapScheduledBase += limit;
+    else if (delta < -limit) mapScheduledBase -= limit;
+    else mapScheduledBase = target;
+    return mapScheduledBase;
 }
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
@@ -394,8 +403,9 @@ static void resetLineTracking() {
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
-    map1SensorMaxTicks = 0;
-    map1ScheduledBase = (float)pidConfig.baseSpeed;
+    mapProfileMaxProgress = 0;
+    mapSensorMaxTicks = 0;
+    mapScheduledBase = (float)pidConfig.baseSpeed;
     map1LastUnsafeMs = millis();
     map1CenteredSinceMs = 0;
     map1BoostActive = false;
@@ -472,7 +482,7 @@ void pid_set_tunings(float kp, float ki, float kd) {
 }
 void pid_set_base_speed(int16_t speed) {
     pidConfig.baseSpeed = speed < 0 ? 0 : (speed > 255 ? 255 : speed);
-    if (!autoMode) map1ScheduledBase = (float)pidConfig.baseSpeed;
+    if (!autoMode) mapScheduledBase = (float)pidConfig.baseSpeed;
 }
 void pid_set_auto_mode(bool enabled) {
     autoMode = enabled;
@@ -509,75 +519,90 @@ bool pid_select_map(uint8_t mapId) {
         highSpeedPeakPwm = MAP_DEFAULT_HS_PEAK_PWM;
     }
     selectedMap = mapId;
+    mapScheduledBase = (float)pidConfig.baseSpeed;
     return true;
 }
 uint8_t pid_get_selected_map(void) { return selectedMap; }
 
-// Set the Map 1 PID sensor selection profile only while stopped.
-// Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
-bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
-                                 uint16_t mask1, uint16_t mask2, uint16_t mask3) {
-    if (autoMode || stage2 <= 0 || stage3 <= stage2 ||
-        stage3 > 10000000 || !mask1 || !mask2 || !mask3) return false;
-    map1SensorStage2Ticks = stage2;
-    map1SensorStage3Ticks = stage3;
-    map1SensorStageMasks[0] = mask1;
-    map1SensorStageMasks[1] = mask2;
-    map1SensorStageMasks[2] = mask3;
+// Independent PID mask configurations for each MAP; all writes atomic while stopped.
+bool pid_set_map_sensor_profile(uint8_t mapId,int32_t t1,int32_t t2,
+                                uint16_t m1,uint16_t m2,uint16_t m3){
+    if(autoMode || mapId<1 || mapId>3 || selectedMap!=mapId ||
+       t1<=0 || t2<=t1 || t2>10000000 || !m1 || !m2 || !m3) return false;
+    uint8_t i=mapId-1U;
+    mapSensorThresholds[i][0]=t1;mapSensorThresholds[i][1]=t2;
+    mapSensorMasks[i][0]=m1;mapSensorMasks[i][1]=m2;mapSensorMasks[i][2]=m3;
     return true;
 }
-
-void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
-                                 uint16_t *mask1, uint16_t *mask2,
-                                 uint16_t *mask3) {
-    if (stage2) *stage2 = map1SensorStage2Ticks;
-    if (stage3) *stage3 = map1SensorStage3Ticks;
-    if (mask1) *mask1 = map1SensorStageMasks[0];
-    if (mask2) *mask2 = map1SensorStageMasks[1];
-    if (mask3) *mask3 = map1SensorStageMasks[2];
+void pid_get_map_sensor_profile(uint8_t mapId,int32_t *t1,int32_t *t2,
+                                uint16_t *m1,uint16_t *m2,uint16_t *m3){
+    if(mapId<1 || mapId>3) return;
+    uint8_t i=mapId-1U;
+    if(t1) *t1=mapSensorThresholds[i][0];
+    if(t2) *t2=mapSensorThresholds[i][1];
+    if(m1) *m1=mapSensorMasks[i][0];
+    if(m2) *m2=mapSensorMasks[i][1];
+    if(m3) *m3=mapSensorMasks[i][2];
+}
+// Retain the legacy MAP 1 commands for existing users.
+bool pid_set_map1_sensor_profile(int32_t t1,int32_t t2,
+                                 uint16_t m1,uint16_t m2,uint16_t m3){
+    return pid_set_map_sensor_profile(1,t1,t2,m1,m2,m3);
+}
+void pid_get_map1_sensor_profile(int32_t *t1,int32_t *t2,
+                                 uint16_t *m1,uint16_t *m2,uint16_t *m3){
+    pid_get_map_sensor_profile(1,t1,t2,m1,m2,m3);
 }
 
-bool pid_set_map1_base_profile(const uint8_t *basePwm) {
-    if (autoMode || selectedMap != 1 || !basePwm) return false;
-    for (uint8_t i = 0; i < 8; ++i) {
-        if (basePwm[i] < 45U) return false;
-    }
-    for (uint8_t i = 0; i < 8; ++i)
-        map1SegmentPwm[i] = basePwm[i];
-    return true;
-}
+bool pid_set_map_speed_profile(uint8_t mapId, const int32_t *xTicks,
+                               const uint8_t *basePwm) {
+    if (autoMode || mapId < 1 || mapId > 3 || selectedMap != mapId ||
+        !xTicks || !basePwm) return false;
 
-bool pid_set_map1_speed_profile(const int32_t *xTicks,
-                                const uint8_t *basePwm) {
-    if (autoMode || selectedMap != 1 || !xTicks || !basePwm) return false;
-
-    // Validate the complete profile before changing any live setting.
+    // Validate the entire profile before modifying any map's live settings.
     for (uint8_t i = 0; i < 7; ++i) {
         if (xTicks[i] <= 0 || xTicks[i] > 10000000L ||
-            (i > 0 && xTicks[i] <= xTicks[i - 1])) {
-            return false;
-        }
+            (i > 0 && xTicks[i] <= xTicks[i - 1])) return false;
     }
     for (uint8_t i = 0; i < 8; ++i) {
         if (basePwm[i] < 45U) return false;
     }
 
+    const uint8_t mapIndex = (uint8_t)(mapId - 1U);
     for (uint8_t i = 0; i < 7; ++i)
-        map1SegmentTicks[i] = xTicks[i];
+        mapSegmentTicks[mapIndex][i] = xTicks[i];
     for (uint8_t i = 0; i < 8; ++i)
-        map1SegmentPwm[i] = basePwm[i];
+        mapSegmentPwm[mapIndex][i] = basePwm[i];
+    mapScheduledBase = (float)mapSegmentPwm[mapIndex][0];
     return true;
 }
 
-void pid_get_map1_speed_profile(int32_t *xTicks, uint8_t *basePwm) {
+void pid_get_map_speed_profile(uint8_t mapId, int32_t *xTicks,
+                               uint8_t *basePwm) {
+    if (mapId < 1 || mapId > 3) return;
+    const uint8_t mapIndex = (uint8_t)(mapId - 1U);
     if (xTicks) {
         for (uint8_t i = 0; i < 7; ++i)
-            xTicks[i] = map1SegmentTicks[i];
+            xTicks[i] = mapSegmentTicks[mapIndex][i];
     }
     if (basePwm) {
         for (uint8_t i = 0; i < 8; ++i)
-            basePwm[i] = map1SegmentPwm[i];
+            basePwm[i] = mapSegmentPwm[mapIndex][i];
     }
+}
+
+// Backward-compatible Map 1 API used by legacy SPP clients.
+bool pid_set_map1_base_profile(const uint8_t *basePwm) {
+    int32_t ticks[7];
+    pid_get_map_speed_profile(1, ticks, nullptr);
+    return pid_set_map_speed_profile(1, ticks, basePwm);
+}
+bool pid_set_map1_speed_profile(const int32_t *xTicks,
+                                const uint8_t *basePwm) {
+    return pid_set_map_speed_profile(1, xTicks, basePwm);
+}
+void pid_get_map1_speed_profile(int32_t *xTicks, uint8_t *basePwm) {
+    pid_get_map_speed_profile(1, xTicks, basePwm);
 }
 uint8_t pid_get_high_speed_stage(void) {
     if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 && autoMode &&
@@ -949,17 +974,18 @@ void pid_line_follow_step(void) {
     if (!autoMode) return;
     float pos = 0;
     uint8_t blackCount = 0;
-    if (selectedMap == 1) {
-        const int32_t progress = runEncoderProgress();
-        if (progress > map1MaxProgress) map1MaxProgress = progress;
-    }
+    const int32_t profileProgress = runEncoderProgress();
+    if (profileProgress > mapProfileMaxProgress)
+        mapProfileMaxProgress = profileProgress;
+    if (selectedMap == 1 && profileProgress > map1MaxProgress)
+        map1MaxProgress = profileProgress;
     const bool good = pid_calculate_position(&pos, &blackCount);
     // Physical position/blackCount continue to drive all existing FSM cases.
     // Only the NORMAL_PID steering error uses the encoder-selected subset.
-    const uint16_t pidSensorMask = map1PidSensorMask();
+    const uint16_t pidSensorMask = activePidSensorMask();
     float pidPosition = pos;
     const bool pidMeasurementGood =
-        pidSensorMask == MAP1_SENSOR_MASK_STAGE3
+        pidSensorMask == FULL_PID_SENSOR_MASK
             ? good
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
@@ -989,13 +1015,17 @@ void pid_line_follow_step(void) {
         motor_stop();
         return;
     }
-    if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1) {
+    if (!ENCODER_SPEED_PROFILE_ENABLED &&
+        selectedMap >= 1 && selectedMap <= 3) {
         if (currentCase != LINE_CASE_NORMAL_PID || !pidMeasurementGood) {
-            map1BoostActive = false;
-            map1CenteredSinceMs = 0;
-            map1LastUnsafeMs = millis();
-            map1ScheduledBase = fminf(map1ScheduledBase,
-                                     map1CappedBase(map1MaxProgress));
+            if (selectedMap == 1) {
+                map1BoostActive = false;
+                map1CenteredSinceMs = 0;
+                map1LastUnsafeMs = millis();
+            }
+            // Do not ramp upward while current line evidence is invalid.
+            mapScheduledBase = fminf(mapScheduledBase,
+                                     mapScheduledTarget(mapProfileMaxProgress));
         }
     }
     const uint32_t nowUs = micros();
@@ -1069,9 +1099,10 @@ void pid_line_follow_step(void) {
 
         const uint16_t sensorMask = sensor_get_line_bits();
         float requestedBase = (float)pidConfig.baseSpeed;
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
-            requestedBase = map1UpdateScheduledBase(
-                map1MaxProgress, absErr, blackCount, sensorMask, dt);
+        if (!ENCODER_SPEED_PROFILE_ENABLED &&
+            selectedMap >= 1 && selectedMap <= 3)
+            requestedBase = mapUpdateScheduledBase(
+                mapProfileMaxProgress, absErr, blackCount, sensorMask, dt);
         float base = updateForwardSpeed(absErr, requestedBase);
         // Replace only the forward-speed target on the first straight. Keep
         // existing PID steering, error governor, outer-eye limits, and SEARCH.
@@ -1151,8 +1182,9 @@ void pid_line_follow_step(void) {
         const bool initialBlackPad =
             !finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU;
         const float crossingFactor = initialBlackPad ? 1.0f : 0.7f;
-        const float crossingBase = (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
-            ? map1ScheduledBase : (float)pidConfig.baseSpeed;
+        const float crossingBase =
+            (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3)
+                ? mapScheduledBase : (float)pidConfig.baseSpeed;
         const int16_t speed = clampPwm(crossingBase * crossingFactor);
         motor_set_speeds(speed, speed);
     } else if (currentCase == LINE_CASE_GAP_BRIDGE) {

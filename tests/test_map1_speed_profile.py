@@ -1,4 +1,4 @@
-"""Validation tests for the editable Map 1 eight-stage profile."""
+"""Validation tests for the editable per-map eight-stage profile."""
 import unittest
 from pathlib import Path
 
@@ -42,21 +42,32 @@ class Map1SpeedProfileTests(unittest.TestCase):
                 validate_map1_speed_profile(
                     [100, 200, 300, 400, 500, 600, 700], bases)
 
-    def test_firmware_exposes_atomic_map1_profile_setter(self):
+    def test_firmware_exposes_independent_profiles_for_all_maps(self):
         pid = (ROOT / "src" / "pid_controller.cpp").read_text(encoding="utf-8")
         header = (ROOT / "include" / "pid_controller.h").read_text(encoding="utf-8")
         main = (ROOT / "src" / "main.cpp").read_text(encoding="utf-8")
-        self.assertIn("int32_t map1SegmentTicks[7]", pid)
-        self.assertIn("pid_set_map1_speed_profile", pid)
-        self.assertIn("pid_set_map1_speed_profile", header)
-        self.assertIn("MAP1_SPEED_PROFILE:", main)
-        self.assertIn("MAP1_SPEED_PROFILE X1=", main)
+        self.assertIn("int32_t mapSegmentTicks[3][7]", pid)
+        self.assertIn("uint8_t mapSegmentPwm[3][8]", pid)
+        self.assertIn("pid_set_map_speed_profile", pid)
+        self.assertIn("pid_set_map_speed_profile", header)
+        self.assertIn("MAP_SPEED_PROFILE:", main)
+        self.assertIn("MAP_SPEED_PROFILE MAP=", main)
+        self.assertIn("selectedMap >= 1 && selectedMap <= 3", pid)
+
+    def test_firmware_keeps_separate_default_profiles_per_map(self):
+        pid = (ROOT / "src" / "pid_controller.cpp").read_text(encoding="utf-8")
+        self.assertIn("{140, 140, 140, 240, 140, 140, 210, 255}", pid)
+        self.assertIn("{160, 160, 160, 160, 160, 160, 160, 160}", pid)
+        self.assertIn("{150, 150, 150, 150, 150, 150, 150, 150}", pid)
+        self.assertIn("mapSegmentTicks[mapIndex][i] = xTicks[i]", pid)
+        self.assertIn("mapSegmentPwm[mapIndex][i] = basePwm[i]", pid)
 
     def test_gui_sends_tick_and_base_values_in_one_command(self):
         app = (ROOT / "robot_debug.py").read_text(encoding="utf-8")
-        self.assertIn('command = "MAP1_SPEED_PROFILE:"', app)
+        self.assertIn('command = "MAP_SPEED_PROFILE:"', app)
         self.assertIn("validate_map1_speed_profile(ticks, bases)", app)
-        self.assertIn('self.send_command("MAP1_SPEED_PROFILE")', app)
+        self.assertIn('self.read_map_speed_profile(initial_map)', app)
+        self.assertIn("self.map_speed_profiles = {", app)
 
 
 if __name__ == "__main__":
