@@ -224,6 +224,8 @@ class App(tk.Tk):
         self.map2_sensor_read_requested = False
         self.map2_sensor_editor_refresh = None
         self.map2_sensor_status = tk.StringVar(value="MAP 2 mắt PID: chờ ESP32")
+        self.map2_test_status = tk.StringVar(
+            value="MAP 2 PID THUẦN: chưa xác nhận firmware trên ESP32")
         self.map2_sensor_window = None
         # Map 3 preset: right-side eyes, all eyes, left-side eyes, then all eyes.
         self.map3_sensor_profile = (
@@ -342,9 +344,7 @@ class App(tk.Tk):
         map2_pure_note.pack(fill="x", padx=8, pady=(0, 2))
         self.label(
             map2_pure_note,
-            "MAP 2 TEST: PID thuần, 16 mắt, BASE từ ô PID; "
-            "không dùng mask/tick, BASE/tick, checkpoint, cua hoặc SEARCH. "
-            "Đặt xe trên line trước khi START.",
+            textvariable=self.map2_test_status,
             bg=PANEL, fg=AMBER, font=("Consolas", 9)
         ).pack(anchor="w")
         map2_sensor_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
@@ -826,6 +826,7 @@ class App(tk.Tk):
         self.map2_sensor_read_pending_at = None
         self.map2_sensor_read_requested = False
         self.map2_sensor_status.set("MAP 2 mắt PID: mất kết nối ESP32")
+        self.map2_test_status.set("MAP 2 PID THUẦN: mất kết nối; chưa xác nhận ESP32")
         self.map3_sensor_confirmed = False
         self.map3_sensor_status.set("MAP 3 mắt PID: mất kết nối ESP32")
         self.map_profile_pending = None
@@ -1718,6 +1719,10 @@ class App(tk.Tk):
         self.log(f"Đã chọn MAP {map_id}; các lượt START kế tiếp lưu trong logs/map_{map_id:02d}/")
         if self.reader is not None and self.reader.is_alive():
             self.read_map_speed_profile(map_id)
+            if map_id == 2:
+                self.map2_test_status.set(
+                    "MAP 2 PID THUẦN: đang hỏi firmware trên ESP32...")
+                self.send_command("MAP2_PID_TEST")
         self.update_control_buttons()
         return True
 
@@ -2105,6 +2110,21 @@ class App(tk.Tk):
                 message.startswith("MAP_SPEED_PROFILE ") or
                 message.startswith("ERR: MAP_SPEED_PROFILE_")):
             self.update_control_buttons()
+        if message.startswith("MAP2_PID_TEST:"):
+            enabled = re.search(r"\bENABLED=(\d+)\b", message)
+            base = re.search(r"\bBASE=(\d+)\b", message)
+            if enabled and enabled.group(1) == "1":
+                self.map2_test_status.set(
+                    f"MAP 2 PID THUẦN: ESP32 ĐÃ XÁC NHẬN | 16 mắt | "
+                    f"BASE={base.group(1) if base else '?'} | "
+                    "không tick, checkpoint, cua/SEARCH | đặt xe trên line")
+            else:
+                self.map2_test_status.set(
+                    "MAP 2 PID THUẦN: ESP32 báo chế độ này chưa được bật.")
+        elif (message.startswith("ERR: UNKNOWN_COMMAND")
+              and "MAP2_PID_TEST" in message):
+            self.map2_test_status.set(
+                "MAP 2 PID THUẦN: firmware chưa hỗ trợ, cần upload lại v7.")
         if message.startswith("MAP_SENSOR_PROFILE_V2:"):
             try:
                 parts = message.split(":", 1)[1].split(",")
