@@ -25,7 +25,8 @@ typedef enum
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
   LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
   LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
-  LINE_CASE_GAP_BRIDGE = 11 // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_GAP_BRIDGE = 11, // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_MAP2_HOLD = 12 // Temporary Map2 line-hold checkpoint; AUTO continues
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
@@ -79,6 +80,8 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map2_sensor_stage(void);
+// Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
+uint8_t pid_get_map2_hold_state(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
