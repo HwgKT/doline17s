@@ -27,6 +27,10 @@ static float lastDashedCorrection = 0;   // remembered PID output for dashed-lin
 namespace {
 constexpr uint32_t LINE_ACQUIRE_MS = 10;
 constexpr uint32_t LINE_LOSS_MS = 30;           // was 40 — faster loss detection reduces stutter duration
+// A line that disappeared at the outer edge during an active sharp turn is
+// not a centered dashed gap. Pivot immediately rather than driving both
+// wheels forward for the usual 30 ms loss-confirmation window.
+constexpr float EDGE_CORNER_IMMEDIATE_SEARCH_ERROR = 55.0f;
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 // Finish requires ALL 16 sensors to see black on 3 consecutive PID samples.
@@ -40,9 +44,20 @@ constexpr uint16_t START_PAD_CENTER_MASK = 0x03C0U; // central eyes S6..S9
 constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
 constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
-constexpr int16_t LINE_SEARCH_PWM = 85;
+constexpr int16_t LINE_SEARCH_PWM = 90;
+// Map 1 early corner: fixed SEARCH-style pivot, stronger reverse inner wheel.
+// No change to ordinary SEARCH or line PID. Active from AUTO start
+// (once the START pad has been exited) until 12000 progress ticks.
+constexpr int32_t EARLY_TURN_MIN_TICKS = 0;
+constexpr int32_t EARLY_TURN_MAX_TICKS = 12000; // exclusive: no new early turns at >=12000
+constexpr int16_t EARLY_TURN_INNER_REVERSE_PWM = 100;
+constexpr int16_t EARLY_TURN_OUTER_FORWARD_PWM = 90;
+constexpr uint32_t EARLY_TURN_TREND_WINDOW_MS = 150;
+constexpr uint8_t EARLY_TURN_EDGE_CONFIRM_FRAMES = 3;
+// Fallback for fast center-to-isolated-edge transitions (two valid samples).
+constexpr uint8_t EARLY_TURN_DIRECT_EDGE_FRAMES = 2;
 // MAP 1 experiment: faster pivot only at the long left corner near 1,311 ticks.
-constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 95;
+constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 90;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_END_ENC = 1700;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -58,7 +73,9 @@ constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 #ifndef DOLINE_ENABLE_ENCODER_SPEED_PROFILE
 #define DOLINE_ENABLE_ENCODER_SPEED_PROFILE 0
 #endif
-constexpr bool ENCODER_SPEED_PROFILE_ENABLED = DOLINE_ENABLE_ENCODER_SPEED_PROFILE != 0;
+// The old encoder-position speed envelope is disabled. Encoder is now used
+// for wheel-speed feedback and (separately) the sensor mask stages only.
+constexpr bool ENCODER_SPEED_PROFILE_ENABLED = false;
 constexpr uint32_t GAP_TIMEOUT_MS = 100;
 // First straight trapezoid in relative motor-encoder ticks.
 // An experimental open-loop PWM envelope, not closed-loop wheel velocity.
@@ -123,30 +140,13 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
-// MAP 01 late-BASE scheduler; the legacy first-straight HS profile remains OFF.
-constexpr int32_t MAP1_SLOW_START_ENC = 4800;
-constexpr int32_t MAP1_SLOW_TIGHT_START_ENC = 5600;
-constexpr int32_t MAP1_SLOW_TIGHT_END_ENC = 6200;
-constexpr int32_t MAP1_SLOW_END_ENC = 6900;
-constexpr int32_t MAP1_LATE_BASE_START_ENC = 8000;
-constexpr float MAP1_LATE_BASE_PWM = 160.0f; // Minimum forward BASE target from 8k to finish; BOOST can still reach peak.
-constexpr int32_t MAP1_LATE_BOOST_START_ENC = 10000;
-constexpr float MAP1_CORNER_BASE_PWM = 115.0f;
-constexpr float MAP1_RISK_BASE_PWM = 105.0f;
-constexpr float MAP1_CORNER_WHEEL_LIMIT = 185.0f;
-constexpr float MAP1_RISK_WHEEL_LIMIT = 170.0f;
-constexpr float MAP1_BOOST_CENTER_ERROR = 20.0f;  // centered enough to enter BOOST
-constexpr float MAP1_BOOST_SINGLE_EYE_ERROR = 15.0f; // lone center eye is valid
-constexpr float MAP1_BOOST_CANCEL_ERROR = 40.0f;  // sharp deviation cancels
-constexpr uint32_t MAP1_BOOST_CONFIRM_MS = 40;    // uninterrupted good line
-constexpr uint32_t MAP1_REACQUIRE_HOLD_MS = 80;
-constexpr float MAP1_BASE_RISE_PWM_PER_SEC = 250.0f;
-constexpr float MAP1_BASE_FALL_PWM_PER_SEC = 500.0f;
+// Fixed per-map BASE: no encoder-position scheduler, no late BOOST, and
+// no per-section PWM caps. The independent wheel PI remains active.
+// Map 1 only: arm the late BASE boost after 10,500 forward-progress ticks.
+constexpr int32_t MAP1_LATE_BOOST_START_TICKS = 10500;
+constexpr float MAP1_LATE_BOOST_CENTER_ERROR = 15.0f;
 int32_t map1MaxProgress = 0;
-float map1ScheduledBase = 130.0f;
-uint32_t map1LastUnsafeMs = 0;
-uint32_t map1CenteredSinceMs = 0;
-bool map1BoostActive = false;
+bool map1LateBoostEngaged = false;
 // Map 01 route lock assumes a repeatable START pose; enabled by default.
 bool map1RouteLockEnabled = false; // Temporarily disabled by default for PID/sensor-mask testing; ROUTE_LOCK:1 to enable.
 map1route::Tracker map1Route;
@@ -168,11 +168,31 @@ static int32_t runEncoderProgress() {
 // Encoder origins are captured at AUTO start (pid_set_auto_mode).
 // User-configurable through SENSOR_PROFILE SPP commands while stopped.
 // Values persist across AUTO runs but return to defaults after reboot.
-int32_t map1SensorStage2Ticks = 350;
-int32_t map1SensorStage3Ticks = 1500;
-uint16_t map1SensorStageMasks[3] = {0x01FFU, 0xFF80U, 0xFFFFU};
+int32_t map1SensorStage2Ticks = 650;
+int32_t map1SensorStage3Ticks = 1350;
+// Stage 1: disable S0..S4; stage 2: disable S9..S15; stage 3: all sensors.
+uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
+int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
+// Map 2: four independent PID eye groups and three monotonic tick thresholds.
+// Defaults all 16 eyes in every stage; does not affect physical observations.
+int32_t map2SensorTickEnds[3] = {1000, 2000, 3000};
+uint16_t map2SensorMasks[4] = {0xFFFFU,0xFFFFU,0xFFFFU,0xFFFFU};
+int32_t map2SensorMaxTravel = 0;
+// Map2 tick boundaries are checkpoints: pause forward motion, align to line,
+// require 10 ms of stable centered line + low encoder motion, then switch mask.
+// No sleeping inside PID loop. Map1 and Map3 are unaffected.
+uint8_t map2SensorActiveStage = 0; // 0..3, latched until checkpoint success.
+uint8_t map2HoldState = 0; // 0=RUN, 1=ALIGN, 2=HOLD, 3=FAULT.
+uint32_t map2HoldStartMs = 0, map2StableSinceMs = 0;
+int32_t map2StableEncL = 0, map2StableEncR = 0;
+constexpr uint32_t MAP2_STABLE_LINE_MS = 10;
+constexpr uint32_t MAP2_HOLD_TIMEOUT_MS = 1500;
+constexpr float MAP2_STABLE_LINE_ERROR = 12.0f;
+constexpr int16_t MAP2_ALIGN_PWM = 55;
+constexpr int32_t MAP2_STILL_ENCODER_TOLERANCE = 2;
+
 
 static int32_t map1SensorTravelTicks() {
     int32_t left = 0, right = 0;
@@ -185,6 +205,17 @@ static int32_t map1SensorTravelTicks() {
     return average > INT32_MAX ? INT32_MAX : (int32_t)average;
 }
 
+static uint16_t map1PidSensorMask();
+static uint16_t map2PidSensorMask() {
+    if (selectedMap != 2 || !autoMode) return 0xFFFFU;
+    const int32_t traveled = map1SensorTravelTicks();
+    if (traveled > map2SensorMaxTravel) map2SensorMaxTravel = traveled;
+    return map2SensorMasks[map2SensorActiveStage];
+}
+static uint16_t activePidSensorMask() {
+    if (selectedMap == 2) return map2PidSensorMask();
+    return map1PidSensorMask();
+}
 static uint16_t map1PidSensorMask() {
     if (selectedMap != 1 || !autoMode) return MAP1_SENSOR_MASK_STAGE3;
     const int32_t traveled = map1SensorTravelTicks();
@@ -226,8 +257,6 @@ constexpr float TURN_CENTERED_POSITION = 22.0f;
 constexpr uint8_t TURN_CENTERED_FRAMES = 2;
 constexpr uint16_t TURN_CENTER_SENSOR_MASK = 0x03C0U;
 constexpr uint8_t TURN_CENTER_SENSOR_MIN = 2;
-constexpr int16_t TURN_PWM_MIN = 100;           // was 95 — slightly more aggressive
-constexpr int16_t TURN_PWM_MAX = 185;           // was 170 — allow faster outer wheel
 constexpr float TURN_CURVE_START_POSITION = 28.0f;
 constexpr float TURN_CURVE_END_POSITION = 75.0f;
 constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
@@ -235,7 +264,27 @@ constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
 constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
 constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
-constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
+
+// Temporarily disable encoder wheel PI. Keep its code for future experiments.
+constexpr bool WHEEL_PID_ENABLED = false;
+// Cascaded control: line PID produces SIGNED wheel speed setpoints; wheel PI
+// closes the speed loop with quadrature encoder feedback. Tune on the robot:
+// one PWM unit corresponds to approximately 6 wheel encoder ticks/second.
+// This factor and gains are initial estimates, NOT calibrated motor constants.
+constexpr float WHEEL_TPS_PER_PWM = 6.0f;
+constexpr uint32_t WHEEL_SPEED_SAMPLE_US = 20000U;  // 50 Hz speed loop
+constexpr float WHEEL_SPEED_FILTER_ALPHA = 0.4f;
+constexpr float WHEEL_KP = 0.045f;  // PWM / (ticks/s)
+constexpr float WHEEL_KI = 0.13f;   // PWM / (ticks)
+constexpr float WHEEL_I_LIMIT_PWM = 35.0f;
+constexpr float WHEEL_CORRECTION_LIMIT_PWM = 55.0f;
+float wheelSpeedTps[2] = {0.0f, 0.0f};
+float wheelIntegralPwm[2] = {0.0f, 0.0f};
+float wheelCorrectionPwm[2] = {0.0f, 0.0f};
+int32_t wheelPrevEnc[2] = {0, 0};
+uint32_t wheelPrevSampleUs = 0;
+bool wheelFeedbackReady = false;
+int8_t wheelPrevDirection[2] = {0, 0};
 constexpr float OUTER_STEERING_START_ERROR = 20.0f;
 constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
 
@@ -250,6 +299,15 @@ TurnState turnState = TURN_NONE;
 TurnState lastTurnDirection = TURN_RIGHT;
 uint32_t turnStartedMs = 0;
 uint32_t searchStartedMs = 0;
+bool earlyTurnActive = false;
+bool edgeLeftSeeded = false, edgeRightSeeded = false;
+uint32_t edgeLeftSeedMs = 0, edgeRightSeedMs = 0;
+float edgeLeftSeedCentroid = 0.0f, edgeRightSeedCentroid = 0.0f;
+uint8_t edgeLeftFrames = 0, edgeRightFrames = 0;
+uint16_t edgeTrackSensorMask = 0;
+bool edgeRecentCenterLeft = false, edgeRecentCenterRight = false;
+uint32_t edgeRecentCenterLeftMs = 0, edgeRecentCenterRightMs = 0;
+uint8_t directLeftEdgeFrames = 0, directRightEdgeFrames = 0;
 uint32_t autoStartedMs = 0;
 uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
@@ -284,109 +342,93 @@ static int16_t clampPwmSigned(float value) {
 static uint8_t bitCount16(uint16_t value) {
     return (uint8_t)__builtin_popcount((unsigned)value);
 }
-static float outerSensorSeverity(uint16_t mask) {
-    float severity = 0.0f;
-    for (uint8_t i = 0; i < 4; ++i) {
-        if (mask & (uint16_t)(1U << i)) {
-            const float sensorSeverity = (float)(4U - i) * 0.25f;
-            if (sensorSeverity > severity) severity = sensorSeverity;
-        }
-        const uint8_t rightSensor = (uint8_t)(15U - i);
-        if (mask & (uint16_t)(1U << rightSensor)) {
-            const float sensorSeverity = (float)(4U - i) * 0.25f;
-            if (sensorSeverity > severity) severity = sensorSeverity;
-        }
-    }
-    return severity;
-}
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
 }
-static void limitMotorCommandPeak(float& left, float& right, float limit) {
-    const float peak = fmaxf(fabsf(left), fabsf(right));
-    if (peak > limit && peak > 0.0f) {
-        const float scale = limit / peak;
-        left *= scale;
-        right *= scale;
+static void resetWheelSpeedPid() {
+    wheelFeedbackReady = false;
+    wheelPrevSampleUs = 0;
+    for (uint8_t i = 0; i < 2; ++i) {
+        wheelSpeedTps[i] = 0.0f;
+        wheelIntegralPwm[i] = 0.0f;
+        wheelCorrectionPwm[i] = 0.0f;
+        wheelPrevDirection[i] = 0;
     }
 }
-static float updateForwardSpeed(float absErr, float requestedBase) {
-    const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-    float targetSpeed = requestedBase *
-        (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
-    const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-        ? pidConfig.baseSpeed : 45);
-    if (targetSpeed < minimumSpeed) targetSpeed = minimumSpeed;
-    if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
-    governedForwardSpeed = targetSpeed;
-    return governedForwardSpeed;
-}
 
-// Encoder averages can drift during SEARCH pivots; require line confirmation
-// for all accelerations instead of trusting encoder progress alone.
-static float map1CappedBase(int32_t progress) {
-    float base = (float)pidConfig.baseSpeed;
-    if (map1Route.active)
-        base = map1Route.baseCap(progress, base);
-    // Raise the Map 1 BASE target after 8000 ticks, including WAIT_LINE
-    // after late BOOST cancels. Keep speed governor, edge caps and SEARCH.
-    if (progress >= MAP1_LATE_BASE_START_ENC)
-        base = fmaxf(base, MAP1_LATE_BASE_PWM);
-    if (progress >= MAP1_SLOW_START_ENC && progress < MAP1_SLOW_END_ENC) {
-        const float cap = progress >= MAP1_SLOW_TIGHT_START_ENC &&
-                          progress < MAP1_SLOW_TIGHT_END_ENC
-                          ? MAP1_RISK_BASE_PWM : MAP1_CORNER_BASE_PWM;
-        base = fminf(base, cap);
+// Called every line-controller cycle, wheel speed is refreshed at 50 Hz.
+// Feed-forward preserves the original line PID wheel command; encoder feedback
+// compensates loading and wheel mismatch without changing the line PID gains.
+static void driveWheelSpeedCascade(int16_t nominalLeftPwm,
+                                   int16_t nominalRightPwm) {
+    int32_t encL = 0, encR = 0;
+    encoder_get_counts(&encL, &encR);
+    const int32_t currentEnc[2] = {encL, encR};
+    const int16_t nominalPwm[2] = {nominalLeftPwm, nominalRightPwm};
+    const uint32_t nowUs = micros();
+
+    if (!wheelFeedbackReady) {
+        wheelPrevEnc[0] = encL;
+        wheelPrevEnc[1] = encR;
+        wheelPrevSampleUs = nowUs;
+        wheelFeedbackReady = true;
     }
-    return base;
-}
 
-static float map1UpdateScheduledBase(int32_t progress, float absErr,
-                                     uint8_t blackCount, uint16_t mask, float dt) {
-    const uint32_t now = millis();
-    float target = map1CappedBase(progress);
-    // A narrow line may be seen by a single central sensor. Requiring
-    // two simultaneous black eyes can block BOOST indefinitely on that track.
-    const bool adjacentLine = blackCount >= 2 && hasAdjacentLineSensors(mask);
-    const bool centeredSingleEye =
-        blackCount == 1 && absErr <= MAP1_BOOST_SINGLE_EYE_ERROR;
-    const bool validLine = adjacentLine || centeredSingleEye;
-    // The late boost remains eligible right up to full-black FINISH.
-    // There is no longer any fixed BASE reduction at encoder 16000.
-    if (progress >= MAP1_LATE_BOOST_START_ENC) {
-        if (map1BoostActive && (!lineLocked || !validLine ||
-                               absErr >= MAP1_BOOST_CANCEL_ERROR)) {
-            map1BoostActive = false;
-            map1CenteredSinceMs = 0;
-            map1LastUnsafeMs = now;
-        }
-        const bool centered = lineLocked && validLine &&
-                              absErr <= MAP1_BOOST_CENTER_ERROR;
-        if (!map1BoostActive) {
-            if (centered &&
-                (uint32_t)(now - map1LastUnsafeMs) >= MAP1_REACQUIRE_HOLD_MS) {
-                if (map1CenteredSinceMs == 0) map1CenteredSinceMs = now;
-                else if ((uint32_t)(now - map1CenteredSinceMs) >=
-                         MAP1_BOOST_CONFIRM_MS) map1BoostActive = true;
+    const uint32_t elapsedUs = nowUs - wheelPrevSampleUs;
+    if (elapsedUs >= WHEEL_SPEED_SAMPLE_US) {
+        const float dt = (float)elapsedUs * 1.0e-6f;
+        const bool sampleValid = dt >= 0.015f && dt <= 0.1f;
+        for (uint8_t i = 0; i < 2; ++i) {
+            const int32_t delta = currentEnc[i] - wheelPrevEnc[i];
+            if (sampleValid) {
+                const float measured = (float)delta / dt;
+                wheelSpeedTps[i] += WHEEL_SPEED_FILTER_ALPHA *
+                    (measured - wheelSpeedTps[i]);
+                const float target = (float)nominalPwm[i] * WHEEL_TPS_PER_PWM;
+                const float error = target - wheelSpeedTps[i];
+                const float proposedI = fmaxf(-WHEEL_I_LIMIT_PWM,
+                    fminf(WHEEL_I_LIMIT_PWM,
+                          wheelIntegralPwm[i] + WHEEL_KI * error * dt));
+                const float proposedCorrection = WHEEL_KP * error + proposedI;
+                // Do not integrate further into the correction saturation.
+                if (fabsf(proposedCorrection) < WHEEL_CORRECTION_LIMIT_PWM ||
+                    (proposedCorrection > 0 && error < 0) ||
+                    (proposedCorrection < 0 && error > 0)) {
+                    wheelIntegralPwm[i] = proposedI;
+                }
+                wheelCorrectionPwm[i] = fmaxf(-WHEEL_CORRECTION_LIMIT_PWM,
+                    fminf(WHEEL_CORRECTION_LIMIT_PWM,
+                          WHEEL_KP * error + wheelIntegralPwm[i]));
             } else {
-                map1CenteredSinceMs = 0;
+                wheelSpeedTps[i] = 0.0f;
+                wheelIntegralPwm[i] = 0.0f;
+                wheelCorrectionPwm[i] = 0.0f;
             }
+            wheelPrevEnc[i] = currentEnc[i];
         }
-        if (map1BoostActive) target = (float)highSpeedPeakPwm;
-    } else {
-        map1BoostActive = false;
-        map1CenteredSinceMs = 0;
+        wheelPrevSampleUs = nowUs;
     }
-    // Gradual acceleration / faster deceleration of the forward BASE only.
-    const float rate = target > map1ScheduledBase
-                     ? MAP1_BASE_RISE_PWM_PER_SEC : MAP1_BASE_FALL_PWM_PER_SEC;
-    const float limit = rate * fminf(dt, 0.02f);
-    const float delta = target - map1ScheduledBase;
-    if (delta > limit) map1ScheduledBase += limit;
-    else if (delta < -limit) map1ScheduledBase -= limit;
-    else map1ScheduledBase = target;
-    return map1ScheduledBase;
+
+    int16_t drivePwm[2] = {0, 0};
+    for (uint8_t i = 0; i < 2; ++i) {
+        const int8_t direction = nominalPwm[i] > 0 ? 1 :
+                                nominalPwm[i] < 0 ? -1 : 0;
+        if (!direction || (wheelPrevDirection[i] &&
+                           wheelPrevDirection[i] != direction)) {
+            wheelIntegralPwm[i] = 0.0f;
+            wheelCorrectionPwm[i] = 0.0f;
+        }
+        wheelPrevDirection[i] = direction;
+        if (!direction) continue;
+        const float requested = (float)nominalPwm[i] + wheelCorrectionPwm[i];
+        // Prevent wheel PI from accidentally reversing the line PID's command.
+        const float aligned = direction > 0 ? fmaxf(0.0f, requested) :
+                                             fminf(0.0f, requested);
+        drivePwm[i] = clampPwmSigned(aligned);
+    }
+    motor_set_speeds(drivePwm[0], drivePwm[1]);
 }
+
 static void clearPidState() {
     lastError = integralError = lastCorrection = 0;
     lastPTerm = lastITerm = lastDTerm = 0;
@@ -394,6 +436,7 @@ static void clearPidState() {
     derivativeWarmupFrames = 0;
 }
 static void resetLineTracking() {
+    resetWheelSpeedPid();
     lineLocked = previouslyLocked = acquiring = missing = false;
     acquireSinceMs = missingSinceMs = 0;
     lastKnownPosition = 0;
@@ -401,6 +444,13 @@ static void resetLineTracking() {
     lastTurnDirection = TURN_RIGHT;
     turnStartedMs = 0;
     searchStartedMs = 0;
+    earlyTurnActive = false;
+    edgeLeftSeeded = edgeRightSeeded = false;
+    edgeLeftFrames = edgeRightFrames = 0;
+    edgeTrackSensorMask = 0;
+    edgeRecentCenterLeft = edgeRecentCenterRight = false;
+    edgeRecentCenterLeftMs = edgeRecentCenterRightMs = 0;
+    directLeftEdgeFrames = directRightEdgeFrames = 0;
     turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
     derivativeWarmupFrames = 0;
@@ -423,12 +473,15 @@ static void resetLineTracking() {
     highSpeedAborted = false;
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
+    map1LateBoostEngaged = false;
     map1SensorMaxTicks = 0;
-    map1ScheduledBase = (float)pidConfig.baseSpeed;
-    map1LastUnsafeMs = millis();
-    map1CenteredSinceMs = 0;
-    map1BoostActive = false;
-    map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
+    map2MaxProgress = 0;
+    map2SensorMaxTravel = 0;
+    map2SensorActiveStage = 0;
+    map2HoldState = 0;
+    map2HoldStartMs = map2StableSinceMs = 0;
+    map2StableEncL = map2StableEncR = 0;
+     map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
 // Sharp turn: outer wheel PWM adapts to how long we've been turning.
@@ -441,10 +494,8 @@ static int16_t sharpTurnPwm() {
         frac = 1.0f - 0.3f * (float)(elapsed - 200) / (float)(SHARP_TURN_PROFILE_MS - 200);
         if (frac < 0.7f) frac = 0.7f;
     }
-    int32_t speed = (int32_t)((float)(pidConfig.baseSpeed + 40) * frac);
-    if (speed < TURN_PWM_MIN) speed = TURN_PWM_MIN;
-    if (speed > TURN_PWM_MAX) speed = TURN_PWM_MAX;
-    return (int16_t)speed;
+    // No extra 100..185 PWM clamp: only the configured motor 8-bit ceiling.
+    return clampPwm((float)(pidConfig.baseSpeed + 40) * frac);
 }
 static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
     float severity = (fabsf(position) - TURN_CURVE_START_POSITION) /
@@ -454,6 +505,125 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
     const float factor = TURN_CURVE_INNER_FACTOR_OPEN -
         severity * (TURN_CURVE_INNER_FACTOR_OPEN - TURN_CURVE_INNER_FACTOR_TIGHT);
     return (int16_t)((float)outer * factor);
+}
+// Detect the center-to-edge trend using ONLY the currently enabled PID
+// eyes. Physical all-16 sensing remains unchanged for START and FINISH.
+// Clear unfinished trends whenever the encoder-selected mask stage changes.
+static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
+    const uint16_t allowedMask = activePidSensorMask();
+    if (allowedMask != edgeTrackSensorMask) {
+        edgeTrackSensorMask = allowedMask;
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+        edgeRecentCenterLeft = edgeRecentCenterRight = false;
+        directLeftEdgeFrames = directRightEdgeFrames = 0;
+    }
+    const uint16_t mask = physicalMask & allowedMask;
+    const uint8_t blackCount = bitCount16(mask);
+    const int32_t turnProgress = selectedMap == 1 ? map1MaxProgress : map2MaxProgress;
+    if ((selectedMap != 1 && selectedMap != 2) ||
+        turnProgress < EARLY_TURN_MIN_TICKS ||
+        turnProgress >= EARLY_TURN_MAX_TICKS ||
+        !finishDetectionArmed || earlyTurnActive || blackCount == 0) {
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+        edgeRecentCenterLeft = edgeRecentCenterRight = false;
+        directLeftEdgeFrames = directRightEdgeFrames = 0;
+        return 0;
+    }
+
+    const bool oppositeEdges =
+        (mask & 0x000FU) != 0U && (mask & 0xF000U) != 0U;
+    // Store recent central evidence even when a wider line makes the
+    // original centroid-trend detector ineligible. Always obey allowedMask.
+    if (!oppositeEdges && (mask & 0x01F0U) && !(mask & 0x000FU)) {
+        edgeRecentCenterLeft = true;
+        edgeRecentCenterLeftMs = now;
+    }
+    if (!oppositeEdges && (mask & 0x0F80U) && !(mask & 0xF000U)) {
+        edgeRecentCenterRight = true;
+        edgeRecentCenterRightMs = now;
+    }
+    if (edgeRecentCenterLeft &&
+        (uint32_t)(now - edgeRecentCenterLeftMs) > EARLY_TURN_TREND_WINDOW_MS)
+        edgeRecentCenterLeft = false;
+    if (edgeRecentCenterRight &&
+        (uint32_t)(now - edgeRecentCenterRightMs) > EARLY_TURN_TREND_WINDOW_MS)
+        edgeRecentCenterRight = false;
+
+    // DIRECT EDGE: only adjacent outer eyes remain black, for two
+    // consecutive samples. Other enabled eyes must be white.
+    const bool isolatedLeft =
+        !oppositeEdges && edgeRecentCenterLeft &&
+        (mask & 0xFFF0U) == 0U &&
+        bitCount16(mask & 0x000FU) >= 2 &&
+        hasAdjacentLineSensors(mask);
+    const bool isolatedRight =
+        !oppositeEdges && edgeRecentCenterRight &&
+        (mask & 0x0FFFU) == 0U &&
+        bitCount16(mask & 0xF000U) >= 2 &&
+        hasAdjacentLineSensors(mask);
+    directLeftEdgeFrames = isolatedLeft
+        ? (uint8_t)(directLeftEdgeFrames < EARLY_TURN_DIRECT_EDGE_FRAMES
+            ? directLeftEdgeFrames + 1 : EARLY_TURN_DIRECT_EDGE_FRAMES) : 0;
+    directRightEdgeFrames = isolatedRight
+        ? (uint8_t)(directRightEdgeFrames < EARLY_TURN_DIRECT_EDGE_FRAMES
+            ? directRightEdgeFrames + 1 : EARLY_TURN_DIRECT_EDGE_FRAMES) : 0;
+    if (directLeftEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) return -1;
+    if (directRightEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) return 1;
+
+    // Centroid trend remains the existing primary detection method.
+    if (blackCount > 6 || oppositeEdges) {
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+        return 0;
+    }
+    float indexSum = 0.0f;
+    for (uint8_t i = 0; i < 16; ++i)
+        if (mask & (uint16_t(1U) << i)) indexSum += (float)i;
+    const float centroid = indexSum / (float)blackCount;
+
+    if (edgeLeftSeeded &&
+        (uint32_t)(now - edgeLeftSeedMs) > EARLY_TURN_TREND_WINDOW_MS) {
+        edgeLeftSeeded = false;
+        edgeLeftFrames = 0;
+    }
+    if (edgeRightSeeded &&
+        (uint32_t)(now - edgeRightSeedMs) > EARLY_TURN_TREND_WINDOW_MS) {
+        edgeRightSeeded = false;
+        edgeRightFrames = 0;
+    }
+
+    // S4..S8 -> S3..S0. Seed only before reaching the outermost eyes.
+    if (!(mask & 0x000FU) && centroid >= 4.0f && centroid <= 8.0f &&
+        (mask & 0x01F0U)) {
+        edgeLeftSeeded = true;
+        edgeLeftSeedMs = now;
+        edgeLeftSeedCentroid = centroid;
+        edgeLeftFrames = 0;
+    }
+    // Mirror: S7..S11 -> S12..S15.
+    if (!(mask & 0xF000U) && centroid >= 7.0f && centroid <= 11.0f &&
+        (mask & 0x0F80U)) {
+        edgeRightSeeded = true;
+        edgeRightSeedMs = now;
+        edgeRightSeedCentroid = centroid;
+        edgeRightFrames = 0;
+    }
+
+    const bool leftReached =
+        edgeLeftSeeded && (mask & 0x000FU) &&
+        centroid <= 3.5f && (edgeLeftSeedCentroid - centroid) >= 1.5f;
+    const bool rightReached =
+        edgeRightSeeded && (mask & 0xF000U) &&
+        centroid >= 11.5f && (centroid - edgeRightSeedCentroid) >= 1.5f;
+    edgeLeftFrames = leftReached
+        ? (uint8_t)(edgeLeftFrames < 3 ? edgeLeftFrames + 1 : 3) : 0;
+    edgeRightFrames = rightReached
+        ? (uint8_t)(edgeRightFrames < 3 ? edgeRightFrames + 1 : 3) : 0;
+    if (edgeLeftFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) return -1;
+    if (edgeRightFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) return 1;
+    return 0;
 }
 static bool isSearchTurn() {
     return turnState == SEARCH_LEFT || turnState == SEARCH_RIGHT;
@@ -501,8 +671,7 @@ void pid_set_tunings(float kp, float ki, float kd) {
 }
 void pid_set_base_speed(int16_t speed) {
     pidConfig.baseSpeed = speed < 0 ? 0 : (speed > 255 ? 255 : speed);
-    if (!autoMode) map1ScheduledBase = (float)pidConfig.baseSpeed;
-}
+ }
 void pid_set_auto_mode(bool enabled) {
     autoMode = enabled;
     currentCase = LINE_CASE_STOPPED;
@@ -544,6 +713,25 @@ uint8_t pid_get_selected_map(void) { return selectedMap; }
 
 // Set the Map 1 PID sensor selection profile only while stopped.
 // Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
+bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks) {
+    if (autoMode || !ticks || !masks ||
+        ticks[0] <= 0 || ticks[1] <= ticks[0] ||
+        ticks[2] <= ticks[1] || ticks[2] > 10000000) return false;
+    for (uint8_t i=0;i<4;++i) if (!masks[i]) return false;
+    for (uint8_t i=0;i<3;++i) map2SensorTickEnds[i] = ticks[i];
+    for (uint8_t i=0;i<4;++i) map2SensorMasks[i] = masks[i];
+    return true;
+}
+void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks) {
+    if (ticks) for (uint8_t i=0;i<3;++i) ticks[i]=map2SensorTickEnds[i];
+    if (masks) for (uint8_t i=0;i<4;++i) masks[i]=map2SensorMasks[i];
+}
+uint8_t pid_get_map2_hold_state(void) { return map2HoldState; }
+uint8_t pid_get_map2_sensor_stage(void) {
+    if (selectedMap != 2) return 0;
+    return map2SensorActiveStage + 1;
+}
+
 bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
                                  uint16_t mask1, uint16_t mask2, uint16_t mask3) {
     if (autoMode || stage2 <= 0 || stage3 <= stage2 ||
@@ -565,16 +753,11 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
     if (mask2) *mask2 = map1SensorStageMasks[1];
     if (mask3) *mask3 = map1SensorStageMasks[2];
 }
-uint8_t pid_get_high_speed_stage(void) {
-    if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 && autoMode &&
-        map1MaxProgress >= MAP1_LATE_BOOST_START_ENC)
-        return map1BoostActive ? 8U : 7U; // WAIT_LINE / BOOST
-    return (uint8_t)highSpeedStage;
-}
+uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
 int32_t pid_get_map1_late_boost_start(void) {
-    return (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
-        ? MAP1_LATE_BOOST_START_ENC : 0;
+    return selectedMap == 1 ? MAP1_LATE_BOOST_START_TICKS : 0;
 }
+bool pid_is_map1_late_boost_engaged(void) { return map1LateBoostEngaged; }
 bool pid_set_high_speed_peak(int16_t pwm) {
     if (autoMode || pwm < 100 || pwm > 255 || pwm < pidConfig.baseSpeed)
         return false;
@@ -784,12 +967,49 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
+    // Prefer a confirmed center-to-edge trajectory over saturated normal PID
+    // from AUTO START until 12000 Map-1 progress ticks. Only enabled PID
+    // sensors participate in the EARLY_TURN detection.
+    // Do not interrupt an already active ordinary SEARCH pivot.
+    if (!isSearchTurn() && blackCount > 0) {
+        const int8_t edgeDirection = detectEarlyEdgeTurn(mask, now);
+        if (edgeDirection != 0) {
+            turnState = edgeDirection < 0 ? SEARCH_LEFT : SEARCH_RIGHT;
+            lastTurnDirection = edgeDirection < 0 ? TURN_LEFT : TURN_RIGHT;
+            earlyTurnActive = true;
+            searchStartedMs = now;
+            centeredTurnFrames = 0;
+            turnMissing = false;
+            missing = false;
+            edgeLeftSeeded = edgeRightSeeded = false;
+            edgeLeftFrames = edgeRightFrames = 0;
+            clearPidState();
+            return edgeDirection < 0 ? LINE_CASE_SHARP_LEFT
+                                     : LINE_CASE_SHARP_RIGHT;
+        }
+    } else if (blackCount == 0) {
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+    }
+
     // Keep PID steering while a corner remains visible; pivot only after line loss.
     if (turnState != TURN_NONE) {
         if (isSearchTurn()) {
-            const bool reliableReacquisition =
-                (blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
-                (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION);
+            const uint16_t reacquireMask =
+                earlyTurnActive ? (mask & activePidSensorMask()) : mask;
+            const uint8_t reacquireCount = bitCount16(reacquireMask);
+            float reacquirePosition = position;
+            const bool reacquirePositionValid = !earlyTurnActive ||
+                calculateMaskedPidPosition(activePidSensorMask(), &reacquirePosition);
+            const bool reliableReacquisition = earlyTurnActive
+                // In EARLY_TURN, disabled eyes must not cause PID reacquisition.
+                ? (reacquireCount >= 2 && reacquireCount <= 6 &&
+                   (reacquireMask & TURN_CENTER_SENSOR_MASK) != 0U &&
+                   reacquirePositionValid &&
+                   fabsf(reacquirePosition) <= TURN_CENTERED_POSITION &&
+                   hasAdjacentLineSensors(reacquireMask))
+                : ((blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
+                   (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION));
             if (reliableReacquisition) {
                 if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
                     ++centeredTurnFrames;
@@ -797,6 +1017,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 centeredTurnFrames = 0;
             }
             if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
+                earlyTurnActive = false;
                 turnState = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
@@ -837,6 +1058,24 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
 
         if (!isSearchTurn() && blackCount == 0) {
+            // The last valid physical line measurement was at the far edge
+            // and its direction agrees with the active sharp turn. Start
+            // the existing SEARCH pivot on this FIRST all-white sample.
+            // Keep the normal 30ms grace for centered dashed-line gaps.
+            const bool edgeCornerLost =
+                (turnState == TURN_RIGHT &&
+                 lastKnownPosition >= EDGE_CORNER_IMMEDIATE_SEARCH_ERROR) ||
+                (turnState == TURN_LEFT &&
+                 lastKnownPosition <= -EDGE_CORNER_IMMEDIATE_SEARCH_ERROR);
+            if (edgeCornerLost) {
+                turnState = searchStateFor(turnState);
+                searchStartedMs = now;
+                centeredTurnFrames = 0;
+                turnMissing = false;
+                missing = false;
+                clearPidState();
+                return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+            }
             if (!turnMissing) {
                 turnMissing = true;
                 turnMissingSinceMs = now;
@@ -854,6 +1093,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
+            earlyTurnActive = false;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
@@ -931,6 +1171,76 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
 }
 
+// Returns true when Map 2 checkpoint owns motor commands for this cycle.
+// A position read from memory is never accepted as evidence of a centered line.
+static bool map2HoldLineStep(float position, uint8_t blackCount, bool good) {
+    if (selectedMap != 2 || map2HoldState == 0) return false;
+    if (map2HoldState == 3) {
+        currentCase = LINE_CASE_STOPPED;
+        motor_stop();
+        return true;
+    }
+    currentCase = LINE_CASE_MAP2_HOLD;
+    const uint32_t now = millis();
+    const uint16_t physical = sensor_get_line_bits();
+    const bool valid = good && blackCount >= 2 && blackCount <= 6 &&
+        (physical & TURN_CENTER_SENSOR_MASK) != 0U &&
+        (physical & 0xF00FU) == 0U;
+    const bool centered = valid && fabsf(position) <= MAP2_STABLE_LINE_ERROR;
+    if ((uint32_t)(now - map2HoldStartMs) >= MAP2_HOLD_TIMEOUT_MS) {
+        map2HoldState = 3;
+        motor_stop();
+        return true;
+    }
+    if (!centered) {
+        map2StableSinceMs = 0;
+        map2HoldState = 1;
+        if (!valid) {
+            motor_stop(); // No blind line search at a checkpoint.
+        } else if (position < 0.0f) {
+            motor_set_speeds(-MAP2_ALIGN_PWM, MAP2_ALIGN_PWM);
+        } else {
+            motor_set_speeds(MAP2_ALIGN_PWM, -MAP2_ALIGN_PWM);
+        }
+        return true;
+    }
+
+    // At center: stop the wheels and establish a NEW stable reference.
+    // Require encoder travel <=2 ticks over a continuous 10-ms window.
+    motor_stop();
+    int32_t left = 0, right = 0;
+    encoder_get_counts(&left, &right);
+    if (!map2StableSinceMs) {
+        map2HoldState = 2;
+        map2StableSinceMs = now;
+        map2StableEncL = left;
+        map2StableEncR = right;
+        return true;
+    }
+    if (labs((long)left-map2StableEncL) > MAP2_STILL_ENCODER_TOLERANCE ||
+        labs((long)right-map2StableEncR) > MAP2_STILL_ENCODER_TOLERANCE) {
+        map2StableSinceMs = now;
+        map2StableEncL = left;
+        map2StableEncR = right;
+        return true;
+    }
+    if ((uint32_t)(now-map2StableSinceMs) < MAP2_STABLE_LINE_MS) return true;
+    // Completed checkpoint. Switch stage only AFTER stable centered line.
+    if (map2SensorActiveStage < 3) ++map2SensorActiveStage;
+    map2HoldState = 0;
+    map2StableSinceMs = 0;
+    turnState = TURN_NONE;
+    earlyTurnActive = false;
+    lineLocked = true;
+    missing = acquiring = false;
+    clearPidState();
+    derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+    reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+    resetWheelSpeedPid();
+    motor_stop(); // Normal line PID resumes in the next iteration.
+    return true;
+}
+
 void pid_line_follow_step(void) {
     if (!autoMode) return;
     float pos = 0;
@@ -940,9 +1250,23 @@ void pid_line_follow_step(void) {
         if (progress > map1MaxProgress) map1MaxProgress = progress;
     }
     const bool good = pid_calculate_position(&pos, &blackCount);
+    // Map 2 progresses continuously; only retain ticks for early turn recognition.
+    if (selectedMap == 2) {
+        const int32_t progress = runEncoderProgress();
+        if (progress > map2MaxProgress) map2MaxProgress = progress;
+    }
+    if (selectedMap == 2 && map2HoldState != 0) {
+        // Preserve FINISH detection even during checkpoint pauses.
+        if (finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU) {
+            currentCase = pid_detect_case(pos, blackCount);
+            motor_stop();
+            if (currentCase == LINE_CASE_STOPPED) return;
+        }
+        if (map2HoldLineStep(pos, blackCount, good)) return;
+    }
     // Physical position/blackCount continue to drive all existing FSM cases.
     // Only the NORMAL_PID steering error uses the encoder-selected subset.
-    const uint16_t pidSensorMask = map1PidSensorMask();
+    const uint16_t pidSensorMask = activePidSensorMask();
     float pidPosition = pos;
     const bool pidMeasurementGood =
         pidSensorMask == MAP1_SENSOR_MASK_STAGE3
@@ -950,6 +1274,19 @@ void pid_line_follow_step(void) {
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
+    if (selectedMap == 2 && map2HoldState == 0 &&
+        map2SensorActiveStage < 3 && finishDetectionArmed &&
+        currentCase == LINE_CASE_NORMAL_PID && lineLocked &&
+        turnState == TURN_NONE &&
+        map2SensorMaxTravel >= map2SensorTickEnds[map2SensorActiveStage]) {
+        map2HoldState = 1;
+        map2HoldStartMs = millis();
+        map2StableSinceMs = 0;
+        clearPidState();
+        resetWheelSpeedPid();
+        map2HoldLineStep(pos, blackCount, good);
+        return;
+    }
     if (map1Route.active && currentCase != LINE_CASE_STOPPED) {
         const bool validRouteLine =
             finishDetectionArmed && lineLocked &&
@@ -975,15 +1312,6 @@ void pid_line_follow_step(void) {
         motor_stop();
         return;
     }
-    if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1) {
-        if (currentCase != LINE_CASE_NORMAL_PID || !pidMeasurementGood) {
-            map1BoostActive = false;
-            map1CenteredSinceMs = 0;
-            map1LastUnsafeMs = millis();
-            map1ScheduledBase = fminf(map1ScheduledBase,
-                                     map1CappedBase(map1MaxProgress));
-        }
-    }
     const uint32_t nowUs = micros();
     const float measuredDt = (float)(nowUs - lastComputeTimeUs) * 1e-6f;
     const bool dtValid = measuredDt > 0 && measuredDt <= 0.1f;
@@ -992,28 +1320,35 @@ void pid_line_follow_step(void) {
     if (prev != LINE_CASE_NORMAL_PID || currentCase != LINE_CASE_NORMAL_PID)
         derivativeHistoryValid = false;
 
+    // Close wheel speed loop only when the line PID has a valid line measurement.
+    // SEARCH, dash gaps, crossing and stop keep their established direct PWM logic.
+    if (currentCase != LINE_CASE_NORMAL_PID || !pidMeasurementGood)
+        resetWheelSpeedPid();
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
-            const int16_t searchPwm = searchPwmForCurrentTurn();
-            motor_set_speeds(-searchPwm, searchPwm);
+            if (earlyTurnActive)
+                motor_set_speeds(-EARLY_TURN_INNER_REVERSE_PWM,
+                                  EARLY_TURN_OUTER_FORWARD_PWM);
+            else {
+                const int16_t searchPwm = searchPwmForCurrentTurn();
+                motor_set_speeds(-searchPwm, searchPwm);
+            }
         } else {
-            const int16_t outer = map1Route.active
-                ? (int16_t)fminf((float)sharpTurnPwm(),
-                                map1Route.wheelCap(map1MaxProgress))
-                : sharpTurnPwm();
+            const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(inner, outer);
         }
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
         if (turnState == SEARCH_RIGHT) {
-            motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
+            if (earlyTurnActive)
+                motor_set_speeds(EARLY_TURN_OUTER_FORWARD_PWM,
+                                 -EARLY_TURN_INNER_REVERSE_PWM);
+            else
+                motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
-            const int16_t outer = map1Route.active
-                ? (int16_t)fminf((float)sharpTurnPwm(),
-                                map1Route.wheelCap(map1MaxProgress))
-                : sharpTurnPwm();
+            const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
@@ -1053,70 +1388,22 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        const uint16_t sensorMask = sensor_get_line_bits();
-        float requestedBase = (float)pidConfig.baseSpeed;
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
-            requestedBase = map1UpdateScheduledBase(
-                map1MaxProgress, absErr, blackCount, sensorMask, dt);
-        float base = updateForwardSpeed(absErr, requestedBase);
-        // Replace only the forward-speed target on the first straight. Keep
-        // existing PID steering, error governor, outer-eye limits, and SEARCH.
-        // For BASE:120, command envelope is 120 -> 255 -> 120.
-        const bool highSpeedStraight =
-            (highSpeedStage == HS_ACCEL || highSpeedStage == HS_CRUISE) &&
-            turnState == TURN_NONE;
-        const bool highSpeedDecelOrHold =
-            highSpeedStage == HS_BRAKE ||
-            highSpeedStage == HS_CORNER_HOLD;
-        // Do not drop the low-speed target merely because TURN_RIGHT was
-        // detected: NORMAL_PID can continue steering through the corner.
-        // Dedicated sharp-turn/search cases retain their pivot commands.
-        if (ENCODER_SPEED_PROFILE_ENABLED && (highSpeedStraight || highSpeedDecelOrHold)) {
-                const float profile = highSpeedForwardTarget(
-                    highSpeedMaxProgress, (float)pidConfig.baseSpeed);
-                const float errorRatio = fminf(
-                    absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-                const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-                    ? pidConfig.baseSpeed : 45);
-                base = fmaxf(minimumSpeed,
-                    profile * (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio));
-                if (base > pidConfig.maxSpeed) base = pidConfig.maxSpeed;
-                governedForwardSpeed = base;
-        }
-        const float edgeSeverity = outerSensorSeverity(sensorMask);
-        if (edgeSeverity > 0.0f) {
-            const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-                ? pidConfig.baseSpeed : 45);
-            const float edgeSpeed = fmaxf(
-                minimumSpeed,
-                (float)pidConfig.baseSpeed *
-                    (1.0f - OUTER_SENSOR_SPEED_REDUCTION * edgeSeverity));
-            if (edgeSpeed < base) base = edgeSpeed;
-            governedForwardSpeed = base;
-        }
-        if (reacquireSpeedFrames > 0) {
-            const float rampProgress =
-                (float)(REACQUIRE_SPEED_RAMP_FRAMES -
-                        reacquireSpeedFrames) /
-                (float)(REACQUIRE_SPEED_RAMP_FRAMES - 1U);
-            const float rampSpeed = (float)DROPOUT_FORWARD_PWM +
-                (governedForwardSpeed - (float)DROPOUT_FORWARD_PWM) *
-                    rampProgress;
-            if (rampSpeed < base) base = rampSpeed;
-            --reacquireSpeedFrames;
-        }
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 &&
-            map1MaxProgress >= MAP1_SLOW_START_ENC &&
-            map1MaxProgress < MAP1_SLOW_END_ENC &&
-            (uint32_t)(millis() - map1LastUnsafeMs) < MAP1_REACQUIRE_HOLD_MS) {
-            // Stay slow for 80 ms after reacquiring the 5k-6k corner cluster.
-            base = fminf(base, MAP1_RISK_BASE_PWM);
-            governedForwardSpeed = base;
-        }
-        const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
-        float correction = lastCorrection;
-        if (correction > correctionLimit) correction = correctionLimit;
-        if (correction < -correctionLimit) correction = -correctionLimit;
+        // Map 1 only: once 10,500 forward-progress ticks have been reached,
+        // boost the base PWM to HS_PEAK on a confirmed centered line.
+        // The boost remains armed until the next AUTO start, but is applied
+        // only while the line is centered; corners retain the configured BASE.
+        // Maps 2 and 3 always keep the regular BASE.
+        const bool map1ReadyForBoost = selectedMap == 1 &&
+            map1MaxProgress >= MAP1_LATE_BOOST_START_TICKS;
+        const bool centeredForBoost = pidMeasurementGood &&
+            fabsf(pidPosition) <= MAP1_LATE_BOOST_CENTER_ERROR;
+        if (map1ReadyForBoost && centeredForBoost)
+            map1LateBoostEngaged = true;
+        float base = (float)pidConfig.baseSpeed;
+        if (map1ReadyForBoost && centeredForBoost)
+            base = (float)highSpeedPeakPwm;
+        governedForwardSpeed = base;
+        const float correction = lastCorrection;
 
         // Preserve the current governed forward PWM for map-specific gaps.
         lastNormalForwardPwm = clampPwm(base);
@@ -1125,30 +1412,15 @@ void pid_line_follow_step(void) {
 
         float leftCommand = base + correction;
         float rightCommand = base - correction;
-        const float outerErrorRatio = fminf(
-            fmaxf((absErr - OUTER_STEERING_START_ERROR) /
-                  (OUTER_STEERING_FULL_ERROR - OUTER_STEERING_START_ERROR),
-                  0.0f),
-            1.0f);
-        const float steeringSeverity = fmaxf(outerErrorRatio, edgeSeverity);
-        float steeringPeakLimit = base +
-            ((float)pidConfig.maxSpeed - base) * steeringSeverity;
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1 &&
-            map1MaxProgress >= MAP1_SLOW_START_ENC &&
-            map1MaxProgress < MAP1_SLOW_END_ENC) {
-            // Prevent high P/D steering commands from bypassing the
-            // low BASE cap with a +/-255 PWM spike near the 5k-6k turns.
-            const float wheelLimit =
-                map1MaxProgress >= MAP1_SLOW_TIGHT_START_ENC &&
-                map1MaxProgress < MAP1_SLOW_TIGHT_END_ENC
-                ? MAP1_RISK_WHEEL_LIMIT : MAP1_CORNER_WHEEL_LIMIT;
-            steeringPeakLimit = fminf(steeringPeakLimit, wheelLimit);
+        // With wheel PI disabled, output the line PID's signed PWM directly.
+        // The wheel-speed feedback implementation remains available for re-enable.
+        const int16_t leftPwm = clampPwmSigned(leftCommand);
+        const int16_t rightPwm = clampPwmSigned(rightCommand);
+        if (WHEEL_PID_ENABLED) {
+            driveWheelSpeedCascade(leftPwm, rightPwm);
+        } else {
+            motor_set_speeds(leftPwm, rightPwm);
         }
-        if (map1Route.active)
-            steeringPeakLimit = fminf(steeringPeakLimit,
-                                      map1Route.wheelCap(map1MaxProgress));
-        limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
-        motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
         // On the all-black START pad, use BASE to ensure forward motion.
@@ -1169,7 +1441,6 @@ void pid_line_follow_step(void) {
         const float coastCorrection = lastDashedCorrection * 0.3f; // was 0.7f — less sideways drift
         float leftCommand = coastBase + coastCorrection;
         float rightCommand = coastBase - coastCorrection;
-        limitMotorCommandPeak(leftCommand, rightCommand, coastBase * 1.5f); // was coastBase — allow outer wheel to stay up
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {
@@ -1202,6 +1473,7 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
         case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
         case LINE_CASE_GAP_BRIDGE: return "CASE 11: Map GAP bridge 100ms";
+        case LINE_CASE_MAP2_HOLD: return "CASE 12: Map2 stationary line hold";
         default: return "Khong Xac Dinh";
     }
 }

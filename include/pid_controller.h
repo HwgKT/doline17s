@@ -25,7 +25,8 @@ typedef enum
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
   LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
   LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
-  LINE_CASE_GAP_BRIDGE = 11 // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_GAP_BRIDGE = 11, // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_MAP2_HOLD = 12 // Temporary Map2 line-hold checkpoint; AUTO continues
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
@@ -74,6 +75,13 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
+// Map 2: 4 PID eye-mask stages selected by three encoder thresholds.
+// 3 ordered positive ticks and 4 nonzero masks. AUTO must be off.
+bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
+void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
+uint8_t pid_get_map2_sensor_stage(void);
+// Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
+uint8_t pid_get_map2_hold_state(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
@@ -90,6 +98,8 @@ uint8_t pid_get_map1_route_fault_code(void);
 uint16_t pid_get_map1_selected_line_mask(void);
 // MAP 1 late speed scheduler threshold; 0 means inactive.
 int32_t pid_get_map1_late_boost_start(void);
+// True once Map 1 has actually applied HS_PEAK on a valid centered line.
+bool pid_is_map1_late_boost_engaged(void);
 // Dynamic brake start: 1800 for peak 100..229; 1600 for 230..239; 1400 for 240..255.
 // Encoder ticks are relative to the current AUTO origin on all MAPs.
 int32_t pid_get_high_speed_brake_start(void);
