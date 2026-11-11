@@ -639,6 +639,8 @@ void loop() {
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
     const uint8_t oldRouteStage=pid_get_map1_route_stage();
+    const uint8_t oldMap2State=pid_get_map2_checkpoint_state();
+    const uint8_t oldMap2Stage=pid_get_map2_tick_stage();
     const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
     if(!wasFinishArmed && pid_finish_detection_armed()){
@@ -649,6 +651,18 @@ void loop() {
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
     const uint8_t newRouteStage=pid_get_map1_route_stage();
     const uint8_t newRouteFault=pid_get_map1_route_fault_code();
+    const uint8_t newMap2State=pid_get_map2_checkpoint_state();
+    const uint8_t newMap2Stage=pid_get_map2_tick_stage();
+    if(pid_get_selected_map()==2 &&
+       (newMap2State!=oldMap2State || newMap2Stage!=oldMap2Stage)){
+      char evt[125];
+      snprintf(evt,sizeof(evt),
+        "MAP2_CHECKPOINT stage=%u/%u state=%u runEnc=%ld t_ms=%lu",
+        (unsigned)newMap2Stage,(unsigned)pid_get_map2_tick_count(),
+        (unsigned)newMap2State,(long)pid_get_run_encoder_progress(),
+        (unsigned long)millis());
+      reply(evt);
+    }
     // A latched finish or PID stop must end AUTO, otherwise Python remains
     // in AUTO while both PWM outputs are zero and START stays locked.
     // Snapshot the stop reason BEFORE safeStop() clears PID state.
