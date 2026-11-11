@@ -905,14 +905,14 @@ class App(tk.Tk):
         self.map1_base_window = win
         win.title("MAP 1 — BASE theo 8 đoạn encoder")
         win.configure(bg=PANEL)
-        win.geometry("560x500")
-        win.minsize(520, 460)
+        win.geometry("590x565")
+        win.minsize(540, 525)
         win.transient(self)
 
         self.label(
             win,
-            "Nhập BASE mục tiêu cho từng đoạn. PID gains giữ nguyên; "
-            "speed governor vẫn có thể giảm PWM thực tế theo sai số line.",
+            "Nhập BASE mục tiêu cho từng đoạn hoặc đặt một BASE chung. "
+            "Giá trị chỉ được xác nhận sau khi ESP32 gửi ACK.",
             bg=PANEL, fg=MUTED, wraplength=520, justify="left"
         ).pack(anchor="w", padx=12, pady=(10, 7))
 
@@ -945,6 +945,14 @@ class App(tk.Tk):
             ttk.Entry(table, textvariable=var, width=10,
                       justify="center").grid(row=i + 1, column=2,
                                              sticky="w", padx=4, pady=4)
+
+        uniform_bar = tk.Frame(win, bg=PANEL, padx=12, pady=6)
+        uniform_bar.pack(fill="x")
+        self.label(uniform_bar, "BASE PWM chung (45–255):", bg=PANEL,
+                   fg=CYAN).pack(side="left", padx=(0, 8))
+        uniform_pwm_var = tk.StringVar(value="130")
+        ttk.Entry(uniform_bar, textvariable=uniform_pwm_var, width=9,
+                  justify="center").pack(side="left", padx=(0, 8))
 
         feedback = tk.StringVar(
             value="Chỉ áp dụng khi đã kết nối SPP, chọn MAP 1 và robot STOP.")
@@ -987,6 +995,24 @@ class App(tk.Tk):
                 self.map1_base_dirty = False
                 self.map1_base_status.set("MAP 1 BASE: đang chờ ESP32 xác nhận")
                 feedback.set("Đã gửi cấu hình; chỉ coi là áp dụng sau khi nhận ACK.")
+
+        def apply_uniform_pwm():
+            try:
+                value = int(uniform_pwm_var.get().strip())
+            except ValueError:
+                feedback.set("BASE PWM chung phải là số nguyên.")
+                return
+            if not 45 <= value <= 255:
+                feedback.set("BASE PWM chung phải nằm trong khoảng 45–255.")
+                return
+            for var in self.map1_base_vars:
+                var.set(str(value))
+            # Reuse the exact eight-segment SPP write path and STOP safety
+            # checks; do not claim success before ESP32 sends an ACK.
+            apply_profile()
+
+        ttk.Button(uniform_bar, text="Áp dụng cho cả 8 đoạn",
+                   command=apply_uniform_pwm).pack(side="left")
 
         def load_defaults():
             defaults = [140, 140, 140, 240, 210, 240, 210, 255]
