@@ -711,9 +711,9 @@ void loop() {
       if(sensorStage!=oldMap3SensorStage || baseStage!=oldMap3BaseStage){
         char msg[150];
         snprintf(msg,sizeof(msg),
-          "MAP3_STAGE sensor=%u base=%u runEnc=%ld basePWM=%d t_ms=%lu",
+          "MAP3_STAGE sensor=%u base=%u travel=%ld basePWM=%d t_ms=%lu",
           (unsigned)sensorStage,(unsigned)baseStage,
-          (long)pid_get_run_encoder_progress(),
+          (long)pid_get_map3_travel_ticks(),
           pid_get_active_base_speed(),(unsigned long)millis());
         reply(msg);
       }
