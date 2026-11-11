@@ -75,8 +75,14 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
-// Map 2: 4 PID eye-mask stages selected by three encoder thresholds.
-// 3 ordered positive ticks and 4 nonzero masks. AUTO must be off.
+// Map 2: 1..8 PID mask stages, N-1 strictly increasing encoder ticks.
+// Last stage continues until FINISH. Configure only while AUTO is stopped.
+// Legacy four-stage API remains for older SPP clients.
+#define PID_MAP2_SENSOR_MAX_STAGES 8
+bool pid_set_map2_sensor_profile_v2(uint8_t stageCount, const int32_t *endTicks,
+                                    const uint16_t *masks);
+void pid_get_map2_sensor_profile_v2(uint8_t *stageCount, int32_t *endTicks,
+                                    uint16_t *masks);
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map2_sensor_stage(void);
