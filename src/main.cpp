@@ -519,11 +519,14 @@ constexpr float REVERSE_CONFIRMED_TPS = 100.0f;
 struct ReverseTrace {
   int8_t lastDirection = 0;
   uint32_t lastDirectionMs = 0;
+  int16_t lastMeaningfulPwm = 0;
   bool active = false;
   int8_t targetDirection = 0;
   uint32_t startedMs = 0;
   int32_t startedEncoder = 0;
   int16_t previousPwm = 0, requestedPwm = 0;
+  uint32_t zeroCrossMs = 0;
+  bool zeroCrossSeen = false;
   float beforeTps = 0.0f;
   uint8_t confirmedSamples = 0;
 };
@@ -547,6 +550,8 @@ void traceWheelReversals() {
   int32_t encoder[2];
   encoder_get_counts(&encoder[0], &encoder[1]);
   const uint32_t dtMs = now - reverseSampleMs;
+  const float speedBeforeSample[2] = {reverseSpeedTps[0], reverseSpeedTps[1]};
+  const bool hadPriorSpeedSample = reverseSpeedValid;
   bool sampled = false;
   if (dtMs >= REVERSE_SAMPLE_MS) {
     if (dtMs <= 100) {
@@ -575,13 +580,18 @@ void traceWheelReversals() {
       tr.targetDirection = direction;
       tr.startedMs = now;
       tr.startedEncoder = encoder[w];
-      tr.previousPwm = tr.lastDirection * REVERSE_PWM_MIN;
+      tr.previousPwm = tr.lastMeaningfulPwm;
       tr.requestedPwm = pwm[w];
-      tr.beforeTps = reverseSpeedValid ? reverseSpeedTps[w] : 0.0f;
+      tr.beforeTps = hadPriorSpeedSample ? speedBeforeSample[w] : 0.0f;
+      tr.zeroCrossSeen = false;
       tr.confirmedSamples = 0;
     }
 
     if (tr.active) {
+      if (sampled && !tr.zeroCrossSeen && reverseSpeedTps[w] * tr.targetDirection >= 0.0f) {
+        tr.zeroCrossSeen = true;
+        tr.zeroCrossMs = now - tr.startedMs;
+      }
       if (sampled && reverseSpeedTps[w] * tr.targetDirection >= REVERSE_CONFIRMED_TPS) {
         if (tr.confirmedSamples < 2) ++tr.confirmedSamples;
       } else if (sampled) {
@@ -594,12 +604,14 @@ void traceWheelReversals() {
       if (done || timeout || cancelled) {
         if (btConnected()) {
           sppLogPrintf(
-            "[WHEEL_REV] wheel=%c result=%s t0_ms=%lu dt_ms=%lu pwm_req=%d "
+            "[WHEEL_REV] wheel=%c result=%s t0_ms=%lu dt_ms=%lu "
+            "pwm_prev=%d pwm_req=%d zero_ms=%ld "
             "v_before=%.1f v_after=%.1f delta_enc=%ld t_ms=%lu",
             w == 0 ? 'L' : 'R',
             done ? "DONE" : cancelled ? "CANCEL" : "TIMEOUT",
             (unsigned long)tr.startedMs, (unsigned long)(now - tr.startedMs),
-            (int)tr.requestedPwm, (double)tr.beforeTps,
+            (int)tr.previousPwm, (int)tr.requestedPwm,
+            tr.zeroCrossSeen ? (long)tr.zeroCrossMs : -1L, (double)tr.beforeTps,
             (double)(reverseSpeedValid ? reverseSpeedTps[w] : 0.0f),
             (long)(encoder[w] - tr.startedEncoder), (unsigned long)now);
         }
@@ -611,6 +623,7 @@ void traceWheelReversals() {
     if (direction != 0) {
       tr.lastDirection = direction;
       tr.lastDirectionMs = now;
+      tr.lastMeaningfulPwm = pwm[w];
     }
   }
 }
