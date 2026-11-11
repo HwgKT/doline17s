@@ -118,7 +118,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP_SPEED_PROFILE_V2 MAP_SPEED_PROFILE_V2:map,count,endTick,base,... MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP_SPEED_PROFILE_V2 MAP_SPEED_PROFILE_V2:map,count,endTick,base,... MAP_SENSOR_PROFILE_V2:2 MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -238,8 +238,69 @@ void command(const String &raw) {
     command(String("MAP_SPEED_PROFILE_V2:")+String(mapId));return;
   }
 
+  // Map 2 variable-length PID sensor stages. Protocol is identical to v5:
+  // MAP_SENSOR_PROFILE_V2:2,N,endTick1,mask1,...,0,lastMask
+  // MAP_SENSOR_PROFILE_V2:2 reads the entire active profile.
+  if(s.startsWith("MAP_SENSOR_PROFILE_V2:")){
+    const String payload=s.substring(String("MAP_SENSOR_PROFILE_V2:").length());
+    if(payload.indexOf(',')<0){
+      if(payload!="2"){reply("ERR: MAP_SENSOR_PROFILE_V2_MAP2_ONLY");return;}
+      uint8_t stages=0;
+      int32_t ticks[PID_MAP2_SENSOR_MAX_STAGES-1]={0};
+      uint16_t masks[PID_MAP2_SENSOR_MAX_STAGES]={0};
+      pid_get_map2_sensor_profile_v2(&stages,ticks,masks);
+      char out[240];
+      int used=snprintf(out,sizeof(out),"MAP_SENSOR_PROFILE_V2:2,%u",(unsigned)stages);
+      for(uint8_t i=0;i<stages && used>0 && used<(int)sizeof(out);++i){
+        const long endTick=(i+1U<stages)?(long)ticks[i]:0L;
+        used+=snprintf(out+used,sizeof(out)-(size_t)used,",%ld,%04X",
+                       endTick,(unsigned)masks[i]);
+      }
+      reply(out);return;
+    }
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP_SENSOR_PROFILE_V2_STOP_REQUIRED");return;
+    }
+    long values[2U+2U*PID_MAP2_SENSOR_MAX_STAGES]={0};
+    uint8_t parsed=0;
+    if(!parseMapProfileCsv(payload,values,2U+2U*PID_MAP2_SENSOR_MAX_STAGES,
+                           &parsed,true) || parsed<4U || (parsed%2U)!=0U){
+      reply("ERR: MAP_SENSOR_PROFILE_V2_FORMAT");return;
+    }
+    const int mapId=(int)values[0],stages=(int)values[1];
+    if(mapId!=2){reply("ERR: MAP_SENSOR_PROFILE_V2_MAP2_ONLY");return;}
+    if(stages<1 || stages>PID_MAP2_SENSOR_MAX_STAGES ||
+       parsed!=(uint8_t)(2+2*stages)){
+      reply("ERR: MAP_SENSOR_PROFILE_V2_STAGE_COUNT_1_8");return;
+    }
+    int32_t ticks[PID_MAP2_SENSOR_MAX_STAGES-1]={0};
+    uint16_t masks[PID_MAP2_SENSOR_MAX_STAGES]={0};
+    for(int i=0;i<stages;++i){
+      const long endTick=values[2+2*i],mask=values[3+2*i];
+      if(i+1==stages){
+        if(endTick!=0){reply("ERR: MAP_SENSOR_PROFILE_V2_LAST_STAGE_MUST_FINISH");return;}
+      }else{
+        if(endTick<=0 || endTick>10000000L){
+          reply("ERR: MAP_SENSOR_PROFILE_V2_TICK_RANGE");return;
+        }
+        ticks[i]=(int32_t)endTick;
+      }
+      if(mask<=0 || mask>0xFFFFL){
+        reply("ERR: MAP_SENSOR_PROFILE_V2_MASK_RANGE");return;
+      }
+      masks[i]=(uint16_t)mask;
+    }
+    if(!pid_set_map2_sensor_profile_v2((uint8_t)stages,ticks,masks)){
+      reply("ERR: MAP_SENSOR_PROFILE_V2_INVALID_OR_UNSORTED_TICKS");return;
+    }
+    command("MAP_SENSOR_PROFILE_V2:2");return;
+  }
+
   // MAP 2: four masks, three tick boundaries; HEX masks like SENSOR_PROFILE.
   if(s=="MAP2_SENSOR_PROFILE"){
+    uint8_t count=0;
+    pid_get_map2_sensor_profile_v2(&count,nullptr,nullptr);
+    if(count!=4){reply("ERR: MAP2_SENSOR_PROFILE_USE_MAP_SENSOR_PROFILE_V2:2");return;}
     int32_t t[3]={}; uint16_t m[4]={};
     pid_get_map2_sensor_profile(t,m);
     char b[165];
