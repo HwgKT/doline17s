@@ -510,120 +510,6 @@ void sendFrame(){
   t.mode=pid_is_auto_mode()?1:0;
   if(btSendTelemetry(t))++txCount;
 }
-// Passive 5-ms encoder sampling. Motor reversal timestamps are captured at
-// motor_set_left/right, not inferred from the slower telemetry stream.
-constexpr uint32_t REV_SAMPLE_US = 5000U;
-constexpr uint32_t REV_TIMEOUT_US = 600000U;
-constexpr float REV_STABLE_TPS = 100.0f;
-struct WheelReverseTrace {
-  bool active = false;
-  int8_t target = 0;
-  MotorReverseEvent command{};
-  float vBefore = 0, vAfter = 0;
-  float v10 = 0, v20 = 0, v50 = 0, v100 = 0;
-  bool got10 = false, got20 = false, got50 = false, got100 = false;
-  int32_t zeroMs = -1;
-  uint8_t stableCount = 0;
-};
-WheelReverseTrace reverseTrace[2];
-uint32_t reverseLastSampleUs = 0;
-int32_t reverseLastEnc[2] = {0, 0};
-float reverseVelocity[2] = {0, 0};
-bool reverseVelocityReady = false;
-
-void reportWheelReverse(uint8_t wheel, const char *result, uint32_t nowUs, int32_t encoder) {
-  WheelReverseTrace &tr = reverseTrace[wheel];
-  if (!tr.active) return;
-  const uint32_t elapsedMs = (uint32_t)(nowUs - tr.command.t_us) / 1000U;
-  if (btConnected()) {
-    sppLogPrintf(
-      "[WHEEL_REV] wheel=%c result=%s t0_us=%lu dt_ms=%lu "
-      "pwm_prev=%d pwm_req=%d v_before=%.1f v_after=%.1f "
-      "zero_ms=%ld v10=%.1f v20=%.1f v50=%.1f v100=%.1f delta_enc=%ld",
-      wheel == 0 ? 'L' : 'R', result,
-      (unsigned long)tr.command.t_us, (unsigned long)elapsedMs,
-      (int)tr.command.pwm_prev, (int)tr.command.pwm_req,
-      (double)tr.vBefore, (double)tr.vAfter, (long)tr.zeroMs,
-      (double)tr.v10, (double)tr.v20, (double)tr.v50,
-      (double)tr.v100, (long)(encoder - tr.command.encoder));
-  }
-  tr.active = false;
-}
-
-void traceWheelReversals() {
-  const uint32_t nowUs = micros();
-  int32_t encoder[2] = {0, 0};
-  encoder_get_counts(&encoder[0], &encoder[1]);
-  if (!pid_is_auto_mode()) {
-    for (uint8_t w = 0; w < 2; ++w) {
-      if (reverseTrace[w].active)
-        reportWheelReverse(w, "AUTO_END", nowUs, encoder[w]);
-      reverseTrace[w] = WheelReverseTrace{};
-      MotorReverseEvent unused{};
-      while (motor_take_reverse_event(w, &unused)) {}
-    }
-    reverseLastSampleUs = nowUs;
-    reverseLastEnc[0] = encoder[0];
-    reverseLastEnc[1] = encoder[1];
-    reverseVelocityReady = false;
-    return;
-  }
-
-  // Start a trace on the *actual* motor command edge.
-  for (uint8_t w = 0; w < 2; ++w) {
-    MotorReverseEvent event{};
-    if (motor_take_reverse_event(w, &event)) {
-      if (reverseTrace[w].active)
-        reportWheelReverse(w, "SUPERSEDED", nowUs, encoder[w]);
-      WheelReverseTrace &tr = reverseTrace[w];
-      tr = WheelReverseTrace{};
-      tr.active = true;
-      tr.command = event;
-      tr.target = event.pwm_req > 0 ? 1 : -1;
-      // Velocity is from the prior completed encoder interval, never future data.
-      tr.vBefore = reverseVelocityReady ? reverseVelocity[w] : 0.0f;
-    }
-  }
-
-  const uint32_t elapsedUs = (uint32_t)(nowUs - reverseLastSampleUs);
-  if (elapsedUs < REV_SAMPLE_US) return;
-  const bool valid = elapsedUs <= 30000U;
-  for (uint8_t w = 0; w < 2; ++w) {
-    if (valid)
-      reverseVelocity[w] =
-        (float)(encoder[w] - reverseLastEnc[w]) * 1000000.0f / (float)elapsedUs;
-  }
-  reverseLastSampleUs = nowUs;
-  reverseLastEnc[0] = encoder[0];
-  reverseLastEnc[1] = encoder[1];
-  reverseVelocityReady = valid;
-  if (!valid) return;
-
-  for (uint8_t w = 0; w < 2; ++w) {
-    WheelReverseTrace &tr = reverseTrace[w];
-    if (!tr.active) continue;
-    const uint32_t ageUs = (uint32_t)(nowUs - tr.command.t_us);
-    const uint32_t ageMs = ageUs / 1000U;
-    const float v = reverseVelocity[w];
-    tr.vAfter = v;
-    if (!tr.got10 && ageMs >= 10) { tr.v10 = v; tr.got10 = true; }
-    if (!tr.got20 && ageMs >= 20) { tr.v20 = v; tr.got20 = true; }
-    if (!tr.got50 && ageMs >= 50) { tr.v50 = v; tr.got50 = true; }
-    if (!tr.got100 && ageMs >= 100) { tr.v100 = v; tr.got100 = true; }
-    if (tr.zeroMs < 0 && v * tr.target >= 0.0f)
-      tr.zeroMs = (int32_t)ageMs;
-    if (v * tr.target >= REV_STABLE_TPS) {
-      if (tr.stableCount < 2) ++tr.stableCount;
-    } else {
-      tr.stableCount = 0;
-    }
-    if (tr.stableCount >= 2)
-      reportWheelReverse(w, "DONE", nowUs, encoder[w]);
-    else if (ageUs >= REV_TIMEOUT_US)
-      reportWheelReverse(w, "TIMEOUT", nowUs, encoder[w]);
-  }
-}
-
 } // namespace
 
 void setup() {
@@ -802,7 +688,6 @@ void loop() {
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
   }
-  traceWheelReversals();
   // No stale bursts; bounded nonblocking enqueue at the selected stream rate.
   const uint32_t txNow=micros();
   if(streamPeriodUs&&!adcBenchActive()){
