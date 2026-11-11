@@ -1410,9 +1410,9 @@ class App(tk.Tk):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
         m2 = re.fullmatch(
-            r"MAP2_SENSOR_PROFILE T1=(\\d+) T2=(\\d+) T3=(\\d+) "
+            r"MAP2_SENSOR_PROFILE T1=(\d+) T2=(\d+) T3=(\d+) "
             r"M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) "
-            r"M3=([0-9A-Fa-f]{4}) M4=([0-9A-Fa-f]{4}) STAGE=(\\d+)",
+            r"M3=([0-9A-Fa-f]{4}) M4=([0-9A-Fa-f]{4}) STAGE=(\d+)",
             message)
         if m2:
             ticks = tuple(int(m2.group(i)) for i in (1,2,3))
