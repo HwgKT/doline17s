@@ -46,8 +46,9 @@ constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
 constexpr int16_t LINE_SEARCH_PWM = 90;
 // Map 1 early corner: fixed SEARCH-style pivot, stronger reverse inner wheel.
-// No change to ordinary SEARCH or line PID. Disabled for the first 2000 ticks.
-constexpr int32_t EARLY_TURN_MIN_TICKS = 2000;
+// No change to ordinary SEARCH or line PID. Active from AUTO start
+// (once the START pad has been exited) until 12000 progress ticks.
+constexpr int32_t EARLY_TURN_MIN_TICKS = 0;
 constexpr int32_t EARLY_TURN_MAX_TICKS = 12000; // exclusive: no new early turns at >=12000
 constexpr int16_t EARLY_TURN_INNER_REVERSE_PWM = 100;
 constexpr int16_t EARLY_TURN_OUTER_FORWARD_PWM = 90;
@@ -267,6 +268,7 @@ bool edgeLeftSeeded = false, edgeRightSeeded = false;
 uint32_t edgeLeftSeedMs = 0, edgeRightSeedMs = 0;
 float edgeLeftSeedCentroid = 0.0f, edgeRightSeedCentroid = 0.0f;
 uint8_t edgeLeftFrames = 0, edgeRightFrames = 0;
+uint16_t edgeTrackSensorMask = 0;
 uint32_t autoStartedMs = 0;
 uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
@@ -406,6 +408,7 @@ static void resetLineTracking() {
     earlyTurnActive = false;
     edgeLeftSeeded = edgeRightSeeded = false;
     edgeLeftFrames = edgeRightFrames = 0;
+    edgeTrackSensorMask = 0;
     turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
     derivativeWarmupFrames = 0;
@@ -454,16 +457,22 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
         severity * (TURN_CURVE_INNER_FACTOR_OPEN - TURN_CURVE_INNER_FACTOR_TIGHT);
     return (int16_t)((float)outer * factor);
 }
-// Update physical-line trend independently of the encoder-dependent PID mask.
-// Called after START/FINISH checks. A seed must originate in the central-left
-// or central-right trapezoid region and reach the corresponding OUTER edge
-// within 150 ms. Three edge frames prevent single-frame IR glitches.
-static int8_t detectEarlyEdgeTurn(uint16_t mask, uint8_t blackCount,
-                                   uint32_t now) {
+// Detect the center-to-edge trend using ONLY the currently enabled PID
+// eyes. Physical all-16 sensing remains unchanged for START and FINISH.
+// Clear unfinished trends whenever the encoder-selected mask stage changes.
+static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
+    const uint16_t allowedMask = map1PidSensorMask();
+    if (allowedMask != edgeTrackSensorMask) {
+        edgeTrackSensorMask = allowedMask;
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+    }
+    const uint16_t mask = physicalMask & allowedMask;
+    const uint8_t blackCount = bitCount16(mask);
     if (selectedMap != 1 || map1MaxProgress < EARLY_TURN_MIN_TICKS ||
         map1MaxProgress >= EARLY_TURN_MAX_TICKS ||
         !finishDetectionArmed || earlyTurnActive || blackCount == 0 ||
-        blackCount > 6 || (mask & 0x000FU && mask & 0xF000U)) {
+        blackCount > 6 || ((mask & 0x000FU) && (mask & 0xF000U))) {
         edgeLeftSeeded = edgeRightSeeded = false;
         edgeLeftFrames = edgeRightFrames = 0;
         return 0;
@@ -836,10 +845,11 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     }
 
     // Prefer a confirmed center-to-edge trajectory over saturated normal PID
-    // once the robot has passed the first 2000 Map-1 travel ticks.
+    // from AUTO START until 12000 Map-1 progress ticks. Only enabled PID
+    // sensors participate in the EARLY_TURN detection.
     // Do not interrupt an already active ordinary SEARCH pivot.
     if (!isSearchTurn() && blackCount > 0) {
-        const int8_t edgeDirection = detectEarlyEdgeTurn(mask, blackCount, now);
+        const int8_t edgeDirection = detectEarlyEdgeTurn(mask, now);
         if (edgeDirection != 0) {
             turnState = edgeDirection < 0 ? SEARCH_LEFT : SEARCH_RIGHT;
             lastTurnDirection = edgeDirection < 0 ? TURN_LEFT : TURN_RIGHT;
@@ -862,12 +872,19 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     // Keep PID steering while a corner remains visible; pivot only after line loss.
     if (turnState != TURN_NONE) {
         if (isSearchTurn()) {
+            const uint16_t reacquireMask =
+                earlyTurnActive ? (mask & map1PidSensorMask()) : mask;
+            const uint8_t reacquireCount = bitCount16(reacquireMask);
+            float reacquirePosition = position;
+            const bool reacquirePositionValid = !earlyTurnActive ||
+                calculateMaskedPidPosition(map1PidSensorMask(), &reacquirePosition);
             const bool reliableReacquisition = earlyTurnActive
-                // Early pivot must not return to PID at the outside edge.
-                ? (blackCount >= 2 && blackCount <= 6 &&
-                   (mask & TURN_CENTER_SENSOR_MASK) != 0U &&
-                   fabsf(position) <= TURN_CENTERED_POSITION &&
-                   hasAdjacentLineSensors(mask))
+                // In EARLY_TURN, disabled eyes must not cause PID reacquisition.
+                ? (reacquireCount >= 2 && reacquireCount <= 6 &&
+                   (reacquireMask & TURN_CENTER_SENSOR_MASK) != 0U &&
+                   reacquirePositionValid &&
+                   fabsf(reacquirePosition) <= TURN_CENTERED_POSITION &&
+                   hasAdjacentLineSensors(reacquireMask))
                 : ((blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
                    (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION));
             if (reliableReacquisition) {
