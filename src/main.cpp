@@ -251,7 +251,9 @@ void command(const String &raw) {
     reply(b);return;
   }
   if(s=="PID_TEST:0" || s=="PID_TEST:OFF"){
-    pidTestStop();reply("PID_TEST: STOPPED");return;
+    // Never touch motor PWM if AUTO/manual is running without PID_TEST.
+    if(pidTestActive)pidTestStop();
+    reply("PID_TEST: STOPPED");return;
   }
   if(s=="PID_TEST:1" || s=="PID_TEST:ON"){
     if(estopLatched || pid_is_auto_mode() || manualActive || adcBenchActive() ||
