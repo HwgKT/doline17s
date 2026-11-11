@@ -341,22 +341,6 @@ class App(tk.Tk):
             command=lambda: self.send_command("SENSOR_PROFILE"))
         self.sensor_profile_read_btn.pack(side="right")
 
-        # Keep the eight-segment speed editor visible even at 720p.
-        # Firmware already supports MAP1_BASE_PROFILE readback/write via SPP.
-        map1_base_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
-        map1_base_bar.pack(fill="x", padx=8, pady=(0, 2))
-        self.map1_base_editor_btn = ttk.Button(
-            map1_base_bar, text="Chỉnh tốc 8 đoạn Map 1",
-            command=self.open_map1_base_editor)
-        self.map1_base_editor_btn.pack(side="left", padx=(0, 8))
-        self.label(map1_base_bar, textvariable=self.map1_base_status,
-                   bg=PANEL, fg=CYAN, font=("Consolas", 9),
-                   anchor="w").pack(side="left", fill="x", expand=True)
-        self.map1_base_read_btn = ttk.Button(
-            map1_base_bar, text="Đọc tốc từ ESP32",
-            command=lambda: self.send_command("MAP1_BASE_PROFILE"))
-        self.map1_base_read_btn.pack(side="right")
-
         # Calibration is a prerequisite for START. Keep its controls visible at
         # minimum window size rather than below the non-scrollable HS_PEAK panel.
         cal_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
@@ -550,6 +534,14 @@ class App(tk.Tk):
         self.label(panel, textvariable=self.hs_peak_feedback,
                    bg=PANEL, fg=MUTED, font=("Segoe UI", 8),
                    anchor="w").pack(fill="x", pady=(0, 1))
+
+        map1_base_row = tk.Frame(panel, bg=PANEL)
+        map1_base_row.pack(fill="x", pady=(3, 2))
+        ttk.Button(map1_base_row, text="BASE từng đoạn Map 1",
+                   command=self.open_map1_base_editor).pack(side="left", padx=(0, 7))
+        self.label(map1_base_row, textvariable=self.map1_base_status,
+                   bg=PANEL, fg=CYAN, font=("Segoe UI", 8),
+                   anchor="w").pack(side="left", fill="x", expand=True)
 
         terminal_heading = tk.Frame(terminal_panel, bg=PANEL)
         terminal_heading.pack(fill="x", pady=(6, 3))
