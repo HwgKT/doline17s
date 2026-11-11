@@ -1348,8 +1348,12 @@ uint32_t pid_get_line_reacquisition_count(void) { return reacquisitions; }
 const char* pid_get_case_name(LineCase_t c) {
     switch (c) {
         case LINE_CASE_NORMAL_PID: return "CASE 1: Bam Line PID";
-        case LINE_CASE_SHARP_LEFT: return "CASE 2: Cua Gat Trai (90 deg)";
-        case LINE_CASE_SHARP_RIGHT: return "CASE 3: Cua Gat Phai (90 deg)";
+        case LINE_CASE_SHARP_LEFT:
+            return earlyTurnActive ? "CASE 2: EARLY TURN LEFT"
+                                   : "CASE 2: Cua Gat Trai (90 deg)";
+        case LINE_CASE_SHARP_RIGHT:
+            return earlyTurnActive ? "CASE 3: EARLY TURN RIGHT"
+                                   : "CASE 3: Cua Gat Phai (90 deg)";
         case LINE_CASE_LOST_LINE: return "CASE 4: Mat Line - STOP";
         case LINE_CASE_CROSS_LINE: return "CASE 5: Vach Ngang / Nga Tu";
         case LINE_CASE_T_LEFT: return "CASE 6: Nga 3 Trai";
