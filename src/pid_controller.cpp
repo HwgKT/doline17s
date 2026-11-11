@@ -877,7 +877,8 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
 }
 uint8_t pid_get_high_speed_stage(void) { return (uint8_t)highSpeedStage; }
 int32_t pid_get_map1_late_boost_start(void) {
-    return selectedMap == 1 ? MAP1_LATE_BOOST_START_TICKS : 0;
+    // Legacy status API: late boost is disabled when using staged BASE.
+    return 0;
 }
 bool pid_is_map1_late_boost_engaged(void) { return map1LateBoostEngaged; }
 bool pid_set_high_speed_peak(int16_t pwm) {
@@ -1514,22 +1515,10 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        // Map 1 only: once 10,500 forward-progress ticks have been reached,
-        // boost the base PWM to HS_PEAK on a confirmed centered line.
-        // The boost remains armed until the next AUTO start, but is applied
-        // only while the line is centered; corners retain the configured BASE.
-        // Maps 2 and 3 always keep the regular BASE.
-        const bool map1ReadyForBoost = selectedMap == 1 &&
-            map1MaxProgress >= MAP1_LATE_BOOST_START_TICKS;
-        const bool centeredForBoost = pidMeasurementGood &&
-            fabsf(pidPosition) <= MAP1_LATE_BOOST_CENTER_ERROR;
-        if (map1ReadyForBoost && centeredForBoost)
-            map1LateBoostEngaged = true;
+        // Tick/BASE stage profile exclusively sets the normal BASE PWM.
         float base = mapUpdateScheduledBase(
             mapProfileMaxProgress, fabsf(err), blackCount,
             sensor_get_line_bits(), measuredDt);
-        if (map1ReadyForBoost && centeredForBoost)
-            base = (float)highSpeedPeakPwm;
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
