@@ -1,6 +1,6 @@
 .pio/build/esp32dev/src/pid_controller.cpp.o: src/pid_controller.cpp \
  include/pid_controller.h include/map1_route_lock.h include/encoder.h \
- include/sensor.h include/pinout.h include/motor.h \
+ include/sensor.h include/pinout.h include/motor.h include/spp_debug.h \
  C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
  C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp_arduino_version.h \
  C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/freertos/FreeRTOS.h \
@@ -134,4 +134,5 @@
  C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/spi_flash/include/esp_spi_flash_counters.h \
  C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_hw_support/include/soc/esp32/spiram.h \
  C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
- C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h
+ C:/Users/KIEUTUANHUNG/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
+ include/bt_telemetry.h
