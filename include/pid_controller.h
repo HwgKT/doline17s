@@ -86,6 +86,8 @@ void pid_get_map2_sensor_profile_v2(uint8_t *stageCount, int32_t *endTicks,
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map2_sensor_stage(void);
+// True when Map 2 bypasses all route modifiers and uses the full-16 line PID.
+bool pid_map2_pure_pid_test_enabled(void);
 // Map 3: four continuously selected PID eye-mask stages, no checkpoint stops.
 // Three ordered positive encoder thresholds and four nonzero masks; AUTO must be off to edit.
 bool pid_set_map3_sensor_profile(const int32_t *ticks, const uint16_t *masks);
