@@ -42,7 +42,7 @@ class Map1SpeedProfileTests(unittest.TestCase):
                 validate_map1_speed_profile(
                     [100, 200, 300, 400, 500, 600, 700], bases)
 
-    def test_firmware_exposes_atomic_map1_profile_setter(self):
+    def test_firmware_exposes_independent_profiles_for_all_maps(self):
         pid = (ROOT / "src" / "pid_controller.cpp").read_text(encoding="utf-8")
         header = (ROOT / "include" / "pid_controller.h").read_text(encoding="utf-8")
         main = (ROOT / "src" / "main.cpp").read_text(encoding="utf-8")
@@ -53,6 +53,14 @@ class Map1SpeedProfileTests(unittest.TestCase):
         self.assertIn("MAP_SPEED_PROFILE:", main)
         self.assertIn("MAP_SPEED_PROFILE MAP=", main)
         self.assertIn("selectedMap >= 1 && selectedMap <= 3", pid)
+
+    def test_firmware_keeps_separate_default_profiles_per_map(self):
+        pid = (ROOT / "src" / "pid_controller.cpp").read_text(encoding="utf-8")
+        self.assertIn("{140, 140, 140, 240, 140, 140, 210, 255}", pid)
+        self.assertIn("{160, 160, 160, 160, 160, 160, 160, 160}", pid)
+        self.assertIn("{150, 150, 150, 150, 150, 150, 150, 150}", pid)
+        self.assertIn("mapSegmentTicks[mapIndex][i] = xTicks[i]", pid)
+        self.assertIn("mapSegmentPwm[mapIndex][i] = basePwm[i]", pid)
 
     def test_gui_sends_tick_and_base_values_in_one_command(self):
         app = (ROOT / "robot_debug.py").read_text(encoding="utf-8")

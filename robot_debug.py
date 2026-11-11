@@ -1628,13 +1628,19 @@ class App(tk.Tk):
                 ticks, bases = validate_map1_speed_profile(values[1:8], values[8:16])
                 actual = (map_id, ticks, bases)
                 pending = self.map_profile_pending
-                if pending is not None and pending[0] == map_id and actual != pending:
+                if pending is not None and pending[0] == map_id:
                     self.map_profile_pending = None
-                    self.map_profile_confirmed[map_id] = False
-                    self.map_profile_status.set(
-                        f"MAP {map_id} BASE: ESP32 trả về khác cấu hình vừa gửi")
+                    if actual != pending:
+                        self.map_profile_confirmed[map_id] = False
+                        self.map_profile_status.set(
+                            f"MAP {map_id} BASE: ESP32 trả về khác cấu hình vừa gửi")
+                    else:
+                        self.map_profile_confirmed[map_id] = True
+                        self.map_profile_status.set(
+                            f"MAP {map_id} BASE: ESP32 OK | " +
+                            " / ".join(str(value) for value in bases))
                 else:
-                    self.map_profile_pending = None
+                    # An unrelated map readback must not clear another map's pending write.
                     self.map_profile_confirmed[map_id] = True
                     self.map_profile_status.set(
                         f"MAP {map_id} BASE: ESP32 OK | " +
