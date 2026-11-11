@@ -831,6 +831,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
         if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {
             finishLineLatched = true;
+            earlyTurnActive = false;
+            earlyTurnReacquireTiming = false;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             return LINE_CASE_STOPPED;
@@ -1044,6 +1046,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
+            earlyTurnActive = false;
+            earlyTurnReacquireTiming = false;
+            earlyTurnReacquireSinceMs = 0;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
