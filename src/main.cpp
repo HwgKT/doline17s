@@ -28,7 +28,6 @@ bool pidTestActive=false;
 float pidTestError=0, pidTestPreviousError=0, pidTestIntegral=0, pidTestD=0, pidTestOutput=0;
 bool pidTestHistory=false;
 uint32_t pidTestPrevUs=0, pidTestStartMs=0, pidTestLastReportMs=0;
-constexpr uint32_t PID_TEST_MAX_MS=45000;
 constexpr int16_t PID_TEST_MAX_PWM=100;
 constexpr float PID_TEST_CENTER_DEADBAND=5.0f;
 uint8_t manualSpeed=120;
@@ -80,10 +79,9 @@ void safeStop() {
 void pidTestStep() {
   if(!pidTestActive)return;
   const uint32_t nowMs=millis();
-  if(nowMs-pidTestStartMs>=PID_TEST_MAX_MS ||
-     !sensor_adc_ready() || sensor_is_calibrating()){
+  if(!sensor_adc_ready() || sensor_is_calibrating()){
     pidTestStop();
-    reply("PID_TEST: AUTO_STOP_TIMEOUT_OR_SENSOR_FAULT");
+    reply("PID_TEST: AUTO_STOP_SENSOR_FAULT");
     return;
   }
   float pos=0;
@@ -194,7 +192,7 @@ void command(const String &raw) {
     pidTestActive=true;pidTestStartMs=millis();
     pidTestLastReportMs=pidTestStartMs;
     pidTestPrevUs=micros();
-    reply("PID_TEST: STARTED (45s limit; lift wheels; STOP/ESTOP to exit)");
+    reply("PID_TEST: STARTED (continuous; lift wheels; STOP/ESTOP to exit)");
     return;
   }
   if(pidTestActive && (s=="A" || s=="AUTO" || s=="START" ||
@@ -386,13 +384,14 @@ void command(const String &raw) {
     reply("ENC_RESET: OK");return;
   }
   if(s=="STATUS"){
-    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld hs=%u peak=%d",
+    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld hs=%u peak=%d pid_test=%u",
       btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
       calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
       motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
       sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count(),
       (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
-      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak());
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak(),
+      (unsigned)(pidTestActive?1:0));
     reply(b);return;
   }
   if(s=="P"||s=="SENSORS"){
