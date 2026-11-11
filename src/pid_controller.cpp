@@ -140,8 +140,8 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
-// Fixed per-map BASE: no encoder-position scheduler, no late BOOST, and
-// no per-section PWM caps. The independent wheel PI remains active.
+// MAP 1 and MAP 2 use their selected fixed BASE. MAP 3 has an independent,
+// configurable four-stage BASE schedule selected by encoder travel.
 // Map 1 only: arm the late BASE boost after 10,500 forward-progress ticks.
 constexpr int32_t MAP1_LATE_BOOST_START_TICKS = 10500;
 constexpr float MAP1_LATE_BOOST_CENTER_ERROR = 15.0f;
@@ -1471,7 +1471,7 @@ void pid_line_follow_step(void) {
         // boost the base PWM to HS_PEAK on a confirmed centered line.
         // The boost remains armed until the next AUTO start, but is applied
         // only while the line is centered; corners retain the configured BASE.
-        // Maps 2 and 3 always keep the regular BASE.
+        // MAP 2 keeps its selected BASE; MAP 3 uses its independent tick schedule.
         const bool map1ReadyForBoost = selectedMap == 1 &&
             map1MaxProgress >= MAP1_LATE_BOOST_START_TICKS;
         const bool centeredForBoost = pidMeasurementGood &&
