@@ -130,20 +130,18 @@ void pidTestStep() {
         pidTestPreviousError=pos;
         motor_stop();
       }else{
-        const float p=pid_get_kp()*(1.0f+0.018f*fabsf(pos))*pos;
-        if((pidTestIntegral>0 && pos<0) || (pidTestIntegral<0 && pos>0))
-          pidTestIntegral*=0.5f;
-        pidTestIntegral=constrain(pidTestIntegral+pos*dt,-80.0f,80.0f);
-        const float i=pid_get_ki()*pidTestIntegral;
-        float d=0;
-        if(dtValid){
-          const float rawD=pid_get_kd()*(pos-pidTestPreviousError)/rawDt;
-          d=constrain(0.6f*rawD+0.4f*pidTestD,-200.0f,200.0f);
-        }
-        pidTestD=d;
-        pidTestPreviousError=pos;
-        pidTestHistory=true;
-        const float correction=constrain(p+i+d,
+        // Exact AUTO law, with isolated bench integral/derivative history.
+        PID_CoreState_t core = {
+          pidTestIntegral, pidTestPreviousError, pidTestD,
+          (uint8_t)(pidTestHistory ? 1 : 0), 0
+        };
+        const float sharedCorrection =
+          pid_compute_shared(pos,dt,dtValid,&core,nullptr,nullptr,nullptr);
+        pidTestIntegral=core.integral;
+        pidTestPreviousError=core.previous_error;
+        pidTestD=core.previous_d;
+        pidTestHistory=core.derivative_valid!=0;
+        const float correction=constrain(sharedCorrection,
                                         -(float)PID_TEST_MAX_PWM,
                                          (float)PID_TEST_MAX_PWM);
         pidTestOutput=correction;
