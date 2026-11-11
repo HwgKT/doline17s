@@ -328,7 +328,7 @@ static float updateForwardSpeed(float absErr, float requestedBase) {
 // from track geometry and recorded runs (including a ~15766-tick finish).
 // X4 is moved ahead of the 10.5k right turn; X5 holds low speed through reacquisition;
 // X6 releases only after the dashed-line/U-turn region.
-constexpr int32_t MAP1_X_TICKS[7] = {
+int32_t map1SegmentTicks[7] = {
     3800, 7800, 8350, 10300, 11400, 12800, 15000
 };
 uint8_t map1SegmentPwm[8] = {
@@ -337,7 +337,7 @@ uint8_t map1SegmentPwm[8] = {
 
 static float map1CappedBase(int32_t progress) {
     uint8_t segment = 0;
-    while (segment < 7 && progress >= MAP1_X_TICKS[segment]) ++segment;
+    while (segment < 7 && progress >= map1SegmentTicks[segment]) ++segment;
     float target = (float)map1SegmentPwm[segment];
     // Retain the existing opt-in route-lock safety cap.
     if (map1Route.active) target = map1Route.baseCap(progress, target);
@@ -547,10 +547,32 @@ bool pid_set_map1_base_profile(const uint8_t *basePwm) {
     return true;
 }
 
+bool pid_set_map1_speed_profile(const int32_t *xTicks,
+                                const uint8_t *basePwm) {
+    if (autoMode || selectedMap != 1 || !xTicks || !basePwm) return false;
+
+    // Validate the complete profile before changing any live setting.
+    for (uint8_t i = 0; i < 7; ++i) {
+        if (xTicks[i] <= 0 || xTicks[i] > 10000000L ||
+            (i > 0 && xTicks[i] <= xTicks[i - 1])) {
+            return false;
+        }
+    }
+    for (uint8_t i = 0; i < 8; ++i) {
+        if (basePwm[i] < 45U || basePwm[i] > 255U) return false;
+    }
+
+    for (uint8_t i = 0; i < 7; ++i)
+        map1SegmentTicks[i] = xTicks[i];
+    for (uint8_t i = 0; i < 8; ++i)
+        map1SegmentPwm[i] = basePwm[i];
+    return true;
+}
+
 void pid_get_map1_speed_profile(int32_t *xTicks, uint8_t *basePwm) {
     if (xTicks) {
         for (uint8_t i = 0; i < 7; ++i)
-            xTicks[i] = MAP1_X_TICKS[i];
+            xTicks[i] = map1SegmentTicks[i];
     }
     if (basePwm) {
         for (uint8_t i = 0; i < 8; ++i)

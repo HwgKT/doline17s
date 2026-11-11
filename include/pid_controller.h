@@ -78,6 +78,8 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
 // boundaries; writes change BASE only and require MAP 1 + AUTO disabled.
 // Values are runtime RAM settings and reset to firmware defaults on reboot.
 bool pid_set_map1_base_profile(const uint8_t *basePwm);
+bool pid_set_map1_speed_profile(const int32_t *xTicks,
+                                const uint8_t *basePwm);
 void pid_get_map1_speed_profile(int32_t *xTicks, uint8_t *basePwm);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.

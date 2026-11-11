@@ -87,6 +87,20 @@ Environment: Windows; ESP32 Classic SPP connected through the outgoing COM port,
 4. Use the new **HS_PEAK — PWM đỉnh (100–255)** slider next to the PID controls. Select the desired value directly or click preset **180**, **220**, **255**; then click **Áp dụng HS**. The app sends `HS_PEAK:n` once and waits for the firmware readback, e.g. `HS_PEAK: PWM=180 BASE=120 RAMP_END=300 BRAKE_START=1800 BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100`. **Đọc HS** sends `HS_PEAK` and refreshes the slider from the firmware. The app auto-reads this value when connecting; the START button stays disabled until HS has been read and any unsaved slider changes have been applied or discarded with **Đọc HS**. Changing HS is disabled while AUTO is running and while a STOP acknowledgement is pending. Terminal commands `HS_PEAK:180`, `HS_PEAK:220`, `HS_PEAK:255` remain available for diagnostic use. The firmware reports the actual `BRAKE_START` for every readback and `brake=` in every HS_STAGE event, rather than showing a fixed 1800. It rejects a HS peak lower than the current BASE and rejects BASE settings above HS peak (`ERR: BASE_GT_HS_PEAK`).
 5. Click exactly one of the three **MAP 1**, **MAP 2**, **MAP 3** buttons. MAP changes are disabled during a run; START requires MAP selection.
 6. Put the robot in the same START position for each attempt. Click **BẮT ĐẦU DÒ LINE**. The app creates a CSV+TXT in the selected map folder **before** transmitting `AUTO:1`, `AUTO:2`, or `AUTO:3` to ESP32.
+### MAP 1 — editable 8-stage encoder/BASE profile
+
+Open **BASE từng đoạn Map 1** to edit seven encoder end-tick thresholds (X1..X7)
+and the eight corresponding BASE PWM targets (B1..B8). Each stage start is
+derived from the previous threshold: stage 1 starts at 0, stage 2 starts at X1,
+and stage 8 starts at X7 and continues until FINISH. Thresholds must be strictly
+increasing in the range 1..10,000,000; each BASE must be 45..255 PWM.
+
+The app sends `MAP1_SPEED_PROFILE:X1,...,X7,B1,...,B8` and waits for firmware
+readback `MAP1_SPEED_PROFILE X1=... B1=...`. The legacy BASE-only
+`MAP1_BASE_PROFILE` command remains supported. Configuration is held in ESP32
+RAM and resets to firmware defaults after reboot. The editor is Map 1 only and
+requires the robot to be stopped.
+
 7. Observe `HS: RAMP/CRUISE/BRAKE/HOLD/COMPLETE/ABORTED`, the relative encoder from periodic DIAG, wheel PWM, black/white line signals and SPP receive frequency. Stop manually via **DỪNG** if needed. Do not treat absence of STOP acknowledgment as proof the motors are off; use E-STOP / physical safety procedure.
 8. Wait for the text `ESP32 ĐÃ XÁC NHẬN DỪNG` and `CSV DA DONG` before the next run. Files are automatically written at:
 
