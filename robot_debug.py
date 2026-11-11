@@ -215,6 +215,10 @@ class App(tk.Tk):
         self.sensor_profile_status = tk.StringVar(
             value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
         self.sensor_profile_window = None
+        self.map2_sensor_profile = (1000, 2000, 3000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF)
+        self.map2_sensor_confirmed = False
+        self.map2_sensor_status = tk.StringVar(value="MAP 2 mắt PID: chờ ESP32")
+        self.map2_sensor_window = None
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -303,6 +307,20 @@ class App(tk.Tk):
             sensor_profile_bar, text="Đọc từ ESP32",
             command=lambda: self.send_command("SENSOR_PROFILE"))
         self.sensor_profile_read_btn.pack(side="right")
+
+        map2_sensor_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
+        map2_sensor_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.map2_sensor_btn = ttk.Button(
+            map2_sensor_bar, text="MAP 2 — 4 giai đoạn mắt PID / tick",
+            command=self.open_map2_sensor_editor)
+        self.map2_sensor_btn.pack(side="left", padx=(0, 6))
+        self.label(map2_sensor_bar, textvariable=self.map2_sensor_status,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(
+                       side="left", fill="x", expand=True)
+        self.map2_sensor_read_btn = ttk.Button(
+            map2_sensor_bar, text="Đọc từ ESP32",
+            command=lambda: self.send_command("MAP2_SENSOR_PROFILE"))
+        self.map2_sensor_read_btn.pack(side="right")
 
         # Calibration is a prerequisite for START. Keep its controls visible at
         # minimum window size rather than below the non-scrollable HS_PEAK panel.
@@ -736,6 +754,8 @@ class App(tk.Tk):
         self.send_command("ROUTE_LOCK")
         self.sensor_profile_confirmed = False
         self.send_command("SENSOR_PROFILE")
+        self.map2_sensor_confirmed = False
+        self.send_command("MAP2_SENSOR_PROFILE")
         self.send_command("PID")
         self.send_command("STREAM:" + self.stream_rate.get())
 
@@ -760,6 +780,8 @@ class App(tk.Tk):
         self.route_status.set("ROUTE: mất kết nối ESP32")
         self.sensor_profile_confirmed = False
         self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
+        self.map2_sensor_confirmed = False
+        self.map2_sensor_status.set("MAP 2 mắt PID: mất kết nối ESP32")
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
         self.estop_latched = None
@@ -821,6 +843,87 @@ class App(tk.Tk):
         cmd = self.cmd_var.get().strip()
         if self.send_command(cmd):
             self.cmd_var.set("")
+
+    def open_map2_sensor_editor(self):
+        """Map 2 only: four encoder-selected PID masks, no checkpoint stops."""
+        if self.map2_sensor_window is not None:
+            try:
+                if self.map2_sensor_window.winfo_exists():
+                    self.map2_sensor_window.lift()
+                    return
+            except tk.TclError:
+                pass
+        win = tk.Toplevel(self)
+        self.map2_sensor_window = win
+        win.title("MAP 2 — 4 giai đoạn chọn mắt PID")
+        win.configure(bg=PANEL)
+        win.geometry("850x505")
+        win.minsize(780, 475)
+        win.transient(self)
+        def close():
+            self.map2_sensor_window = None
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", close)
+        t1,t2,t3,*initial_masks = self.map2_sensor_profile
+        tickvars = [tk.StringVar(value=str(x)) for x in (t1,t2,t3)]
+        tickrow = tk.Frame(win,bg=PANEL,padx=10,pady=9)
+        tickrow.pack(fill="x")
+        for i,var in enumerate(tickvars,1):
+            self.label(tickrow,f"Mốc {i} (tick):",bg=PANEL).pack(side="left")
+            ttk.Entry(tickrow,textvariable=var,width=9).pack(
+                side="left",padx=(4,13))
+        self.label(win,
+            "Chỉ chọn mắt dùng để tính PID; vẫn đọc đủ 16 ADC cho mất line, cua và FINISH.",
+            bg=PANEL,fg=MUTED).pack(anchor="w",padx=12)
+        self.label(win,
+            "Theo tick encoder từ lúc AUTO bắt đầu. Chuyển giai đoạn liên tục, KHÔNG dừng xe.",
+            bg=PANEL,fg=AMBER).pack(anchor="w",padx=12,pady=(3,5))
+        groups=[]
+        titles=("Giai đoạn 1: 0 → mốc 1","Giai đoạn 2: mốc 1 → mốc 2",
+                "Giai đoạn 3: mốc 2 → mốc 3","Giai đoạn 4: từ mốc 3")
+        for title,mask in zip(titles,initial_masks):
+            group=tk.LabelFrame(win,text=title,bg=PANEL,fg=FG,padx=7,pady=7)
+            group.pack(fill="x",padx=10,pady=4)
+            bits=[tk.BooleanVar(value=bool(mask&(1<<i))) for i in range(16)]
+            groups.append(bits)
+            for i,var in enumerate(bits):
+                ttk.Checkbutton(group,text=f"S{i}",variable=var).grid(
+                    row=0,column=i,padx=2)
+        feedback=tk.StringVar(value="Cấu hình chỉ áp dụng khi robot đã dừng.")
+        self.label(win,textvariable=feedback,bg=PANEL,fg=CYAN).pack(
+            anchor="w",padx=12,pady=(7,2))
+        row=tk.Frame(win,bg=PANEL,padx=12,pady=4)
+        row.pack(fill="x")
+        def apply():
+            connected=self.reader is not None and self.reader.is_alive()
+            locked=(self.auto_running or self.start_pending or
+                    self.stop_ack_deadline is not None or
+                    self.stop_verify_pending or self.run_csv.active is not None)
+            if not connected or locked:
+                feedback.set("Chỉ chỉnh khi đã kết nối SPP và AUTO dừng.")
+                return
+            try:
+                ticks=[int(v.get().strip()) for v in tickvars]
+            except ValueError:
+                feedback.set("Mốc tick phải là số nguyên.")
+                return
+            masks=[sum((1<<i) for i,v in enumerate(group) if v.get())
+                   for group in groups]
+            if not(0<ticks[0]<ticks[1]<ticks[2]<=10000000) or not all(masks):
+                feedback.set("Cần 0 < T1 < T2 < T3, mỗi giai đoạn bật ít nhất 1 mắt.")
+                return
+            command="MAP2_SENSOR_PROFILE:{},{},{},{:04X},{:04X},{:04X},{:04X}".format(
+                *ticks,*masks)
+            if self.send_command(command):
+                self.map2_sensor_confirmed=False
+                self.map2_sensor_status.set("MAP 2 mắt PID: đang chờ ESP32 xác nhận...")
+                feedback.set("Đã gửi, chờ ESP32 xác nhận cấu hình.")
+        ttk.Button(row,text="Áp dụng xuống ESP32",command=apply).pack(
+            side="left",padx=(0,8))
+        ttk.Button(row,text="Đọc cấu hình từ ESP32",
+                   command=lambda:self.send_command("MAP2_SENSOR_PROFILE")).pack(
+                       side="left")
+        ttk.Button(row,text="Đóng",command=close).pack(side="right")
 
     def open_sensor_profile_editor(self):
         """Edit per-stage masks and switch ticks; changes require robot stopped."""
@@ -1049,6 +1152,11 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        if hasattr(self,"map2_sensor_btn"):
+            self.map2_sensor_btn.configure(
+                state="normal" if self.selected_map == 2 else "disabled")
+            self.map2_sensor_read_btn.configure(
+                state="normal" if connected else "disabled")
         if hasattr(self, "sensor_profile_btn"):
             self.sensor_profile_btn.configure(state="normal")
             self.sensor_profile_read_btn.configure(
@@ -1301,6 +1409,27 @@ class App(tk.Tk):
         if message.startswith("RUN_ORIGIN "):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
+        m2 = re.fullmatch(
+            r"MAP2_SENSOR_PROFILE T1=(\\d+) T2=(\\d+) T3=(\\d+) "
+            r"M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) "
+            r"M3=([0-9A-Fa-f]{4}) M4=([0-9A-Fa-f]{4}) STAGE=(\\d+)",
+            message)
+        if m2:
+            ticks = tuple(int(m2.group(i)) for i in (1,2,3))
+            masks = tuple(int(m2.group(i),16) for i in (4,5,6,7))
+            self.map2_sensor_profile = ticks+masks
+            self.map2_sensor_confirmed = True
+            self.map2_sensor_status.set(
+                f"MAP 2 mắt PID: T={ticks} | stage={m2.group(8)} | "
+                + "/".join(f"{m:04X}" for m in masks)+" (ESP32 OK)")
+            if self.map2_sensor_window is not None:
+                try:
+                    self.map2_sensor_window.title("MAP 2 — ESP32 đã xác nhận; mở lại để cập nhật")
+                except tk.TclError:
+                    self.map2_sensor_window = None
+        elif message.startswith("ERR: MAP2_SENSOR_PROFILE_"):
+            self.map2_sensor_confirmed=False
+            self.map2_sensor_status.set("MAP 2 mắt PID: ESP32 từ chối — xem Terminal")
         sensor_profile_match = re.fullmatch(
             r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
