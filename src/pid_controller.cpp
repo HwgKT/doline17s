@@ -45,6 +45,13 @@ constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
 constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
 constexpr int16_t LINE_SEARCH_PWM = 90;
+// Map 1 early corner: fixed SEARCH-style pivot, stronger reverse inner wheel.
+// No change to ordinary SEARCH or line PID. Disabled for the first 2000 ticks.
+constexpr int32_t EARLY_TURN_MIN_TICKS = 2000;
+constexpr int16_t EARLY_TURN_INNER_REVERSE_PWM = 100;
+constexpr int16_t EARLY_TURN_OUTER_FORWARD_PWM = 90;
+constexpr uint32_t EARLY_TURN_TREND_WINDOW_MS = 150;
+constexpr uint8_t EARLY_TURN_EDGE_CONFIRM_FRAMES = 3;
 // MAP 1 experiment: faster pivot only at the long left corner near 1,311 ticks.
 constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 90;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
@@ -254,6 +261,11 @@ TurnState turnState = TURN_NONE;
 TurnState lastTurnDirection = TURN_RIGHT;
 uint32_t turnStartedMs = 0;
 uint32_t searchStartedMs = 0;
+bool earlyTurnActive = false;
+bool edgeLeftSeeded = false, edgeRightSeeded = false;
+uint32_t edgeLeftSeedMs = 0, edgeRightSeedMs = 0;
+float edgeLeftSeedCentroid = 0.0f, edgeRightSeedCentroid = 0.0f;
+uint8_t edgeLeftFrames = 0, edgeRightFrames = 0;
 uint32_t autoStartedMs = 0;
 uint32_t turnMissingSinceMs = 0;
 uint8_t centeredTurnFrames = 0;
@@ -390,6 +402,9 @@ static void resetLineTracking() {
     lastTurnDirection = TURN_RIGHT;
     turnStartedMs = 0;
     searchStartedMs = 0;
+    earlyTurnActive = false;
+    edgeLeftSeeded = edgeRightSeeded = false;
+    edgeLeftFrames = edgeRightFrames = 0;
     turnMissingSinceMs = 0;
     centeredTurnFrames = 0;
     derivativeWarmupFrames = 0;
@@ -437,6 +452,66 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
     const float factor = TURN_CURVE_INNER_FACTOR_OPEN -
         severity * (TURN_CURVE_INNER_FACTOR_OPEN - TURN_CURVE_INNER_FACTOR_TIGHT);
     return (int16_t)((float)outer * factor);
+}
+// Update physical-line trend independently of the encoder-dependent PID mask.
+// Called after START/FINISH checks. A seed must originate in the central-left
+// or central-right trapezoid region and reach the corresponding OUTER edge
+// within 150 ms. Three edge frames prevent single-frame IR glitches.
+static int8_t detectEarlyEdgeTurn(uint16_t mask, uint8_t blackCount,
+                                   uint32_t now) {
+    if (selectedMap != 1 || map1MaxProgress < EARLY_TURN_MIN_TICKS ||
+        !finishDetectionArmed || earlyTurnActive || blackCount == 0 ||
+        blackCount > 6 || (mask & 0x000FU && mask & 0xF000U)) {
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+        return 0;
+    }
+    float indexSum = 0.0f;
+    for (uint8_t i = 0; i < 16; ++i)
+        if (mask & (uint16_t(1U) << i)) indexSum += (float)i;
+    const float centroid = indexSum / (float)blackCount;
+
+    if (edgeLeftSeeded &&
+        (uint32_t)(now - edgeLeftSeedMs) > EARLY_TURN_TREND_WINDOW_MS) {
+        edgeLeftSeeded = false;
+        edgeLeftFrames = 0;
+    }
+    if (edgeRightSeeded &&
+        (uint32_t)(now - edgeRightSeedMs) > EARLY_TURN_TREND_WINDOW_MS) {
+        edgeRightSeeded = false;
+        edgeRightFrames = 0;
+    }
+
+    // S4..S8 -> S3..S0. Seed only before reaching the outermost eyes.
+    if (!(mask & 0x000FU) && centroid >= 4.0f && centroid <= 8.0f &&
+        (mask & 0x01F0U)) {
+        edgeLeftSeeded = true;
+        edgeLeftSeedMs = now;
+        edgeLeftSeedCentroid = centroid;
+        edgeLeftFrames = 0;
+    }
+    // Mirror: S7..S11 -> S12..S15.
+    if (!(mask & 0xF000U) && centroid >= 7.0f && centroid <= 11.0f &&
+        (mask & 0x0F80U)) {
+        edgeRightSeeded = true;
+        edgeRightSeedMs = now;
+        edgeRightSeedCentroid = centroid;
+        edgeRightFrames = 0;
+    }
+
+    const bool leftReached =
+        edgeLeftSeeded && (mask & 0x000FU) &&
+        centroid <= 3.5f && (edgeLeftSeedCentroid - centroid) >= 1.5f;
+    const bool rightReached =
+        edgeRightSeeded && (mask & 0xF000U) &&
+        centroid >= 11.5f && (centroid - edgeRightSeedCentroid) >= 1.5f;
+    edgeLeftFrames = leftReached
+        ? (uint8_t)(edgeLeftFrames < 3 ? edgeLeftFrames + 1 : 3) : 0;
+    edgeRightFrames = rightReached
+        ? (uint8_t)(edgeRightFrames < 3 ? edgeRightFrames + 1 : 3) : 0;
+    if (edgeLeftFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) return -1;
+    if (edgeRightFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) return 1;
+    return 0;
 }
 static bool isSearchTurn() {
     return turnState == SEARCH_LEFT || turnState == SEARCH_RIGHT;
@@ -758,12 +833,41 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         }
     }
 
+    // Prefer a confirmed center-to-edge trajectory over saturated normal PID
+    // once the robot has passed the first 2000 Map-1 travel ticks.
+    // Do not interrupt an already active ordinary SEARCH pivot.
+    if (!isSearchTurn() && blackCount > 0) {
+        const int8_t edgeDirection = detectEarlyEdgeTurn(mask, blackCount, now);
+        if (edgeDirection != 0) {
+            turnState = edgeDirection < 0 ? SEARCH_LEFT : SEARCH_RIGHT;
+            lastTurnDirection = edgeDirection < 0 ? TURN_LEFT : TURN_RIGHT;
+            earlyTurnActive = true;
+            searchStartedMs = now;
+            centeredTurnFrames = 0;
+            turnMissing = false;
+            missing = false;
+            edgeLeftSeeded = edgeRightSeeded = false;
+            edgeLeftFrames = edgeRightFrames = 0;
+            clearPidState();
+            return edgeDirection < 0 ? LINE_CASE_SHARP_LEFT
+                                     : LINE_CASE_SHARP_RIGHT;
+        }
+    } else if (blackCount == 0) {
+        edgeLeftSeeded = edgeRightSeeded = false;
+        edgeLeftFrames = edgeRightFrames = 0;
+    }
+
     // Keep PID steering while a corner remains visible; pivot only after line loss.
     if (turnState != TURN_NONE) {
         if (isSearchTurn()) {
-            const bool reliableReacquisition =
-                (blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
-                (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION);
+            const bool reliableReacquisition = earlyTurnActive
+                // Early pivot must not return to PID at the outside edge.
+                ? (blackCount >= 2 && blackCount <= 6 &&
+                   (mask & TURN_CENTER_SENSOR_MASK) != 0U &&
+                   fabsf(position) <= TURN_CENTERED_POSITION &&
+                   hasAdjacentLineSensors(mask))
+                : ((blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
+                   (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION));
             if (reliableReacquisition) {
                 if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
                     ++centeredTurnFrames;
@@ -771,6 +875,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                 centeredTurnFrames = 0;
             }
             if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
+                earlyTurnActive = false;
                 turnState = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
@@ -846,6 +951,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
 
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
+            earlyTurnActive = false;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
@@ -982,8 +1088,13 @@ void pid_line_follow_step(void) {
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
         if (turnState == SEARCH_LEFT) {
-            const int16_t searchPwm = searchPwmForCurrentTurn();
-            motor_set_speeds(-searchPwm, searchPwm);
+            if (earlyTurnActive)
+                motor_set_speeds(-EARLY_TURN_INNER_REVERSE_PWM,
+                                  EARLY_TURN_OUTER_FORWARD_PWM);
+            else {
+                const int16_t searchPwm = searchPwmForCurrentTurn();
+                motor_set_speeds(-searchPwm, searchPwm);
+            }
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
@@ -992,7 +1103,11 @@ void pid_line_follow_step(void) {
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
         if (turnState == SEARCH_RIGHT) {
-            motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
+            if (earlyTurnActive)
+                motor_set_speeds(EARLY_TURN_OUTER_FORWARD_PWM,
+                                 -EARLY_TURN_INNER_REVERSE_PWM);
+            else
+                motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
             const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
