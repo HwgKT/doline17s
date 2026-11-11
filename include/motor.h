@@ -49,6 +49,17 @@ void motor_set_right(int16_t speed);
  */
 void motor_set_speeds(int16_t speed_left, int16_t speed_right);
 
+// Read-only instrumentation: snapshot of the exact PWM sign-change command.
+// Wheel index: 0=left, 1=right. Newest event is retained until consumed.
+typedef struct {
+    uint32_t t_us;
+    int32_t encoder;
+    int16_t pwm_prev;
+    int16_t pwm_req;
+} MotorReverseEvent;
+bool motor_take_reverse_event(uint8_t wheel, MotorReverseEvent *event);
+
+
 /**
  * @brief Lấy tốc độ PWM hiện tại của động cơ trái
  * @return Giá trị PWM (-255 đến 255)
