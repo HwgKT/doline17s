@@ -98,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_TICKS MAP2_TICKS:t1,t2,... HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -178,6 +178,53 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Map 2 checkpoints, independent of Map 1 PID sensor-mask stages.
+  // MAP2_TICKS:300,1400,2300,3100 sets 4 ordered boundaries; 0 disables.
+  if(s=="MAP2_TICKS"){
+    String b="MAP2_TICKS COUNT="+String(pid_get_map2_tick_count())+
+      " NEXT="+String(pid_get_map2_tick_stage())+
+      " STATE="+String(pid_get_map2_checkpoint_state())+" TICKS=";
+    for(uint8_t i=0;i<pid_get_map2_tick_count();++i){
+      if(i)b+=",";
+      b+=String(pid_get_map2_tick(i));
+    }
+    reply(b);return;
+  }
+  if(s.startsWith("MAP2_TICKS:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP2_TICKS_REQUIRES_STOPPED");return;
+    }
+    String raw=s.substring(11);
+    if(raw=="0"){
+      pid_set_map2_tick_stages(nullptr,0);
+      command("MAP2_TICKS");return;
+    }
+    int32_t ticks[8]={};
+    uint8_t count=0;
+    bool valid=raw.length()>0;
+    int start=0;
+    while(valid && start<raw.length()){
+      if(count>=8){valid=false;break;}
+      const int comma=raw.indexOf(',',start);
+      const String item=comma<0?raw.substring(start):raw.substring(start,comma);
+      if(!item.length()){valid=false;break;}
+      for(unsigned i=0;i<item.length();++i){
+        if(item[i]<'0' || item[i]>'9'){valid=false;break;}
+      }
+      if(!valid)break;
+      const long value=strtol(item.c_str(),nullptr,10);
+      if(value<=0 || value>10000000L ||
+         (count && value<=ticks[count-1])){valid=false;break;}
+      ticks[count++]=(int32_t)value;
+      if(comma<0)break;
+      start=comma+1;
+      if(start>=raw.length())valid=false;
+    }
+    if(!valid || !count || !pid_set_map2_tick_stages(ticks,count)){
+      reply("ERR: MAP2_TICKS_USE_ASCENDING_POSITIVE_TICKS_MAX8");return;
+    }
+    command("MAP2_TICKS");return;
+  }
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
   // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
   if(s=="SENSOR_PROFILE"){
