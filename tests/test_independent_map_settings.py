@@ -27,6 +27,15 @@ class IndependentMapSettingsTest(unittest.TestCase):
         self.assertIn("self.sensor_profile_pending = (target, a, b, *values)",c)
         self.assertIn('f"MAP_SENSOR_PROFILE:{target},{a},{b},"',c)
         self.assertIn("self.read_map_sensor_profile(target)",c)
+    def test_start_waits_for_active_map_sensor_profile_confirmation(self):
+        c=(ROOT/"robot_debug.py").read_text(encoding="utf-8")
+        self.assertIn("self.sensor_profile_pending is None",c)
+        self.assertIn("self.sensor_profile_confirmed.get(self.selected_map, False)",c)
+        self.assertIn("self.read_map_sensor_profile(map_id)",c)
+    def test_map_switch_is_blocked_while_profiles_are_dirty_or_pending(self):
+        c=(ROOT/"robot_debug.py").read_text(encoding="utf-8")
+        self.assertIn("self.sensor_profile_dirty or self.sensor_profile_pending is not None",c)
+        self.assertIn('getattr(self, "map_profile_pending", None) is not None',c)
     def test_header_exposes_map_specific_api(self):
         c=(ROOT/"include/pid_controller.h").read_text(encoding="utf-8")
         self.assertIn("pid_set_map_sensor_profile",c)

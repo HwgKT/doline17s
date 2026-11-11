@@ -174,7 +174,7 @@ uint16_t mapSensorMasks[3][3]={
 constexpr uint16_t FULL_PID_SENSOR_MASK=0xFFFFU;
 int32_t mapSensorMaxTicks=0;
 
-static int32_t map1SensorTravelTicks() {
+static int32_t mapSensorTravelTicks() {
     int32_t left = 0, right = 0;
     encoder_get_counts(&left, &right);
     int64_t dl = (int64_t)left - runEncoderOriginL;
@@ -187,7 +187,7 @@ static int32_t map1SensorTravelTicks() {
 
 static uint16_t activePidSensorMask(){
     if(!autoMode || selectedMap<1 || selectedMap>3) return FULL_PID_SENSOR_MASK;
-    const int32_t ticks=map1SensorTravelTicks();
+    const int32_t ticks=mapSensorTravelTicks();
     if(ticks>mapSensorMaxTicks) mapSensorMaxTicks=ticks;
     const uint8_t i=selectedMap-1U;
     if(mapSensorMaxTicks<mapSensorThresholds[i][0]) return mapSensorMasks[i][0];

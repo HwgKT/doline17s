@@ -252,6 +252,7 @@ class App(tk.Tk):
         self.sensor_profile_confirmed = {1: False, 2: False, 3: False}
         self.sensor_profile_pending = None
         self.sensor_profile_editor_refresh = None
+        self.sensor_profile_dirty = False
         self.sensor_profile_status = tk.StringVar(
             value="PID mắt: chờ ESP32 (mặc định 650 / 1350 ticks)")
         self.sensor_profile_window = None
@@ -1129,6 +1130,11 @@ class App(tk.Tk):
     def read_map_sensor_profile(self, map_id):
         if map_id not in (1, 2, 3):
             return False
+        if self.reader is None or not self.reader.is_alive():
+            return False
+        if map_id == self.selected_map:
+            self.sensor_profile_confirmed[map_id] = False
+            self.update_control_buttons()
         return self.send_command(f"MAP_SENSOR_PROFILE:{map_id}")
 
     def open_sensor_profile_editor(self):
@@ -1183,6 +1189,7 @@ class App(tk.Tk):
 
         def mark_dirty(*_):
             dirty[0] = True
+            self.sensor_profile_dirty = True
         tick1.trace_add("write", mark_dirty)
         tick2.trace_add("write", mark_dirty)
         for row in masks:
@@ -1197,6 +1204,7 @@ class App(tk.Tk):
                 for i, state in enumerate(states):
                     state.set(bool(mask & (1 << i)))
             dirty[0] = False
+            self.sensor_profile_dirty = False
 
         def refresh(map):
             if map == map_id[0] and win.winfo_exists() and not dirty[0]:
@@ -1219,6 +1227,10 @@ class App(tk.Tk):
 
         def read():
             dirty[0] = False
+            self.sensor_profile_dirty = False
+            if self.sensor_profile_pending is not None:
+                info.set("Đang chờ ESP32 xác nhận lần ghi trước.")
+                return
             if self.read_map_sensor_profile(map_id[0]):
                 info.set(f"Đang đọc MAP {map_id[0]}...")
             else:
@@ -1249,6 +1261,8 @@ class App(tk.Tk):
                 self.sensor_profile_pending = (target, a, b, *values)
                 self.sensor_profile_confirmed[target] = False
                 dirty[0] = False
+                self.sensor_profile_dirty = False
+                self.update_control_buttons()
                 info.set(f"MAP {target}: đang chờ xác nhận từ ESP32.")
 
         def defaults():
@@ -1260,11 +1274,13 @@ class App(tk.Tk):
                 for i, state in enumerate(states):
                     state.set(bool(mask & (1 << i)))
             dirty[0] = True
+            self.sensor_profile_dirty = True
             info.set("Đã điền mặc định, nhấn Áp dụng để gửi.")
 
         def close():
             self.sensor_profile_window = None
             self.sensor_profile_editor_refresh = None
+            self.sensor_profile_dirty = False
             win.destroy()
 
         actions = tk.Frame(win, bg=PANEL, padx=12)
@@ -1394,6 +1410,11 @@ class App(tk.Tk):
                 or self.stop_verify_pending):
             self.log("Không thể đổi MAP khi xe đang chạy hoặc chưa xác nhận STOP.")
             return False
+        if (self.sensor_profile_dirty or self.sensor_profile_pending is not None
+                or getattr(self, "map_profile_dirty", False)
+                or getattr(self, "map_profile_pending", None) is not None):
+            self.log("Hãy áp dụng/đọc lại cấu hình MAP đang sửa trước khi chuyển MAP.")
+            return False
         # A physical GPIO34 START uses the firmware's stored MAP.
         # Update the ESP32 as soon as the user selects a map, not only
         # when the Python START button sends AUTO:map_id.
@@ -1408,6 +1429,8 @@ class App(tk.Tk):
             button.configure(bg=CYAN if chosen else GREY,
                              fg=BG if chosen else FG)
         self.log(f"Đã chọn MAP {map_id}; các lượt START kế tiếp lưu trong logs/map_{map_id:02d}/")
+        if self.reader is not None and self.reader.is_alive():
+            self.read_map_sensor_profile(map_id)
         self.update_control_buttons()
         return True
 
@@ -1423,6 +1446,8 @@ class App(tk.Tk):
                      and self.hs_peak_confirmed is not None
                      and not self.hs_peak_dirty
                      and self.calibration_ok and self.selected_map is not None
+                     and self.sensor_profile_pending is None
+                     and self.sensor_profile_confirmed.get(self.selected_map, False)
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
@@ -1819,6 +1844,7 @@ class App(tk.Tk):
                              "ERR: SENSOR_PROFILE_REQUIRES_STOPPED"):
                 self.sensor_profile_confirmed[1] = False
                 self.sensor_profile_status.set("MAP 1: PID mắt ESP32 từ chối")
+        self.update_control_buttons()
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
             self.stop_ack_deadline = None
             self.stop_verify_pending = False

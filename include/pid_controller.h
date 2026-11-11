@@ -67,8 +67,8 @@ bool pid_is_auto_mode(void);
 // Set track profile before AUTO. Valid MAP values: 1, 2, 3.
 bool pid_select_map(uint8_t mapId);
 uint8_t pid_get_selected_map(void);
-// Map 1 only: encoder thresholds and three independent 16-bit PID sensor masks.
-// Requires AUTO disabled; never changes physical ADC/line detection.
+// Independent encoder thresholds and three 16-bit PID sensor masks per MAP.
+// Writes require AUTO disabled and the requested MAP selected. Physical ADC/FSM remains unmasked.
 bool pid_set_map_sensor_profile(uint8_t mapId, int32_t stage2, int32_t stage3,
                                 uint16_t mask1, uint16_t mask2, uint16_t mask3);
 void pid_get_map_sensor_profile(uint8_t mapId, int32_t *stage2, int32_t *stage3,
