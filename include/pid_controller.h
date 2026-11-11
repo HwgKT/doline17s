@@ -88,6 +88,7 @@ void pid_get_map3_profile(int32_t *sensorTicks, uint16_t *sensorMasks,
                           int32_t *baseTicks, uint8_t *basePwms);
 uint8_t pid_get_map3_sensor_stage(void);
 uint8_t pid_get_map3_base_stage(void);
+int32_t pid_get_map3_travel_ticks(void);
 int16_t pid_get_active_base_speed(void);
 // Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
 uint8_t pid_get_map2_hold_state(void);
