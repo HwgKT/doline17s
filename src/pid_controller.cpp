@@ -721,6 +721,7 @@ void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks) {
     if (ticks) for (uint8_t i=0;i<3;++i) ticks[i]=map2SensorTickEnds[i];
     if (masks) for (uint8_t i=0;i<4;++i) masks[i]=map2SensorMasks[i];
 }
+uint8_t pid_get_map2_hold_state(void) { return map2HoldState; }
 uint8_t pid_get_map2_sensor_stage(void) {
     if (selectedMap != 2) return 0;
     return map2SensorActiveStage + 1;
@@ -1453,6 +1454,7 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
         case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
         case LINE_CASE_GAP_BRIDGE: return "CASE 11: Map GAP bridge 100ms";
+        case LINE_CASE_MAP2_HOLD: return "CASE 12: Map2 stationary line hold";
         default: return "Khong Xac Dinh";
     }
 }
