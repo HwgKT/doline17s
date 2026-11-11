@@ -1,0 +1,27 @@
+# PlatformIO build directories and cache
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Python caches and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local IDE configuration
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Robot telemetry log outputs (retain folder structure / docs)
+logs/**/*.csv
+logs/**/*.txt
+!logs/**/README.md
+
+# Operating System files
+Thumbs.db
+Desktop.ini
+.DS_Store
