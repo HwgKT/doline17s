@@ -624,6 +624,7 @@ void loop() {
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
     const uint8_t oldRouteStage=pid_get_map1_route_stage();
+    const bool oldMap1Boost=pid_is_map1_late_boost_engaged();
     const uint8_t oldMap2Stage=pid_get_map2_sensor_stage();
     const uint8_t oldMap2Hold=pid_get_map2_hold_state();
     const bool wasFinishArmed=pid_finish_detection_armed();
@@ -636,6 +637,16 @@ void loop() {
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
     const uint8_t newRouteStage=pid_get_map1_route_stage();
     const uint8_t newRouteFault=pid_get_map1_route_fault_code();
+    if(pid_get_selected_map()==1 &&
+       !oldMap1Boost && pid_is_map1_late_boost_engaged()){
+      char event[140];
+      snprintf(event,sizeof(event),
+        "HS_STAGE BOOST map=1 runEnc=%ld base=%d peak=%d start=%ld t_ms=%lu",
+        (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
+        pid_get_high_speed_peak(),(long)pid_get_map1_late_boost_start(),
+        (unsigned long)millis());
+      reply(event);
+    }
     if(pid_get_selected_map()==2 && newCase!=LINE_CASE_STOPPED){
       const uint8_t newMap2Stage=pid_get_map2_sensor_stage();
       const uint8_t newMap2Hold=pid_get_map2_hold_state();
