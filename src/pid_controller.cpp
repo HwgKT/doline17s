@@ -171,6 +171,12 @@ uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
+// Map 2: four independent PID eye groups and three monotonic tick thresholds.
+// Defaults all 16 eyes in every stage; does not affect physical observations.
+int32_t map2SensorTickEnds[3] = {1000, 2000, 3000};
+uint16_t map2SensorMasks[4] = {0xFFFFU,0xFFFFU,0xFFFFU,0xFFFFU};
+int32_t map2SensorMaxTravel = 0;
+
 
 static int32_t map1SensorTravelTicks() {
     int32_t left = 0, right = 0;
@@ -183,6 +189,20 @@ static int32_t map1SensorTravelTicks() {
     return average > INT32_MAX ? INT32_MAX : (int32_t)average;
 }
 
+static uint16_t map1PidSensorMask();
+static uint16_t map2PidSensorMask() {
+    if (selectedMap != 2 || !autoMode) return 0xFFFFU;
+    const int32_t traveled = map1SensorTravelTicks();
+    if (traveled > map2SensorMaxTravel) map2SensorMaxTravel = traveled;
+    if (map2SensorMaxTravel < map2SensorTickEnds[0]) return map2SensorMasks[0];
+    if (map2SensorMaxTravel < map2SensorTickEnds[1]) return map2SensorMasks[1];
+    if (map2SensorMaxTravel < map2SensorTickEnds[2]) return map2SensorMasks[2];
+    return map2SensorMasks[3];
+}
+static uint16_t activePidSensorMask() {
+    if (selectedMap == 2) return map2PidSensorMask();
+    return map1PidSensorMask();
+}
 static uint16_t map1PidSensorMask() {
     if (selectedMap != 1 || !autoMode) return MAP1_SENSOR_MASK_STAGE3;
     const int32_t traveled = map1SensorTravelTicks();
@@ -442,6 +462,7 @@ static void resetLineTracking() {
     map1MaxProgress = 0;
     map1SensorMaxTicks = 0;
     map2MaxProgress = 0;
+    map2SensorMaxTravel = 0;
      map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
@@ -471,7 +492,7 @@ static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
 // eyes. Physical all-16 sensing remains unchanged for START and FINISH.
 // Clear unfinished trends whenever the encoder-selected mask stage changes.
 static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
-    const uint16_t allowedMask = map1PidSensorMask();
+    const uint16_t allowedMask = activePidSensorMask();
     if (allowedMask != edgeTrackSensorMask) {
         edgeTrackSensorMask = allowedMask;
         edgeLeftSeeded = edgeRightSeeded = false;
@@ -674,6 +695,28 @@ uint8_t pid_get_selected_map(void) { return selectedMap; }
 
 // Set the Map 1 PID sensor selection profile only while stopped.
 // Physical 16-channel ADC sampling, FSM, route and finish logic are untouched.
+bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks) {
+    if (autoMode || !ticks || !masks ||
+        ticks[0] <= 0 || ticks[1] <= ticks[0] ||
+        ticks[2] <= ticks[1] || ticks[2] > 10000000) return false;
+    for (uint8_t i=0;i<4;++i) if (!masks[i]) return false;
+    for (uint8_t i=0;i<3;++i) map2SensorTickEnds[i] = ticks[i];
+    for (uint8_t i=0;i<4;++i) map2SensorMasks[i] = masks[i];
+    return true;
+}
+void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks) {
+    if (ticks) for (uint8_t i=0;i<3;++i) ticks[i]=map2SensorTickEnds[i];
+    if (masks) for (uint8_t i=0;i<4;++i) masks[i]=map2SensorMasks[i];
+}
+uint8_t pid_get_map2_sensor_stage(void) {
+    if (selectedMap != 2) return 0;
+    const int32_t traveled = map2SensorMaxTravel;
+    if (traveled < map2SensorTickEnds[0]) return 1;
+    if (traveled < map2SensorTickEnds[1]) return 2;
+    if (traveled < map2SensorTickEnds[2]) return 3;
+    return 4;
+}
+
 bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
                                  uint16_t mask1, uint16_t mask2, uint16_t mask3) {
     if (autoMode || stage2 <= 0 || stage3 <= stage2 ||
@@ -935,11 +978,11 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     if (turnState != TURN_NONE) {
         if (isSearchTurn()) {
             const uint16_t reacquireMask =
-                earlyTurnActive ? (mask & map1PidSensorMask()) : mask;
+                earlyTurnActive ? (mask & activePidSensorMask()) : mask;
             const uint8_t reacquireCount = bitCount16(reacquireMask);
             float reacquirePosition = position;
             const bool reacquirePositionValid = !earlyTurnActive ||
-                calculateMaskedPidPosition(map1PidSensorMask(), &reacquirePosition);
+                calculateMaskedPidPosition(activePidSensorMask(), &reacquirePosition);
             const bool reliableReacquisition = earlyTurnActive
                 // In EARLY_TURN, disabled eyes must not cause PID reacquisition.
                 ? (reacquireCount >= 2 && reacquireCount <= 6 &&
@@ -1126,7 +1169,7 @@ void pid_line_follow_step(void) {
     }
     // Physical position/blackCount continue to drive all existing FSM cases.
     // Only the NORMAL_PID steering error uses the encoder-selected subset.
-    const uint16_t pidSensorMask = map1PidSensorMask();
+    const uint16_t pidSensorMask = activePidSensorMask();
     float pidPosition = pos;
     const bool pidMeasurementGood =
         pidSensorMask == MAP1_SENSOR_MASK_STAGE3
