@@ -76,6 +76,9 @@ constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 // The old encoder-position speed envelope is disabled. Encoder is now used
 // for wheel-speed feedback and (separately) the sensor mask stages only.
 constexpr bool ENCODER_SPEED_PROFILE_ENABLED = false;
+// Isolate Map 2 as a line-only nonlinear PID diagnostic. Compile-time flag
+// makes it possible to reinstate the old Map 2 state machine later.
+constexpr bool MAP2_PURE_PID_TEST_ENABLED = true;
 constexpr uint32_t GAP_TIMEOUT_MS = 100;
 // First straight trapezoid in relative motor-encoder ticks.
 // An experimental open-loop PWM envelope, not closed-loop wheel velocity.
@@ -221,6 +224,7 @@ static int32_t map1SensorTravelTicks() {
 
 static uint16_t map1PidSensorMask();
 static uint16_t map2PidSensorMask() {
+    if (MAP2_PURE_PID_TEST_ENABLED) return 0xFFFFU; // All 16 eyes.
     if (selectedMap != 2 || !autoMode) return 0xFFFFU;
     const int32_t traveled = map1SensorTravelTicks();
     if (traveled > map2SensorMaxTravel) map2SensorMaxTravel = traveled;
@@ -861,8 +865,9 @@ void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks) {
     if (masks) for (uint8_t i = 0; i < 4; ++i) masks[i] = map2SensorMasks[i];
 }
 uint8_t pid_get_map2_hold_state(void) { return map2HoldState; }
+bool pid_map2_pure_pid_test_enabled(void) { return MAP2_PURE_PID_TEST_ENABLED; }
 uint8_t pid_get_map2_sensor_stage(void) {
-    if (selectedMap != 2) return 0;
+    if (selectedMap != 2 || MAP2_PURE_PID_TEST_ENABLED) return 0;
     return map2SensorActiveStage + 1;
 }
 
@@ -980,6 +985,67 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     if (finishLineLatched) return LINE_CASE_STOPPED;
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
+
+    // Map 2 pure-PID experiment: no corner, SEARCH, dashed-gap, checkpoint,
+    // stage-mask or speed-scheduler FSM. START must be positioned ON a
+    // centered narrow line; motor stays at zero until line is confirmed.
+    if (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED) {
+        if (!finishDetectionArmed) {
+            const bool centeredTrack =
+                blackCount >= 1 && blackCount <= 6 &&
+                (mask & START_PAD_CENTER_MASK) != 0U &&
+                fabsf(position) <= START_PAD_CENTER_TOLERANCE;
+            if (centeredTrack) {
+                if (!startPadExitCandidate) {
+                    startPadExitCandidate = true;
+                    startPadExitSinceMs = now;
+                } else if ((uint32_t)(now - startPadExitSinceMs) >=
+                           START_PAD_EXIT_CONFIRM_MS) {
+                    finishDetectionArmed = true;
+                    startPadExitCandidate = false;
+                    lineLocked = previouslyLocked = true;
+                    acquiring = missing = false;
+                    clearPidState();
+                    derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                }
+            } else {
+                startPadExitCandidate = false;
+            }
+            if (!finishDetectionArmed) {
+                // Do not coast off a black START pad or search without line.
+                if ((uint32_t)(now - autoStartedMs) >= STARTUP_LOSS_GRACE_MS)
+                    return LINE_CASE_STOPPED;
+                return LINE_CASE_LOST_LINE; // Stops both motor PWM outputs.
+            }
+        }
+        // Retain physical all-16-black FINISH, confirmed over three samples.
+        if (mask == 0xFFFFU) {
+            if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
+            if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {
+                finishLineLatched = true;
+                return LINE_CASE_STOPPED;
+            }
+        } else {
+            fullLineFrames = 0;
+        }
+        if (blackCount == 0) {
+            if (!missing) {
+                missing = true;
+                missingSinceMs = now;
+            }
+            // Immediately stop PWM; exit AUTO if absent for >=30 ms.
+            if ((uint32_t)(now - missingSinceMs) >= LINE_LOSS_MS) {
+                missing = false;
+                lineLocked = false;
+                ++confirmedLosses;
+                return LINE_CASE_STOPPED;
+            }
+            return LINE_CASE_LOST_LINE;
+        }
+        missing = false;
+        lineLocked = previouslyLocked = true;
+        return LINE_CASE_NORMAL_PID;
+    }
     // Stage uses monotonic maximum forward progress, not time or raw encoder
     // sum; wheel reversal during SEARCH must not reactivate earlier zones.
     if (ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 && !highSpeedAborted) {
@@ -1414,7 +1480,8 @@ void pid_line_follow_step(void) {
         const int32_t progress = runEncoderProgress();
         if (progress > map2MaxProgress) map2MaxProgress = progress;
     }
-    if (selectedMap == 2 && map2HoldState != 0) {
+    if (selectedMap == 2 && !MAP2_PURE_PID_TEST_ENABLED &&
+        map2HoldState != 0) {
         // Preserve FINISH detection even during checkpoint pauses.
         if (finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU) {
             currentCase = pid_detect_case(pos, blackCount);
@@ -1433,7 +1500,8 @@ void pid_line_follow_step(void) {
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
-    if (selectedMap == 2 && map2HoldState == 0 &&
+    if (selectedMap == 2 && !MAP2_PURE_PID_TEST_ENABLED &&
+        map2HoldState == 0 &&
         map2SensorActiveStage + 1U < map2SensorStageCount && finishDetectionArmed &&
         currentCase == LINE_CASE_NORMAL_PID && lineLocked &&
         turnState == TURN_NONE &&
@@ -1548,9 +1616,11 @@ void pid_line_follow_step(void) {
         lastCorrection = p + it + d;
 
         // Tick/BASE stage profile exclusively sets the normal BASE PWM.
-        float base = mapUpdateScheduledBase(
-            mapProfileMaxProgress, fabsf(err), blackCount,
-            sensor_get_line_bits(), measuredDt);
+        float base = (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED)
+            ? (float)pidConfig.baseSpeed
+            : mapUpdateScheduledBase(
+                mapProfileMaxProgress, fabsf(err), blackCount,
+                sensor_get_line_bits(), measuredDt);
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
