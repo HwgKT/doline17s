@@ -157,6 +157,50 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Eight Map 1 BASE targets, editable over SPP only while the robot is stopped.
+  // Encoder X1..X7 thresholds are read-only; updates live in ESP32 RAM.
+  if(s=="MAP1_BASE_PROFILE"){
+    int32_t x[7]={0};
+    uint8_t base[8]={0};
+    pid_get_map1_speed_profile(x,base);
+    char b[220];
+    snprintf(b,sizeof(b),
+      "MAP1_BASE_PROFILE X1=%ld X2=%ld X3=%ld X4=%ld X5=%ld X6=%ld X7=%ld "
+      "B1=%u B2=%u B3=%u B4=%u B5=%u B6=%u B7=%u B8=%u",
+      (long)x[0],(long)x[1],(long)x[2],(long)x[3],(long)x[4],(long)x[5],(long)x[6],
+      (unsigned)base[0],(unsigned)base[1],(unsigned)base[2],(unsigned)base[3],
+      (unsigned)base[4],(unsigned)base[5],(unsigned)base[6],(unsigned)base[7]);
+    reply(b);return;
+  }
+  if(s.startsWith("MAP1_BASE_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP1_BASE_PROFILE_REQUIRES_STOPPED");return;
+    }
+    if(pid_get_selected_map()!=1){
+      reply("ERR: MAP1_BASE_PROFILE_MAP1_ONLY");return;
+    }
+    int value[8]={0};
+    char trailing=0;
+    const int count=sscanf(s.c_str()+18,
+      "%d,%d,%d,%d,%d,%d,%d,%d %c",
+      &value[0],&value[1],&value[2],&value[3],
+      &value[4],&value[5],&value[6],&value[7],&trailing);
+    if(count!=8){
+      reply("ERR: MAP1_BASE_PROFILE_FORMAT");return;
+    }
+    uint8_t base[8];
+    for(uint8_t i=0;i<8;++i){
+      if(value[i]<45 || value[i]>255){
+        reply("ERR: MAP1_BASE_PROFILE_RANGE_45_255");return;
+      }
+      base[i]=(uint8_t)value[i];
+    }
+    if(!pid_set_map1_base_profile(base)){
+      reply("ERR: MAP1_BASE_PROFILE_REJECTED");return;
+    }
+    command("MAP1_BASE_PROFILE");return;
+  }
+
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
   // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
   if(s=="SENSOR_PROFILE"){
