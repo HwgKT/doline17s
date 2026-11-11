@@ -559,7 +559,7 @@ bool pid_set_map1_speed_profile(const int32_t *xTicks,
         }
     }
     for (uint8_t i = 0; i < 8; ++i) {
-        if (basePwm[i] < 45U || basePwm[i] > 255U) return false;
+        if (basePwm[i] < 45U) return false;
     }
 
     for (uint8_t i = 0; i < 7; ++i)
