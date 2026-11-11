@@ -228,6 +228,8 @@ class App(tk.Tk):
         self.estop_pending = False
         self.start_pending = False
         self.auto_running = False
+        self.pid_test_active = False
+        self.pid_test_pending = False
         self.run_elapsed_seconds = 0.0
         self.run_started_at = None
         self.run_timer_var = tk.StringVar(value="00:00:00")
@@ -363,6 +365,11 @@ class App(tk.Tk):
                                   bg=ROSE, fg="#ffffff", activebackground="#be123c",
                                   relief="flat", height=1, pady=1)
         self.stop_btn.pack(side="left", fill="x", expand=True)
+        self.pid_test_btn = tk.Button(
+            panel, text="BẬT TEST PID TẠI CHỖ", command=self.toggle_pid_test,
+            font=("Segoe UI", 9, "bold"), bg=CYAN, fg=BG,
+            relief="flat", height=1, pady=1)
+        self.pid_test_btn.pack(fill="x", pady=(2, 2))
         run_timer = tk.Frame(panel, bg=PANEL)
         run_timer.pack(fill="x", pady=(1, 2))
         self.label(run_timer, "Thời gian xe chạy", bg=PANEL, fg=MUTED,
@@ -704,6 +711,8 @@ class App(tk.Tk):
         self.estop_pending = False
         self.start_pending = False
         self.set_auto_running(False)
+        self.pid_test_active = False
+        self.pid_test_pending = False
         self.control_state.set("Đang kết nối — chờ STATUS từ firmware.")
         self.adc_status.set("ADC: chờ STATUS")
         self.control_state_label.configure(fg=AMBER)
@@ -730,6 +739,7 @@ class App(tk.Tk):
         self.cal_data = {}
         self.update_control_buttons()
         self.send_command("STATUS")
+        self.send_command("PID_TEST")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
         self.send_command("HS_PEAK")
@@ -770,6 +780,8 @@ class App(tk.Tk):
         self.stop_verify_deadline = None
         self.stop_verify_retries = 0
         self.set_auto_running(False)
+        self.pid_test_active = False
+        self.pid_test_pending = False
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
         self.next_diag_poll = None
@@ -816,6 +828,23 @@ class App(tk.Tk):
             self.update_control_buttons()
             return False
         return True
+
+    def toggle_pid_test(self):
+        """Toggle isolated stationary PID mode, synchronized by firmware ACK."""
+        connected = self.reader is not None and self.reader.is_alive()
+        if not connected or self.pid_test_pending:
+            return
+        if not self.pid_test_active and (
+                self.estop_latched is not False or self.estop_pending
+                or self.auto_running or self.start_pending
+                or self.stop_ack_deadline is not None or self.stop_verify_pending
+                or self.run_csv.active is not None or not self.calibration_ok):
+            self.log("PID_TEST: cần kết nối, calibration OK, AUTO đang dừng và không E-STOP.")
+            return
+        command = "PID_TEST:0" if self.pid_test_active else "PID_TEST:1"
+        if self.send_command(command):
+            self.pid_test_pending = True
+            self.update_control_buttons()
 
     def send_terminal(self):
         cmd = self.cmd_var.get().strip()
@@ -1033,6 +1062,7 @@ class App(tk.Tk):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
                      and not self.encoder_reset_pending
+                     and not self.pid_test_active and not self.pid_test_pending
                      and not self.estop_pending and not self.start_pending
                      and not self.auto_running and self.run_csv.active is None
                      and self.stop_ack_deadline is None
@@ -1044,6 +1074,17 @@ class App(tk.Tk):
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
+        test_can_toggle = (connected and not self.pid_test_pending and (
+            self.pid_test_active or (
+                self.estop_latched is False and not self.estop_pending
+                and not self.auto_running and not self.start_pending
+                and self.stop_ack_deadline is None and not self.stop_verify_pending
+                and self.run_csv.active is None and self.calibration_ok)))
+        self.pid_test_btn.configure(
+            state="normal" if test_can_toggle else "disabled",
+            text="TẮT TEST PID TẠI CHỖ" if self.pid_test_active else "BẬT TEST PID TẠI CHỖ",
+            bg=ROSE if self.pid_test_active else CYAN,
+            fg="#ffffff" if self.pid_test_active else BG)
         locked = (self.run_csv.active is not None or self.auto_running
                   or self.start_pending or self.stop_ack_deadline is not None
                   or self.stop_verify_pending)
@@ -1109,6 +1150,9 @@ class App(tk.Tk):
             self.run_txt_file = None
 
     def start_line(self):
+        if self.pid_test_active or self.pid_test_pending:
+            self.log("Tắt PID_TEST và chờ ACK trước khi START AUTO.")
+            return
         if self.encoder_reset_pending:
             self.log("Đang chờ ACK reset encoder; chưa gửi START.")
             return
@@ -1301,6 +1345,25 @@ class App(tk.Tk):
         if message.startswith("RUN_ORIGIN "):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
+        if message.startswith("PID_TEST: STARTED"):
+            self.pid_test_active = True
+            self.pid_test_pending = False
+            self.control_state.set("PID TEST ĐANG BẬT — robot xoay tại chỗ theo line.")
+            self.update_control_buttons()
+        elif message == "PID_TEST: STOPPED" or message.startswith("PID_TEST: AUTO_STOP"):
+            self.pid_test_active = False
+            self.pid_test_pending = False
+            self.control_state.set("PID TEST ĐÃ TẮT — động cơ dừng.")
+            self.update_control_buttons()
+        elif message.startswith("PID_TEST: active="):
+            match = re.search(r"active=(\d)", message)
+            if match:
+                self.pid_test_active = match.group(1) == "1"
+                self.pid_test_pending = False
+                self.update_control_buttons()
+        elif message == "ERR: PID_TEST_NEEDS_STOPPED_CALIBRATED_SAFE_ROBOT":
+            self.pid_test_pending = False
+            self.update_control_buttons()
         sensor_profile_match = re.fullmatch(
             r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
@@ -1322,6 +1385,8 @@ class App(tk.Tk):
         elif message == "ERR: SENSOR_PROFILE_INVALID" or message == "ERR: SENSOR_PROFILE_REQUIRES_STOPPED":
             self.sensor_profile_status.set("PID mắt: ESP32 từ chối thay đổi — xem Terminal")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
+            self.pid_test_active = False
+            self.pid_test_pending = False
             self.stop_ack_deadline = None
             self.stop_verify_pending = False
             self.stop_verify_deadline = None
@@ -1551,6 +1616,10 @@ class App(tk.Tk):
                     f"PID: {float(pid.group(1)):.1f} Hz    "
                     f"SPP TX: {float(sent.group(1)):.1f} Hz{warning}")
         elif message.startswith("STATUS:"):
+            test_match = re.search(r"\bpid_test=(\d)\b", message)
+            if test_match:
+                self.pid_test_active = test_match.group(1) == "1"
+                self.pid_test_pending = False
             estop = re.search(r"\bestop=(\d)\b", message)
             auto = re.search(r"\bauto=(\d)\b", message)
             pwm_l = re.search(r"\bpwmL=(-?\d+)\b", message)
@@ -1583,6 +1652,9 @@ class App(tk.Tk):
                 elif self.auto_running:
                     self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
                     self.control_state_label.configure(fg=GREEN)
+                elif self.pid_test_active:
+                    self.control_state.set("PID TEST ĐANG BẬT — xoay tại chỗ theo line.")
+                    self.control_state_label.configure(fg=CYAN)
                 else:
                     self.control_state.set("SẴN SÀNG — động cơ đang dừng.")
                     self.control_state_label.configure(fg=GREEN)
@@ -1592,6 +1664,8 @@ class App(tk.Tk):
                               "ERR: ADC_READ_FAULT_MOTORS_STOPPED")
               or message.startswith("AUTO_FINISHED:")
               or message.startswith("AUTO_STOPPED:")):
+            self.pid_test_active = False
+            self.pid_test_pending = False
             self.confirm_stopped(message)
         pid = re.search(r"PID:\s*Kp=([\d.]+)\s+Ki=([\d.]+)\s+Kd=([\d.]+)\s+Base=(\d+)",
                         message, flags=re.IGNORECASE)
