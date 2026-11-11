@@ -15,6 +15,35 @@ static const float SENSOR_WEIGHTS[N_SENSORS] = {
 // Optimised tune for sharp-turn responsiveness.  Gains are still live-tuneable
 // via the SPP KP:/KI:/KD: commands.
 static PID_Config_t pidConfig = {1.6f, 0.0f, 0.8f, 100, 255, -100};
+// One PID law for both AUTO and stationary PID_TEST. State is caller-owned.
+float pid_compute_shared(float err, float dt, bool dtValid,
+                         PID_CoreState_t *state,
+                         float *pTerm, float *iTerm, float *dTerm) {
+    if (!state) return 0.0f;
+    const float p = pidConfig.Kp * (1.0f + 0.018f * fabsf(err)) * err;
+    if ((state->integral > 0 && err < 0) ||
+        (state->integral < 0 && err > 0))
+        state->integral *= 0.5f;
+    state->integral += err * dt;
+    state->integral = fmaxf(-80.0f, fminf(80.0f, state->integral));
+    const float it = pidConfig.Ki * state->integral;
+    float d = 0.0f;
+    if (state->warmup_frames > 0) {
+        --state->warmup_frames;
+    } else if (pidConfig.Kd != 0 && state->derivative_valid && dtValid) {
+        const float rawD = pidConfig.Kd *
+                           (err - state->previous_error) / dt;
+        d = 0.6f * rawD + 0.4f * state->previous_d;
+        d = fmaxf(-200.0f, fminf(200.0f, d));
+    }
+    state->previous_error = err;
+    state->previous_d = d;
+    state->derivative_valid = 1;
+    if (pTerm) *pTerm = p;
+    if (iTerm) *iTerm = it;
+    if (dTerm) *dTerm = d;
+    return p + it + d;
+}
 static bool autoMode = false;
 static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0, integralError = 0, lastCorrection = 0;
@@ -1190,39 +1219,15 @@ void pid_line_follow_step(void) {
         }
     } else if (currentCase == LINE_CASE_NORMAL_PID && pidMeasurementGood) {
         const float err = pidPosition;
-        const float absErr = fabsf(err);
-
-        // Non-linear P gain: ramps up quadratically as error increases.
-        // This makes the robot react gently near center but aggressively near edges.
-        const float p = pidConfig.Kp * (1.0f + 0.018f * absErr) * err;
-
-        // Integral with anti-windup: tighter clamp + decay when error crosses zero
-        if ((integralError > 0 && err < 0) || (integralError < 0 && err > 0))
-            integralError *= 0.5f;  // fast decay on zero-crossing to avoid overshoot
-        integralError += err * dt;
-        if (integralError > 80.0f) integralError = 80.0f;
-        if (integralError < -80.0f) integralError = -80.0f;
-        const float it = pidConfig.Ki * integralError;
-
-        // Derivative on error with low-pass filter to reduce noise spikes
-        float d = 0.0f;
-        if (derivativeWarmupFrames > 0) {
-            --derivativeWarmupFrames;
-        } else if (pidConfig.Kd != 0 && derivativeHistoryValid && dtValid) {
-            const float rawD = pidConfig.Kd * (err - lastError) / measuredDt;
-            // First-order low-pass: alpha=0.6 balances responsiveness vs noise
-            d = 0.6f * rawD + 0.4f * lastDTerm;
-            // Hard clamp: prevents catastrophic D-spikes when re-entering PID after a turn
-            constexpr float D_CLAMP = 200.0f;
-            if (d >  D_CLAMP) d =  D_CLAMP;
-            if (d < -D_CLAMP) d = -D_CLAMP;
-        }
-        lastError = err;
-        derivativeHistoryValid = true;
-        lastPTerm = p;
-        lastITerm = it;
-        lastDTerm = d;
-        lastCorrection = p + it + d;
+        PID_CoreState_t core = {integralError, lastError, lastDTerm,
+                                (uint8_t)(derivativeHistoryValid ? 1 : 0),
+                                derivativeWarmupFrames};
+        lastCorrection = pid_compute_shared(err, dt, dtValid, &core,
+                                            &lastPTerm, &lastITerm, &lastDTerm);
+        integralError = core.integral;
+        lastError = core.previous_error;
+        derivativeHistoryValid = core.derivative_valid != 0;
+        derivativeWarmupFrames = core.warmup_frames;
 
         // Fixed BASE across all encoder ticks. Steering still comes from
         // the line PID; wheel PI later translates speed targets into PWM.
