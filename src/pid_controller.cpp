@@ -40,9 +40,9 @@ constexpr uint16_t START_PAD_CENTER_MASK = 0x03C0U; // central eyes S6..S9
 constexpr float START_PAD_CENTER_TOLERANCE = 22.0f;
 constexpr uint32_t START_PAD_EXIT_CONFIRM_MS = 30;
 constexpr int16_t DROPOUT_FORWARD_PWM = 95;    // was 65 — higher coast speed maintains momentum over dashed lines
-constexpr int16_t LINE_SEARCH_PWM = 85;
+constexpr int16_t LINE_SEARCH_PWM = 90;
 // MAP 1 experiment: faster pivot only at the long left corner near 1,311 ticks.
-constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 95;
+constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 90;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_END_ENC = 1700;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
@@ -121,7 +121,7 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1000, 1700}  // MAP 3
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
-constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150};
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // MAP 01 late-BASE scheduler; the legacy first-straight HS profile remains OFF.
 constexpr int32_t MAP1_SLOW_START_ENC = 4800;
@@ -171,7 +171,7 @@ static int32_t runEncoderProgress() {
 int32_t map1SensorStage2Ticks = 650;
 int32_t map1SensorStage3Ticks = 1350;
 // Stage 1: S6-S15; stage 2: S0-S9; stage 3: all 16 sensors.
-uint16_t map1SensorStageMasks[3] = {0xFFC0U, 0x03FFU, 0xFFFFU};
+uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 
@@ -216,7 +216,6 @@ static bool calculateMaskedPidPosition(uint16_t allowedMask, float *outPosition)
     *outPosition = weighted / (float)strength;
     return true;
 }
-constexpr float OUTER_SENSOR_SPEED_REDUCTION = 0.40f;
 
 // A sharp turn is entered only when the centroid reaches the outer region.
 // If the line is lost, AUTO pivots in place to search for it.
@@ -234,11 +233,6 @@ constexpr float TURN_CURVE_END_POSITION = 75.0f;
 constexpr float TURN_CURVE_INNER_FACTOR_OPEN = 0.75f;
 constexpr float TURN_CURVE_INNER_FACTOR_TIGHT = 0.35f;
 
-constexpr float SPEED_GOVERNOR_FULL_ERROR = 30.0f;
-constexpr float SPEED_GOVERNOR_REDUCTION = 0.45f;
-constexpr float PID_CORRECTION_BASE_MULTIPLIER = 6.0f;
-constexpr float OUTER_STEERING_START_ERROR = 20.0f;
-constexpr float OUTER_STEERING_FULL_ERROR = 60.0f;
 
 enum TurnState : uint8_t {
     TURN_NONE,
@@ -285,44 +279,9 @@ static int16_t clampPwmSigned(float value) {
 static uint8_t bitCount16(uint16_t value) {
     return (uint8_t)__builtin_popcount((unsigned)value);
 }
-static float outerSensorSeverity(uint16_t mask) {
-    float severity = 0.0f;
-    for (uint8_t i = 0; i < 4; ++i) {
-        if (mask & (uint16_t)(1U << i)) {
-            const float sensorSeverity = (float)(4U - i) * 0.25f;
-            if (sensorSeverity > severity) severity = sensorSeverity;
-        }
-        const uint8_t rightSensor = (uint8_t)(15U - i);
-        if (mask & (uint16_t)(1U << rightSensor)) {
-            const float sensorSeverity = (float)(4U - i) * 0.25f;
-            if (sensorSeverity > severity) severity = sensorSeverity;
-        }
-    }
-    return severity;
-}
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
 }
-static void limitMotorCommandPeak(float& left, float& right, float limit) {
-    const float peak = fmaxf(fabsf(left), fabsf(right));
-    if (peak > limit && peak > 0.0f) {
-        const float scale = limit / peak;
-        left *= scale;
-        right *= scale;
-    }
-}
-static float updateForwardSpeed(float absErr, float requestedBase) {
-    const float errorRatio = fminf(absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-    float targetSpeed = requestedBase *
-        (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio);
-    const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-        ? pidConfig.baseSpeed : 45);
-    if (targetSpeed < minimumSpeed) targetSpeed = minimumSpeed;
-    if (targetSpeed > pidConfig.maxSpeed) targetSpeed = pidConfig.maxSpeed;
-    governedForwardSpeed = targetSpeed;
-    return governedForwardSpeed;
-}
-
 // Map 1 eight-segment open-loop PWM BASE schedule, using monotonic
 // encoder progress relative to AUTO start. X1..X7 are estimated landmarks
 // from track geometry and recorded runs (including a ~15766-tick finish).
@@ -405,16 +364,14 @@ static void resetLineTracking() {
 // Start faster, ramp down as timeout approaches to avoid overshooting.
 static int16_t sharpTurnPwm() {
     const uint32_t elapsed = (uint32_t)(millis() - turnStartedMs);
-    // First 200 ms: full power.  Then linearly taper to 70% by timeout.
+    // Match v2: start at full power, taper to 70% after 200 ms.
     float frac = 1.0f;
     if (elapsed > 200) {
-        frac = 1.0f - 0.3f * (float)(elapsed - 200) / (float)(SHARP_TURN_PROFILE_MS - 200);
+        frac = 1.0f - 0.3f * (float)(elapsed - 200) /
+               (float)(SHARP_TURN_PROFILE_MS - 200);
         if (frac < 0.7f) frac = 0.7f;
     }
-    int32_t speed = (int32_t)((float)(pidConfig.baseSpeed + 40) * frac);
-    if (speed < TURN_PWM_MIN) speed = TURN_PWM_MIN;
-    if (speed > TURN_PWM_MAX) speed = TURN_PWM_MAX;
-    return (int16_t)speed;
+    return clampPwm((float)(pidConfig.baseSpeed + 40) * frac);
 }
 static int16_t sharpTurnInnerPwm(int16_t outer, float position) {
     float severity = (fabsf(position) - TURN_CURVE_START_POSITION) /
@@ -988,10 +945,7 @@ void pid_line_follow_step(void) {
             const int16_t searchPwm = searchPwmForCurrentTurn();
             motor_set_speeds(-searchPwm, searchPwm);
         } else {
-            const int16_t outer = map1Route.active
-                ? (int16_t)fminf((float)sharpTurnPwm(),
-                                map1Route.wheelCap(map1MaxProgress))
-                : sharpTurnPwm();
+            const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(inner, outer);
         }
@@ -1000,10 +954,7 @@ void pid_line_follow_step(void) {
         if (turnState == SEARCH_RIGHT) {
             motor_set_speeds(LINE_SEARCH_PWM, -LINE_SEARCH_PWM);
         } else {
-            const int16_t outer = map1Route.active
-                ? (int16_t)fminf((float)sharpTurnPwm(),
-                                map1Route.wheelCap(map1MaxProgress))
-                : sharpTurnPwm();
+            const int16_t outer = sharpTurnPwm();
             const int16_t inner = sharpTurnInnerPwm(outer, pos);
             motor_set_speeds(outer, inner);
         }
@@ -1043,83 +994,22 @@ void pid_line_follow_step(void) {
         lastDTerm = d;
         lastCorrection = p + it + d;
 
-        const uint16_t sensorMask = sensor_get_line_bits();
-        float requestedBase = (float)pidConfig.baseSpeed;
-        if (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
-            requestedBase = map1UpdateScheduledBase(
-                map1MaxProgress, absErr, blackCount, sensorMask, dt);
-        float base = updateForwardSpeed(absErr, requestedBase);
-        // Replace only the forward-speed target on the first straight. Keep
-        // existing PID steering, error governor, outer-eye limits, and SEARCH.
-        // For BASE:120, command envelope is 120 -> 255 -> 120.
-        const bool highSpeedStraight =
-            (highSpeedStage == HS_ACCEL || highSpeedStage == HS_CRUISE) &&
-            turnState == TURN_NONE;
-        const bool highSpeedDecelOrHold =
-            highSpeedStage == HS_BRAKE ||
-            highSpeedStage == HS_CORNER_HOLD;
-        // Do not drop the low-speed target merely because TURN_RIGHT was
-        // detected: NORMAL_PID can continue steering through the corner.
-        // Dedicated sharp-turn/search cases retain their pivot commands.
-        if (ENCODER_SPEED_PROFILE_ENABLED && (highSpeedStraight || highSpeedDecelOrHold)) {
-                const float profile = highSpeedForwardTarget(
-                    highSpeedMaxProgress, (float)pidConfig.baseSpeed);
-                const float errorRatio = fminf(
-                    absErr / SPEED_GOVERNOR_FULL_ERROR, 1.0f);
-                const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-                    ? pidConfig.baseSpeed : 45);
-                base = fmaxf(minimumSpeed,
-                    profile * (1.0f - SPEED_GOVERNOR_REDUCTION * errorRatio));
-                if (base > pidConfig.maxSpeed) base = pidConfig.maxSpeed;
-                governedForwardSpeed = base;
-        }
-        const float edgeSeverity = outerSensorSeverity(sensorMask);
-        if (edgeSeverity > 0.0f) {
-            const float minimumSpeed = (float)(pidConfig.baseSpeed < 45
-                ? pidConfig.baseSpeed : 45);
-            const float edgeSpeed = fmaxf(
-                minimumSpeed,
-                (float)pidConfig.baseSpeed *
-                    (1.0f - OUTER_SENSOR_SPEED_REDUCTION * edgeSeverity));
-            if (edgeSpeed < base) base = edgeSpeed;
-            governedForwardSpeed = base;
-        }
-        if (reacquireSpeedFrames > 0) {
-            const float rampProgress =
-                (float)(REACQUIRE_SPEED_RAMP_FRAMES -
-                        reacquireSpeedFrames) /
-                (float)(REACQUIRE_SPEED_RAMP_FRAMES - 1U);
-            const float rampSpeed = (float)DROPOUT_FORWARD_PWM +
-                (governedForwardSpeed - (float)DROPOUT_FORWARD_PWM) *
-                    rampProgress;
-            if (rampSpeed < base) base = rampSpeed;
-            --reacquireSpeedFrames;
-        }
-        const float correctionLimit = base * PID_CORRECTION_BASE_MULTIPLIER;
-        float correction = lastCorrection;
-        if (correction > correctionLimit) correction = correctionLimit;
-        if (correction < -correctionLimit) correction = -correctionLimit;
+        // Match mainHighSpeedv2: fixed BASE, no encoder scheduler,
+        // error governor, outer-eye speed reduction, or reacquire speed ramp.
+        const float base = (float)pidConfig.baseSpeed;
+        governedForwardSpeed = base;
+        const float correction = lastCorrection;
 
-        // Preserve the current governed forward PWM for map-specific gaps.
+        // Preserve the current BASE for dashed-line coast.
         lastNormalForwardPwm = clampPwm(base);
         // Save correction for dashed-line coast
         lastDashedCorrection = correction;
 
-        float leftCommand = base + correction;
-        float rightCommand = base - correction;
-        const float outerErrorRatio = fminf(
-            fmaxf((absErr - OUTER_STEERING_START_ERROR) /
-                  (OUTER_STEERING_FULL_ERROR - OUTER_STEERING_START_ERROR),
-                  0.0f),
-            1.0f);
-        const float steeringSeverity = fmaxf(outerErrorRatio, edgeSeverity);
-        float steeringPeakLimit = base +
-            ((float)pidConfig.maxSpeed - base) * steeringSeverity;
-        if (map1Route.active)
-            steeringPeakLimit = fminf(steeringPeakLimit,
-                                      map1Route.wheelCap(map1MaxProgress));
-        limitMotorCommandPeak(leftCommand, rightCommand, steeringPeakLimit);
-        motor_set_speeds(clampPwmSigned(leftCommand), clampPwmSigned(rightCommand));
+        const float leftCommand = base + correction;
+        const float rightCommand = base - correction;
+        // Match v2: clamp each wheel independently; do not scale both wheels.
+        motor_set_speeds(clampPwmSigned(leftCommand),
+                         clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_CROSS_LINE) {
         clearPidState();
         // On the all-black START pad, use BASE to ensure forward motion.
@@ -1127,9 +1017,7 @@ void pid_line_follow_step(void) {
         const bool initialBlackPad =
             !finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU;
         const float crossingFactor = initialBlackPad ? 1.0f : 0.7f;
-        const float crossingBase = (!ENCODER_SPEED_PROFILE_ENABLED && selectedMap == 1)
-            ? map1ScheduledBase : (float)pidConfig.baseSpeed;
-        const int16_t speed = clampPwm(crossingBase * crossingFactor);
+        const int16_t speed = clampPwm((float)pidConfig.baseSpeed * crossingFactor);
         motor_set_speeds(speed, speed);
     } else if (currentCase == LINE_CASE_GAP_BRIDGE) {
         motor_set_speeds(gapHoldPwm, gapHoldPwm);
@@ -1142,7 +1030,6 @@ void pid_line_follow_step(void) {
         const float coastCorrection = lastDashedCorrection * 0.3f; // was 0.7f — less sideways drift
         float leftCommand = coastBase + coastCorrection;
         float rightCommand = coastBase - coastCorrection;
-        limitMotorCommandPeak(leftCommand, rightCommand, coastBase * 1.5f); // was coastBase — allow outer wheel to stay up
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {
