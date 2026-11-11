@@ -80,6 +80,15 @@ void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map2_sensor_stage(void);
+// Map 3: four independent PID masks and four independent BASE PWM stages.
+// Sensor and BASE tick boundaries are separate; all values are editable while stopped.
+bool pid_set_map3_profile(const int32_t *sensorTicks, const uint16_t *sensorMasks,
+                          const int32_t *baseTicks, const uint8_t *basePwms);
+void pid_get_map3_profile(int32_t *sensorTicks, uint16_t *sensorMasks,
+                          int32_t *baseTicks, uint8_t *basePwms);
+uint8_t pid_get_map3_sensor_stage(void);
+uint8_t pid_get_map3_base_stage(void);
+int16_t pid_get_active_base_speed(void);
 // Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
 uint8_t pid_get_map2_hold_state(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
