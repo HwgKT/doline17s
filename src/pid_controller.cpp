@@ -170,24 +170,7 @@ int32_t map1SensorStage3Ticks = 1350;
 uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
-// Map 2 independent checkpoints. Defaults OFF until the operator sets
-// validated tick boundaries through MAP2_TICKS (no existing Map2 stages).
-constexpr uint8_t MAP2_MAX_TICK_STAGES = 8;
-int32_t map2TickEnds[MAP2_MAX_TICK_STAGES] = {};
-uint8_t map2TickCount = 0, map2TickStage = 0;
-int32_t map2MaxProgress = 0;
-enum Map2Checkpoint : uint8_t { MAP2_RUN, MAP2_SETTLE, MAP2_ALIGN, MAP2_FAULT };
-Map2Checkpoint map2Checkpoint = MAP2_RUN;
-uint32_t map2CheckpointSince = 0, map2StoppedSince = 0;
-int32_t map2PrevL = 0, map2PrevR = 0;
-uint8_t map2CenterSamples = 0;
-constexpr uint32_t MAP2_SETTLE_MS = 100, MAP2_SETTLE_TIMEOUT_MS = 1500;
-constexpr uint32_t MAP2_ALIGN_TIMEOUT_MS = 1800;
-constexpr int16_t MAP2_ALIGN_PWM = 65;
-constexpr int16_t MAP2_ALIGN_MIN_PWM = 28;
-constexpr float MAP2_HOLD_CENTER_ERROR = 8.0f;
-constexpr uint8_t MAP2_CENTER_CONFIRM_FRAMES = 5;
-
+int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
 
 static int32_t map1SensorTravelTicks() {
     int32_t left = 0, right = 0;
@@ -329,15 +312,6 @@ static uint8_t bitCount16(uint16_t value) {
 static bool hasAdjacentLineSensors(uint16_t mask) {
     return (mask & (uint16_t)(mask >> 1)) != 0;
 }
-// Map2-only proportional heading correction while zero forward PWM.
-// Uses the same -75..75 weighted sensor position as normal line PID.
-static int16_t map2HoldPwm(float position) {
-    float power = (float)MAP2_ALIGN_MIN_PWM + 0.55f *
-                  (fabsf(position) - MAP2_HOLD_CENTER_ERROR);
-    power = fmaxf((float)MAP2_ALIGN_MIN_PWM,
-                  fminf((float)MAP2_ALIGN_PWM, power));
-    return (int16_t)power;
-}
 static void resetWheelSpeedPid() {
     wheelFeedbackReady = false;
     wheelPrevSampleUs = 0;
@@ -467,12 +441,6 @@ static void resetLineTracking() {
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
     map1SensorMaxTicks = 0;
-    map2TickStage = 0;
-    map2MaxProgress = 0;
-    map2Checkpoint = MAP2_RUN;
-    map2CheckpointSince = map2StoppedSince = 0;
-    map2PrevL = map2PrevR = 0;
-    map2CenterSamples = 0;
      map1Route.begin(autoMode && selectedMap == 1 && map1RouteLockEnabled);
 }
 
@@ -678,25 +646,6 @@ void pid_set_auto_mode(bool enabled) {
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
-bool pid_set_map2_tick_stages(const int32_t *ticks, uint8_t count) {
-    if (autoMode || count > MAP2_MAX_TICK_STAGES || (count && !ticks))
-        return false;
-    for (uint8_t i=0; i<count; ++i) {
-        if (ticks[i] <= 0 || ticks[i] > 10000000 ||
-            (i && ticks[i] <= ticks[i-1])) return false;
-    }
-    for (uint8_t i=0; i<MAP2_MAX_TICK_STAGES; ++i)
-        map2TickEnds[i] = i < count ? ticks[i] : 0;
-    map2TickCount = count;
-    return true;
-}
-uint8_t pid_get_map2_tick_count(void) { return map2TickCount; }
-int32_t pid_get_map2_tick(uint8_t i) {
-    return i < map2TickCount ? map2TickEnds[i] : 0;
-}
-uint8_t pid_get_map2_tick_stage(void) { return map2TickStage; }
-uint8_t pid_get_map2_checkpoint_state(void) { return (uint8_t)map2Checkpoint; }
-
 bool pid_set_map1_route_lock(bool enabled) {
     if (autoMode) return false;
     map1RouteLockEnabled = enabled;
@@ -1169,111 +1118,10 @@ void pid_line_follow_step(void) {
         if (progress > map1MaxProgress) map1MaxProgress = progress;
     }
     const bool good = pid_calculate_position(&pos, &blackCount);
+    // Map 2 progresses continuously; only retain ticks for early turn recognition.
     if (selectedMap == 2) {
-        const uint32_t now = millis();
         const int32_t progress = runEncoderProgress();
         if (progress > map2MaxProgress) map2MaxProgress = progress;
-        if (map2Checkpoint == MAP2_RUN && map2TickStage < map2TickCount &&
-            map2MaxProgress >= map2TickEnds[map2TickStage]) {
-            map2Checkpoint = MAP2_SETTLE;
-            map2CheckpointSince = now;
-            map2StoppedSince = 0;
-            map2CenterSamples = 0;
-            encoder_get_counts(&map2PrevL, &map2PrevR);
-            clearPidState();
-            resetWheelSpeedPid();
-        }
-        if (map2Checkpoint != MAP2_RUN) {
-            currentCase = map2Checkpoint == MAP2_FAULT ?
-                LINE_CASE_STOPPED : LINE_CASE_MAP2_CHECKPOINT;
-            if (map2Checkpoint == MAP2_FAULT) {
-                motor_stop();
-                return;
-            }
-
-            // Keep tracking the PHYSICAL line throughout stopping and
-            // alignment. With common-mode PWM=0, a small signed differential
-            // correction rotates the robot in place; it does NOT drive it
-            // forward along the track after the tick boundary.
-            const uint16_t mask = sensor_get_line_bits();
-            const bool valid = good && blackCount >= 1 && blackCount <= 6 &&
-                               (mask & 0xF00FU) == 0;
-            const bool centered = valid && blackCount >= 2 &&
-                (mask & TURN_CENTER_SENSOR_MASK) != 0 &&
-                fabsf(pos) <= MAP2_HOLD_CENTER_ERROR;
-            int32_t left=0, right=0;
-            encoder_get_counts(&left, &right);
-            const bool still = labs((long)left-map2PrevL) <= 1 &&
-                               labs((long)right-map2PrevR) <= 1;
-            map2PrevL = left;
-            map2PrevR = right;
-
-            if (map2Checkpoint == MAP2_SETTLE) {
-                // Briefly settle forward momentum; do not hand control back to
-                // ordinary forward PID at the stage transition.
-                // A visible off-center line is actively steered even here.
-                if (valid && fabsf(pos) > MAP2_HOLD_CENTER_ERROR) {
-                    const int16_t power = map2HoldPwm(pos);
-                    if (pos < 0) motor_set_speeds(-power, power);
-                    else motor_set_speeds(power, -power);
-                } else {
-                    motor_stop();
-                }
-                if (still) {
-                    if (!map2StoppedSince) map2StoppedSince = now;
-                } else {
-                    map2StoppedSince = 0;
-                }
-                if (map2StoppedSince &&
-                    now-map2StoppedSince >= MAP2_SETTLE_MS) {
-                    map2Checkpoint = MAP2_ALIGN;
-                    map2CheckpointSince = now;
-                    map2CenterSamples = 0;
-                } else if (now-map2CheckpointSince >= MAP2_SETTLE_TIMEOUT_MS) {
-                    map2Checkpoint = MAP2_FAULT;
-                    motor_stop();
-                }
-                return;
-            }
-
-            // ALIGN: heading correction only, not forward travel. Release
-            // requires both a fresh centered measurement AND stationary
-            // encoders; a momentary line crossing cannot release this stage.
-            if (centered && still) {
-                if (map2CenterSamples < MAP2_CENTER_CONFIRM_FRAMES)
-                    ++map2CenterSamples;
-            } else {
-                map2CenterSamples = 0;
-            }
-            if (map2CenterSamples >= MAP2_CENTER_CONFIRM_FRAMES) {
-                ++map2TickStage;
-                map2Checkpoint = MAP2_RUN;
-                lineLocked = true;
-                acquiring = missing = false;
-                turnState = TURN_NONE;
-                earlyTurnActive = false;
-                clearPidState();
-                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
-                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
-                resetWheelSpeedPid();
-                motor_stop(); // Resume normal Map2 PID on next cycle.
-                return;
-            }
-            if (now-map2CheckpointSince >= MAP2_ALIGN_TIMEOUT_MS) {
-                map2Checkpoint = MAP2_FAULT;
-                motor_stop();
-                return;
-            }
-            if (!valid || fabsf(pos) <= MAP2_HOLD_CENTER_ERROR) {
-                // No line -> no blind search. Centered -> zero motor torque.
-                motor_stop();
-            } else {
-                const int16_t power = map2HoldPwm(pos);
-                if (pos < 0) motor_set_speeds(-power, power);
-                else motor_set_speeds(power, -power);
-            }
-            return;
-        }
     }
     // Physical position/blackCount continue to drive all existing FSM cases.
     // Only the NORMAL_PID steering error uses the encoder-selected subset.
@@ -1460,7 +1308,6 @@ const char* pid_get_case_name(LineCase_t c) {
         case LINE_CASE_DASHED_LINE: return "CASE 9: Pending loss - forward only";
         case LINE_CASE_STARTUP_COAST: return "CASE 10: Startup loss - straight";
         case LINE_CASE_GAP_BRIDGE: return "CASE 11: Map GAP bridge 100ms";
-        case LINE_CASE_MAP2_CHECKPOINT: return "CASE 12: Map 2 tick checkpoint";
         default: return "Khong Xac Dinh";
     }
 }
