@@ -23,7 +23,10 @@ typedef enum
   LINE_CASE_T_LEFT = 6,     // Case 6: Ngã 3 chữ T bên trái
   LINE_CASE_T_RIGHT = 7,    // Case 7: Ngã 3 chữ T bên phải
   LINE_CASE_STOPPED = 8,    // Case 8: Dừng xe
-  LINE_CASE_DASHED_LINE = 9 // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
+  LINE_CASE_DASHED_LINE = 9, // Case 9: Đoạn nét đứt (vượt qua khoảng trắng)
+  LINE_CASE_STARTUP_COAST = 10, // Case 10: Khởi động mất line, chạy thẳng có giới hạn
+  LINE_CASE_GAP_BRIDGE = 11, // Case 11: Qua line dut theo MAP, toi da 100ms
+  LINE_CASE_MAP2_HOLD = 12 // Temporary Map2 line-hold checkpoint; AUTO continues
 } LineCase_t;
 
 // Cấu trúc chứa thông số PID
@@ -33,7 +36,7 @@ typedef struct {
   float Kd;
   int16_t baseSpeed; // Tốc độ chuẩn (ví dụ 160)
   int16_t maxSpeed;  // Tốc độ tối đa (255)
-  int16_t minSpeed;  // Tốc độ tối thiểu (-120 để quay ngược bánh khi cua)
+  int16_t minSpeed;  // Legacy field; normal PID may issue signed wheel commands
 } PID_Config_t;
 
 // =================== CÁC HÀM KHỞI TẠO & CÀI ĐẶT ===================
@@ -62,6 +65,55 @@ void pid_set_auto_mode(bool enable);
  * @brief Kiểm tra xem đang chạy tự động dò line hay lái tay
  */
 bool pid_is_auto_mode(void);
+// Set track profile before AUTO. Valid MAP values: 1, 2, 3.
+bool pid_select_map(uint8_t mapId);
+uint8_t pid_get_selected_map(void);
+// Map 1 only: encoder thresholds and three independent 16-bit PID sensor masks.
+// Requires AUTO disabled; never changes physical ADC/line detection.
+bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
+                                 uint16_t mask1, uint16_t mask2, uint16_t mask3);
+void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
+                                 uint16_t *mask1, uint16_t *mask2,
+                                 uint16_t *mask3);
+// Map 2: 4 PID eye-mask stages selected by three encoder thresholds.
+// 3 ordered positive ticks and 4 nonzero masks. AUTO must be off.
+bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
+void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
+uint8_t pid_get_map2_sensor_stage(void);
+// Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
+uint8_t pid_get_map2_hold_state(void);
+// High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
+// 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
+uint8_t pid_get_high_speed_stage(void);
+// Adjustable peak PWM before START (100-255), must not be below BASE.
+bool pid_set_high_speed_peak(int16_t pwm);
+int16_t pid_get_high_speed_peak(void);
+// Map 01 aligned-start route lock: straight, semicircle, right, straight.
+// 0=OFF, 1=STRAIGHT_1, 2=SEMICIRCLE, 3=RIGHT_TURN, 4=STRAIGHT_2, 5=FAULT.
+// Before START: ROUTE_LOCK:0 disables if the robot starts at another pose.
+bool pid_set_map1_route_lock(bool enabled);
+bool pid_get_map1_route_lock(void);
+uint8_t pid_get_map1_route_stage(void);
+uint8_t pid_get_map1_route_fault_code(void);
+uint16_t pid_get_map1_selected_line_mask(void);
+// MAP 1 late speed scheduler threshold; 0 means inactive.
+int32_t pid_get_map1_late_boost_start(void);
+// True once Map 1 has actually applied HS_PEAK on a valid centered line.
+bool pid_is_map1_late_boost_engaged(void);
+// Dynamic brake start: 1800 for peak 100..229; 1600 for 230..239; 1400 for 240..255.
+// Encoder ticks are relative to the current AUTO origin on all MAPs.
+int32_t pid_get_high_speed_brake_start(void);
+// Signed average encoder progress since AUTO, without resetting global counts.
+int32_t pid_get_run_encoder_progress(void);
+void pid_get_run_encoder_origins(int32_t* left, int32_t* right);
+void pid_get_gap_window(int32_t* begin, int32_t* end);
+bool pid_line_is_confirmed(void);
+// True only after 16 black sensors for 3 consecutive PID cycles.
+bool pid_finish_line_latched(void);
+// True only after leaving the all-black START pad and tracking a stable narrow line.
+bool pid_finish_detection_armed(void);
+uint32_t pid_get_confirmed_line_loss_count(void);
+uint32_t pid_get_line_reacquisition_count(void);
 
 // =================== CÁC HÀM XỬ LÝ CHÍNH ===================
 
@@ -70,7 +122,8 @@ bool pid_is_auto_mode(void);
  * chính giữa)
  * @param outPosition Con trỏ lưu vị trí tính được
  * @param outBlackCount Con trỏ lưu số lượng mắt đang thấy vạch đen
- * @return true nếu có ít nhất 1 mắt thấy đen, false nếu mất line
+ * @return true nếu có mắt vượt ngưỡng RAW riêng TH_i; chỉ mắt đó
+ *         góp phần vào trọng tâm Analog 0–1000
  */
 bool pid_calculate_position(float *outPosition, uint8_t *outBlackCount);
 
@@ -89,6 +142,9 @@ LineCase_t pid_get_current_case(void);
 const char *pid_get_case_name(LineCase_t c);
 float pid_get_last_error(void);
 float pid_get_correction(void);
+float pid_get_term_p(void);
+float pid_get_term_i(void);
+float pid_get_term_d(void);
 float pid_get_kp(void);
 float pid_get_ki(void);
 float pid_get_kd(void);

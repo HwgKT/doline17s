@@ -1,88 +1,766 @@
 #include <Arduino.h>
+#include <math.h>
+#include <stdlib.h>
+#include "pinout.h"
 #include "sensor.h"
 #include "motor.h"
-#include "ble_control.h"
+#include "encoder.h"
 #include "pid_controller.h"
+#include "bt_telemetry.h"
+#include "perf_monitor.h"
+#include "adc_bench.h"
+#include "spp_debug.h"
 
-unsigned long lastPrintTime = 0;
+namespace {
+// 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
+constexpr uint32_t BLINK_MS=400;
+// 128 calibration frames take about 0.2s at ~650 Hz. Blink periods must be
+// shorter than calibration acquisition, not hundreds of ms per ADC sample.
+constexpr uint32_t CAL_WHITE_LED_BLINK_MS=40; // fast, GPIO2 toggle interval
+constexpr uint32_t CAL_BLACK_LED_BLINK_MS=90; // slower, GPIO2 toggle interval
+constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
+// FINISH is a 16/16 BLACK pad. START may occur on BLACK, WHITE or a line.
+// Both GUI and GPIO34 share the same AUTO safety/validation checks.
+bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
+bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
+uint8_t manualSpeed=120;
+uint16_t streamHz=300;
+uint32_t streamPeriodUs=1000000UL/300;
+uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
+uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
+BtTxStats lastTxStats{};
+// Each boot requires physical presses WHITE -> BLACK -> START.
+// A successful START keeps the button usable for subsequent runs; calibration
+// can also be restarted explicitly through CAL_WHITE via SPP.
+enum Button34Phase : uint8_t {
+  BUTTON34_WHITE_NEXT,
+  BUTTON34_WHITE_CAPTURING,
+  BUTTON34_BLACK_NEXT,
+  BUTTON34_BLACK_CAPTURING,
+  BUTTON34_START_NEXT,
+  BUTTON34_START_REUSE
+};
+Button34Phase button34Phase=BUTTON34_WHITE_NEXT;
+uint32_t lastButton34LedMs=0;
+
+void ledWrite(bool on) {
+  ledOn=on;
+  digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
+}
+void setButton34Phase(Button34Phase phase) {
+  button34Phase=phase;
+  lastButton34LedMs=millis();
+  // Only illuminate the LED during an active calibration capture.
+  // CAL_WHITE_DONE and CAL_OK_SAVED turn it OFF until the next press.
+  ledWrite(phase==BUTTON34_WHITE_CAPTURING ||
+           phase==BUTTON34_BLACK_CAPTURING);
+}
+void reply(const String &line) { btSendLine(line); }
+void safeStop() {
+  pid_set_auto_mode(false); motor_stop(); manualActive=false;
+}
+bool parseGain(const String &s,float &val) {
+  if(!s.length())return false;
+  char *end=nullptr;
+  float v=strtof(s.c_str(),&end);
+  if(end==s.c_str()||*end||!isfinite(v)||v<0||v>50)return false;
+  val=v;return true;
+}
+bool parseSpeed(const String &s,int &val) {
+  if(!s.length())return false;
+  char *end=nullptr;
+  long v=strtol(s.c_str(),&end,10);
+  if(end==s.c_str()||*end||v<0||v>255)return false;
+  val=(int)v;return true;
+}
+void showPid() {
+  char b[100];
+  snprintf(b,sizeof(b),"PID: Kp=%.2f Ki=%.2f Kd=%.2f Base=%d",
+           pid_get_kp(),pid_get_ki(),pid_get_kd(),pid_get_base_speed());
+  reply(b);
+}
+void showCalib() {
+  reply(String("CAL_STATUS READY=")+(calibrationReady?"1":"0")+
+        " STATE="+String((int)sensor_calibration_state()));
+}
+void command(const String &raw) {
+  String s=raw;s.trim();s.toUpperCase();
+  if(!s.length())return;
+  // Highest-priority commands: E-STOP cuts PWM and prevents all new motion.
+  if(s=="ESTOP"||s=="E_STOP"||s=="EMERGENCY_STOP"){
+    estopLatched=true; safeStop();adcBenchCancel();
+    reply("ESTOP: LATCHED");return;
+  }
+  if(s=="RESET_ESTOP"){
+    safeStop();estopLatched=false; // Unlock only: motors remain stopped.
+    reply("ESTOP: CLEARED (MOTORS OFF)");return;
+  }
+  // USB command echo intentionally disabled.
+  if(s=="PING"){reply("PONG");return;}
+  if(s=="?"||s=="HELP"){
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    return;
+  }
+  if(s=="STREAM"){
+    reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
+  }
+  if(s.startsWith("STREAM:")){
+    const String textHz=s.substring(7);
+    const int hz=textHz.toInt();
+    const bool valid=(textHz==String(hz))&&
+       (hz==0||hz==20||hz==50||hz==100||hz==200||hz==300);
+    if(!valid){reply("ERR: STREAM_RATE_USE_0_20_50_100_200_300");return;}
+    streamHz=(uint16_t)hz;
+    streamPeriodUs=streamHz?1000000UL/streamHz:0;
+    lastTxUs=micros();
+    btDropPendingTelemetry();
+    reply(String("STREAM Hz=")+streamHz+" FRAME_BYTES=72");return;
+  }
+  if(s=="ADC_MODE"){
+    reply(String("ADC_MODE: ")+sensor_get_adc_mode()+
+          " method="+sensor_adc_mode()+
+          " (0=DISCARD_FIRST,1=NO_DISCARD; RAM_ONLY)");
+    return;
+  }
+  if(s.startsWith("ADC_MODE:")){
+    const String value=s.substring(9);
+    if(value!="0" && value!="1"){
+      reply("ERR: ADC_MODE_USE_0_OR_1");return;
+    }
+    if(pid_is_auto_mode() || manualActive || sensor_is_calibrating() ||
+       adcBenchActive() || motor_get_left_speed()!=0 || motor_get_right_speed()!=0){
+      reply("ERR: ADC_MODE_REQUIRES_STOPPED");return;
+    }
+    if(!sensor_set_adc_mode((uint8_t)(value=="1"?1:0))){
+      reply("ERR: ADC_MODE_NOT_READY");return;
+    }
+    command("ADC_MODE");
+    return;
+  }
+  if(s=="DIAG"){
+    const uint32_t t=micros(),dt=t-lastDiagUs;
+    const float sec=dt?dt*1e-6f:1.0f;
+    const BtTxStats tx=btGetTxStats();
+    int32_t encL=0,encR=0;encoder_get_counts(&encL,&encR);
+    char b[360];
+    snprintf(b,sizeof(b),
+      "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
+      "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
+      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u peak=%d route=%u rf=%u clu=%04X",
+      btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
+      loopCount/sec,pidCount/sec,
+      (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
+      (unsigned long)(tx.dropped-lastTxStats.dropped),
+      (unsigned long)(tx.failed-lastTxStats.failed),
+      (unsigned long)skippedSlots,(unsigned long)tx.pending,
+      (long)encL,(long)encR,
+      (unsigned)pid_get_current_case(),pid_line_is_confirmed()?1U:0U,
+      (unsigned long)pid_get_confirmed_line_loss_count(),
+      (unsigned long)pid_get_line_reacquisition_count(),
+      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak(),
+      (unsigned)pid_get_map1_route_stage(),
+      (unsigned)pid_get_map1_route_fault_code(),
+      (unsigned)pid_get_map1_selected_line_mask());
+    lastDiagUs=t;loopCount=pidCount=txCount=0;
+    lastTxStats=tx;skippedSlots=0;
+    reply(b);return;
+  }
+  if(s=="PERF"){perfReport();return;}
+  if(s=="TASKS"){perfTaskReport();return;}
+  if(s=="ADC_BENCH"){
+    if(sensor_is_calibrating()){reply("ERR: ADC_BENCH_CALIB_ACTIVE");return;}
+    safeStop();
+    reply(adcBenchStart()?"ADC_BENCH: STARTED (SPP RESULTS)":
+                          "ERR: ADC_BENCH_BUSY_OR_INIT_FAILED");
+    return;
+  }
+  if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
+  if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
+  if(s=="PID"){showPid();return;}
+  // MAP 2: four masks, three tick boundaries; HEX masks like SENSOR_PROFILE.
+  if(s=="MAP2_SENSOR_PROFILE"){
+    int32_t t[3]={}; uint16_t m[4]={};
+    pid_get_map2_sensor_profile(t,m);
+    char b[165];
+    snprintf(b,sizeof(b),
+      "MAP2_SENSOR_PROFILE T1=%ld T2=%ld T3=%ld M1=%04X M2=%04X M3=%04X M4=%04X STAGE=%u",
+      (long)t[0],(long)t[1],(long)t[2],
+      (unsigned)m[0],(unsigned)m[1],(unsigned)m[2],(unsigned)m[3],
+      (unsigned)pid_get_map2_sensor_stage());
+    reply(b);return;
+  }
+  if(s.startsWith("MAP2_SENSOR_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP2_SENSOR_PROFILE_REQUIRES_STOPPED");return;
+    }
+    long t1=0,t2=0,t3=0;
+    unsigned m1=0,m2=0,m3=0,m4=0;
+    char tail=0;
+    const int n=sscanf(s.c_str()+20,"%ld,%ld,%ld,%x,%x,%x,%x %c",
+      &t1,&t2,&t3,&m1,&m2,&m3,&m4,&tail);
+    const int32_t ticks[3]={(int32_t)t1,(int32_t)t2,(int32_t)t3};
+    const uint16_t masks[4]={(uint16_t)m1,(uint16_t)m2,
+                             (uint16_t)m3,(uint16_t)m4};
+    if(n!=7 || t1<=0 || t2<=t1 || t3<=t2 || t3>10000000L ||
+       m1==0 || m2==0 || m3==0 || m4==0 ||
+       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU || m4>0xFFFFU ||
+       !pid_set_map2_sensor_profile(ticks,masks)){
+      reply("ERR: MAP2_SENSOR_PROFILE_INVALID");return;
+    }
+    command("MAP2_SENSOR_PROFILE");return;
+  }
+  // Read/update all three Map 1 PID sensor masks without opening a terminal.
+  // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
+  if(s=="SENSOR_PROFILE"){
+    int32_t t1=0,t2=0;
+    uint16_t m1=0,m2=0,m3=0;
+    pid_get_map1_sensor_profile(&t1,&t2,&m1,&m2,&m3);
+    char b[130];
+    snprintf(b,sizeof(b),
+      "SENSOR_PROFILE T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
+      (long)t1,(long)t2,(unsigned)m1,(unsigned)m2,(unsigned)m3);
+    reply(b);return;
+  }
+  if(s.startsWith("SENSOR_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: SENSOR_PROFILE_REQUIRES_STOPPED");return;
+    }
+    long t1=0,t2=0;
+    unsigned m1=0,m2=0,m3=0;
+    char trailing=0;
+    const int count=sscanf(s.c_str()+15,"%ld,%ld,%x,%x,%x %c",
+                            &t1,&t2,&m1,&m2,&m3,&trailing);
+    if(count!=5 || t1<=0 || t2<=t1 || t2>10000000L ||
+       m1==0 || m2==0 || m3==0 ||
+       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU ||
+       !pid_set_map1_sensor_profile((int32_t)t1,(int32_t)t2,
+                                   (uint16_t)m1,(uint16_t)m2,(uint16_t)m3)){
+      reply("ERR: SENSOR_PROFILE_INVALID");return;
+    }
+    command("SENSOR_PROFILE");return;
+  }
+  if(s=="ROUTE_LOCK"){
+    char b[128];
+    snprintf(b,sizeof(b),
+      "ROUTE_LOCK: ENABLED=%u MAP=%u STATE=%u FAULT=%u",
+      (unsigned)(pid_get_map1_route_lock()?1:0),
+      (unsigned)pid_get_selected_map(),
+      (unsigned)pid_get_map1_route_stage(),
+      (unsigned)pid_get_map1_route_fault_code());
+    reply(b);return;
+  }
+  if(s.startsWith("ROUTE_LOCK:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: ROUTE_LOCK_REQUIRES_STOPPED");return;
+    }
+    const String arg=s.substring(11);
+    if(arg!="0"&&arg!="1"){
+      reply("ERR: ROUTE_LOCK_USE_0_OR_1");return;
+    }
+    pid_set_map1_route_lock(arg=="1");
+    reply(String("ROUTE_LOCK: ENABLED=")+(pid_get_map1_route_lock()?1:0)+
+          " MAP="+pid_get_selected_map()+" STATE=0 FAULT=0");
+    return;
+  }
+  if(s=="HS_PEAK"){
+    char b[160];
+    if(pid_get_map1_late_boost_start()>0){
+      snprintf(b,sizeof(b),
+        "HS_PEAK: PWM=%d BASE=%d START_ENC=%ld MODE=MAP1_LATE_BASE",
+        pid_get_high_speed_peak(),pid_get_base_speed(),
+        (long)pid_get_map1_late_boost_start());
+    }else{
+      snprintf(b,sizeof(b),
+        "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
+        pid_get_high_speed_peak(),pid_get_base_speed(),
+        (long)pid_get_high_speed_brake_start());
+    }
+    reply(b);return;
+  }
+  if(s.startsWith("HS_PEAK:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: HS_PEAK_REQUIRES_STOPPED");return;
+    }
+    int value;
+    const String rawPwm=s.substring(8);
+    if(!parseSpeed(rawPwm,value)||value<100 ||
+       !pid_set_high_speed_peak((int16_t)value)){
+      reply("ERR: HS_PEAK_RANGE_100_TO_255_AND_GE_BASE");return;
+    }
+    command("HS_PEAK");return;
+  }
+  if(s=="PWM"){
+    char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
+      motor_get_left_speed(),motor_get_right_speed(),
+      pid_get_last_error(),pid_get_correction());
+    reply(b);return;
+  }
+  if(s=="ENC"||s=="ENCODER"){
+    int32_t l=0,r=0;
+    encoder_get_counts(&l,&r);
+    char b[92];
+    snprintf(b,sizeof(b),"ENC: L=%ld R=%ld (signed x4)",(long)l,(long)r);
+    reply(b);return;
+  }
+  if(s=="ENC_RESET"||s=="RESET_ENCODER"){
+    // Resetting absolute counts in AUTO would corrupt runEnc (and the
+    // 10k BOOST scheduler). Also require both motor outputs at rest.
+    if(pid_is_auto_mode()||manualActive||
+       motor_get_left_speed()!=0||motor_get_right_speed()!=0){
+      reply("ERR: ENC_RESET_REQUIRES_STOPPED");return;
+    }
+    encoder_reset_counts();
+    reply("ENC_RESET: OK");return;
+  }
+  if(s=="STATUS"){
+    char b[240];snprintf(b,sizeof(b),"STATUS: bt=%d auto=%d estop=%d calib=%d calibrating=%d case=%d pwmL=%d pwmR=%d adc=%s adc_ok=%d adc_err=%lu map=%u runEnc=%ld hs=%u peak=%d",
+      btConnected()?1:0,pid_is_auto_mode()?1:0,estopLatched?1:0,
+      calibrationReady?1:0,sensor_is_calibrating()?1:0,(int)pid_get_current_case(),
+      motor_get_left_speed(),motor_get_right_speed(),sensor_adc_mode(),
+      sensor_adc_ready()?1:0,(unsigned long)sensor_adc_error_count(),
+      (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak());
+    reply(b);return;
+  }
+  if(s=="P"||s=="SENSORS"){
+    String b="SENSORS: ";
+    for(int i=0;i<N_SENSORS;++i)b+=(sensor_is_black(i)?'1':'0');
+    reply(b);return;
+  }
+  // Explicit track profile, independent of the Python CSV destination.
+  if(s=="MAP"){
+    int32_t gapBegin=0,gapEnd=0;
+    pid_get_gap_window(&gapBegin,&gapEnd);
+    char b[100];
+    snprintf(b,sizeof(b),"MAP: SELECTED %u GAP=%ld-%ld TIMEOUT=100ms",
+      (unsigned)pid_get_selected_map(),(long)gapBegin,(long)gapEnd);
+    reply(b);return;
+  }
+  if(s.startsWith("MAP:")){
+    const String idText=s.substring(4);
+    const int id=idText.toInt();
+    if(id<1||id>3||idText!=String(id)){
+      reply("ERR: MAP_USE_1_2_3");return;
+    }
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: MAP_REQUIRES_STOPPED");return;
+    }
+    pid_select_map((uint8_t)id);
+    command("MAP");return;
+  }
+  if(s=="S"||s=="STOP"||s=="M"||s=="MANUAL"){
+    safeStop();adcBenchCancel();
+    // Prioritize the stop acknowledgment over stale 100-Hz telemetry.
+    btDropPendingTelemetry();
+    reply(s=="M"||s=="MANUAL"?"MODE: MANUAL":"MOTOR: STOP");return;
+  }
+  if(s=="A"||s=="AUTO"||s=="START"||s.startsWith("AUTO:")){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(pid_is_auto_mode()){reply("ERR: AUTO_ALREADY_RUNNING");return;}
+    if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
+    if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
+    // AUTO:1/2/3 sets the firmware track atomically with START, avoiding
+    // a mismatch between the Python logging MAP and the active controller.
+    if(s.startsWith("AUTO:")){
+      const String idText=s.substring(5);
+      const int id=idText.toInt();
+      if(id<1||id>3||idText!=String(id)){
+        reply("ERR: MAP_USE_1_2_3");return;
+      }
+      if(!pid_select_map((uint8_t)id)){
+        reply("ERR: MAP_SELECT_FAILED");return;
+      }
+    }
+    if(pid_get_selected_map()==0){
+      reply("ERR: MAP_NOT_SELECTED");return;
+    }
+    // Start is permitted from BLACK, WHITE, or a narrow line.
+    // PID initially coasts straight until the center line is confirmed;
+    // the full-black FINISH detector remains disarmed during acquisition.
+    manualActive=false;
+    pid_set_auto_mode(true);
+    reply("MODE: AUTO PID");
+    reply(String("ADC_RUN_MODE: ")+sensor_get_adc_mode()+
+          " method="+sensor_adc_mode());
+    int32_t runL=0,runR=0;
+    pid_get_run_encoder_origins(&runL,&runR); // exactly the PID's AUTO origin
+    char runInfo[180];
+    snprintf(runInfo,sizeof(runInfo),
+       "RUN_ORIGIN map=%u encL0=%ld encR0=%ld base=%d peak=%d kp=%.2f ki=%.2f kd=%.2f t_ms=%lu",
+       (unsigned)pid_get_selected_map(),(long)runL,(long)runR,
+       pid_get_base_speed(),pid_get_high_speed_peak(),
+       pid_get_kp(),pid_get_ki(),pid_get_kd(),
+       (unsigned long)millis());
+    reply(runInfo);
+    char rampEvent[160];
+    if(pid_get_map1_late_boost_start()>0){
+      snprintf(rampEvent,sizeof(rampEvent),
+        "HS_STAGE OFF map=1 runEnc=0 base=%d peak=%d start=%ld t_ms=%lu",
+        pid_get_base_speed(),pid_get_high_speed_peak(),
+        (long)pid_get_map1_late_boost_start(),(unsigned long)millis());
+    }else{
+      snprintf(rampEvent,sizeof(rampEvent),
+        "HS_STAGE %s map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+        pid_get_high_speed_stage()==0 ? "OFF" : "RAMP",
+        (unsigned)pid_get_selected_map(),pid_get_base_speed(),
+        pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
+        (unsigned long)millis());
+    }
+    reply(rampEvent);
+    if(pid_get_selected_map()==1 && pid_get_map1_route_lock()){
+      char routeEvent[110];
+      snprintf(routeEvent,sizeof(routeEvent),
+        "ROUTE_STAGE STRAIGHT_1 map=1 runEnc=0 t_ms=%lu",
+        (unsigned long)millis());
+      reply(routeEvent);
+    }
+    return;
+  }
+  // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
+  if(s=="C"||s=="W"||s=="CALIB"||s=="CAL_WHITE"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
+    safeStop();
+    if(sensor_capture_white()){
+      setButton34Phase(BUTTON34_WHITE_CAPTURING);
+      reply("CAL_WHITE_ACCEPTED");
+    }else reply("CAL_BUSY");
+    return;
+  }
+  if(s=="CAL_BLACK"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(sensor_calibration_state()!=CAL_WHITE_READY){reply("CAL_NEED_WHITE");return;}
+    safeStop();
+    if(sensor_capture_black()){
+      setButton34Phase(BUTTON34_BLACK_CAPTURING);
+      reply("CAL_BLACK_ACCEPTED");
+    }else reply("CAL_BUSY");
+    return;
+  }
+  if(s=="CAL_STATUS"){showCalib();return;}
+  if(s=="CAL_DUMP"){
+    showCalib();
+    if(!calibrationReady){reply("CAL_NO_PROFILE");return;}
+    reply("CAL_DUMP_BEGIN");
+    for(int i=0;i<N_SENSORS;++i){
+      char line[80];
+      snprintf(line,sizeof(line),"CAL_DATA %d %u %u %u",
+          i,minValues[i],maxValues[i],thresholds[i]);
+      reply(line);
+    }
+    reply("CAL_DUMP_DONE");return;
+  }
+  if(s=="K"||s=="STOP_CALIB"||s=="SWEEP"){reply("CAL_USE_WHITE_THEN_BLACK");return;}
+  if(s=="INV"||s=="INVERT"){reply("CAL_FIXED_POLARITY BLACK_ADC_HIGH");return;}
+  if(s.startsWith("KP:")||s.startsWith("KI:")||s.startsWith("KD:")){
+    float v;
+    if(!parseGain(s.substring(3),v)){reply("ERR: PID_VALUE_0_50");return;}
+    float kp=pid_get_kp(),ki=pid_get_ki(),kd=pid_get_kd();
+    if(s.startsWith("KP:"))kp=v;
+    if(s.startsWith("KI:"))ki=v;
+    if(s.startsWith("KD:"))kd=v;
+    pid_set_tunings(kp,ki,kd);showPid();return;
+  }
+  if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
+    int v;int sep=s.indexOf(':');
+    if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
+    // A BASE above HS_PEAK makes the trapezoid undefined. Reject instead
+    // of silently turning a supposedly lower peak into a higher target.
+    if(v>pid_get_high_speed_peak()){reply("ERR: BASE_GT_HS_PEAK");return;}
+    pid_set_base_speed(v);manualSpeed=(uint8_t)v;
+    reply(String("SPEED SET: ")+v);return;
+  }
+  if(s=="F"||s=="B"||s=="L"||s=="R"){
+    if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
+    if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
+    if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
+    safeStop();
+    if(s=="F")motor_forward(manualSpeed);
+    if(s=="B")motor_backward(manualSpeed);
+    if(s=="L")motor_set_speeds(-(int16_t)manualSpeed*2/3,manualSpeed);
+    if(s=="R")motor_set_speeds(manualSpeed,-(int16_t)manualSpeed*2/3);
+    manualActive=true;lastManual=millis();
+    reply(String("MOTOR: ")+s+" (deadman 750ms)");return;
+  }
+  reply(String("ERR: UNKNOWN_COMMAND ")+s);
+}
+void connectionState(uint32_t now) {
+  bool connected=sppStarted&&btConnected();
+  if(connected!=btPrevious){
+    if(connected){
+      ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
+      reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
+      command("HS_PEAK");
+    }else{
+      safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
+      btDropPendingTelemetry(); // no replay after reconnect
+    }
+    btPrevious=connected;
+  }
+}
+// Calibration indicator has priority over the Bluetooth LED:
+// blink only while capturing; OFF after each completed calibration step.
+void updateLedIndicator(uint32_t now) {
+  const uint32_t blinkMs =
+    button34Phase==BUTTON34_WHITE_CAPTURING ? CAL_WHITE_LED_BLINK_MS :
+    button34Phase==BUTTON34_BLACK_CAPTURING ? CAL_BLACK_LED_BLINK_MS : 0U;
+  if(blinkMs) {
+    if((uint32_t)(now-lastButton34LedMs)>=blinkMs) {
+      lastButton34LedMs=now;
+      ledWrite(!ledOn);
+    }
+    return;
+  }
+  // Do not let a connected Bluetooth SPP session relight GPIO2 while
+  // waiting for CAL_WHITE, CAL_BLACK or START.
+  if(button34Phase!=BUTTON34_START_REUSE){
+    if(ledOn) ledWrite(false);
+    return;
+  }
+  if(sppStarted && btConnected()){
+    if(!ledOn)ledWrite(true);
+  }else if((uint32_t)(now-lastBlink)>=BLINK_MS){
+    lastBlink=now;
+    ledWrite(!ledOn);
+  }
+}
+void sendFrame(){
+  if(!sppStarted||!btConnected())return;
+  Telemetry t{};
+  // Timestamp belongs to the single post-PID snapshot, not the Bluetooth write.
+  t.t_ms=millis();
+  for(int i=0;i<N_SENSORS;++i)t.adc[i]=sensorRaw[i];
+  int32_t l=0,r=0;
+  encoder_get_counts(&l,&r);
+  t.encL=l;t.encR=r;
+  t.pwmL=motor_get_left_speed();t.pwmR=motor_get_right_speed();
+  t.err=pid_is_auto_mode()?pid_get_last_error():0.0f;
+  t.p=pid_get_term_p();t.i=pid_get_term_i();t.d=pid_get_term_d();
+  t.out=pid_is_auto_mode()?pid_get_correction():0.0f;
+  t.mode=pid_is_auto_mode()?1:0;
+  if(btSendTelemetry(t))++txCount;
+}
+} // namespace
 
 void setup() {
-  Serial.begin(115200);
-  delay(500);
-
-  Serial.println("\n==============================================");
-  Serial.println("  ESP32 XE DO LINE 16 MAT - BLE + MOTOR + PID");
-  Serial.println("==============================================");
-
-  // 1. Khởi tạo cảm biến dò line 16 mắt (CD74HC4067)
-  sensor_init();
-
-  // 2. Khởi tạo điều khiển 2 động cơ PWM
-  motor_init();
-
-  // 3. Khởi tạo PID với cấu hình mặc định
-  pid_init(2.2f, 0.0f, 10.0f, 120);
-
-  // 4. Khởi tạo BLE Server điều khiển không dây
-  ble_control_init("ESP32_LineRobot");
-
-  Serial.println("\nSan sang!");
-  Serial.println("- Dung nut CALIB tren mach HOAC Web/BLE de lia calib Min/Max.");
-  Serial.println("- Lenh BLE/Web:");
-  Serial.println("  + 'C' / 'W': Bat dau lia calib 4s | 'K': Chot som");
-  Serial.println("  + 'INV': Dao cuc tinh cam bien (Den <-> Trang)");
-  Serial.println("  + 'A': BAT chay tu dong PID | 'M': TAT ve lai tay");
-  Serial.println("  + 'PWM': Xem toc do PWM 2 banh | 'PID': Xem thong so PID");
-  Serial.println("  + 'KP:2.2' | 'KI:0' | 'KD:10' | 'BASE:120': Chinh thong so PID");
-  Serial.println("  + 'F'/'B'/'L'/'R'/'S': Dieu khien tay tien/lui/trai/phai/dung");
+  // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
+  pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
+  sensor_init();motor_init();
+  encoder_init(); // mainv2 signed quadrature x4 on A and B channels
+  pid_init(1.6f,0.0f,0.8f,100); // default PID gains for MAP 1/2/3
+  pid_select_map(1); // physical GPIO34 START works without a connected app
+  sppStarted=btBegin("LineRobot");
+  lastTxUs=lastDiagUs=micros();
+  lastTxStats=btGetTxStats();
+  lastBlink=millis();
 }
-
 void loop() {
-  // 1. Duy trì kết nối và thông báo qua BLE
-  ble_control_update();
-
-  // 2. Kiểm tra nút nhấn vật lý (hoạt động song song với lệnh BLE/Web)
-  if (sensor_is_button_pressed()) {
-    sensor_handle_calibration_step();
-  }
-
-  // 3. Xử lý quét Min/Max nếu đang trong chế độ lia calib (trong hàm này đã có sensor_read_all)
-  sensor_update_calibration_loop();
-
-  // 4. Quét các mắt cảm biến khi ở chế độ bình thường (tránh quét 2 lần liên tiếp khi calib)
-  if (!sensor_is_calibrating()) {
-    sensor_read_all();
-  }
-
-  // 5. Nếu đang ở chế độ Tự động -> Chạy thuật toán PID xử lý từng Case
-  if (pid_is_auto_mode()) {
-    pid_line_follow_step();
-  }
-
-  // 6. Định kỳ in thông tin trạng thái ra Serial & xuất PWM qua BLE (150ms/lần)
-  if (millis() - lastPrintTime >= 150) {
-    lastPrintTime = millis();
-    int16_t leftPwm = motor_get_left_speed();
-    int16_t rightPwm = motor_get_right_speed();
-    float err = pid_get_last_error();
-    const char* caseName = pid_get_case_name(pid_get_current_case());
-
-    if (pid_is_auto_mode()) {
-      Serial.printf("[%s] Err: %.1f | PWM L:%d R:%d | Corr: %.1f\n",
-                    caseName,
-                    err,
-                    leftPwm,
-                    rightPwm,
-                    pid_get_correction());
-    } else if (calibrationReady) {
-      sensor_print_states();
-    }
-
-    // Xuất giá trị PWM 2 động cơ, sai số và tên Case lên BLE
-    if (ble_is_connected()) {
-      ble_send_pwm_telemetry(leftPwm, rightPwm, err, caseName);
+  const uint32_t loopStartUs=micros();
+  perfLoopBegin(loopStartUs);
+  uint32_t now=millis();++loopCount;
+  uint32_t stageStartUs=micros();
+  connectionState(now);
+  if(sppStarted)btPollCommands(command);
+  perfRecord(PERF_COMM, micros()-stageStartUs);
+  // GPIO34 physical 3-press workflow: WHITE -> BLACK -> START.
+  // GPIO34 itself is debounced once per LOW press in sensor.cpp.
+  if(sensor_start_button_pressed()){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: BUTTON34_REQUIRES_STOPPED");
+    }else if(adcBenchActive()){
+      reply("ERR: ADC_BENCH_ACTIVE");
+    }else if(button34Phase==BUTTON34_WHITE_NEXT){
+      reply("BUTTON34: CAL_WHITE_REQUEST");
+      command("CAL_WHITE"); // changes phase only on accepted capture
+    }else if(button34Phase==BUTTON34_WHITE_CAPTURING){
+      reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
+    }else if(button34Phase==BUTTON34_BLACK_NEXT){
+      if(sensor_is_calibrating() ||
+         sensor_calibration_state()!=CAL_WHITE_READY){
+        reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
+      }else{
+        reply("BUTTON34: CAL_BLACK_REQUEST");
+        command("CAL_BLACK");
+      }
+    }else if(button34Phase==BUTTON34_BLACK_CAPTURING){
+      reply("ERR: BUTTON34_WAIT_CAL_BLACK_DONE");
+    }else{
+      // Reuse the same AUTO validation as the GUI (no black-pad requirement).
+      reply("BUTTON34: START_REQUEST");
+      command("AUTO");
+      if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
     }
   }
-
-  delay(5); // Chu kỳ lấy mẫu và điều khiển 5ms chuẩn ổn định
+  const bool wasCalibrating=sensor_is_calibrating();
+  stageStartUs=micros();
+  if(adcBenchActive())adcBenchStep();
+  else if(wasCalibrating)sensor_update_calibration_loop();
+  else sensor_read_all();
+  perfRecord(PERF_ADC, micros()-stageStartUs);
+  if(!sensor_adc_ready() && (pid_is_auto_mode() || manualActive)){
+    safeStop();
+    reply("ERR: ADC_READ_FAULT_MOTORS_STOPPED");
+  }
+  switch(sensor_take_calibration_event()){
+    case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
+    case CAL_WHITE_DONE:
+      setButton34Phase(BUTTON34_BLACK_NEXT); // LED OFF, ready for BLACK press
+      reply("CAL_WHITE_DONE");break;
+    case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
+    case CAL_SAVED:
+      setButton34Phase(BUTTON34_START_NEXT);
+      reply("CAL_OK_SAVED");showCalib();break;
+    case CAL_ERROR:
+      // An invalid black profile cannot advance to START. Redo WHITE first.
+      setButton34Phase(BUTTON34_WHITE_NEXT);
+      reply("CAL_FAILED");showCalib();break;
+    default: break;
+  }
+  updateLedIndicator(now);
+  if(pid_is_auto_mode()&&!sensor_is_calibrating()){
+    stageStartUs=micros();
+    const LineCase_t oldCase=pid_get_current_case();
+    const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t oldRouteStage=pid_get_map1_route_stage();
+    const bool oldMap1Boost=pid_is_map1_late_boost_engaged();
+    const uint8_t oldMap2Stage=pid_get_map2_sensor_stage();
+    const uint8_t oldMap2Hold=pid_get_map2_hold_state();
+    const bool wasFinishArmed=pid_finish_detection_armed();
+    pid_line_follow_step();++pidCount;
+    if(!wasFinishArmed && pid_finish_detection_armed()){
+      reply("FINISH_ARMED: LINE_CONFIRMED");
+    }
+    perfRecord(PERF_PID, micros()-stageStartUs);
+    const LineCase_t newCase=pid_get_current_case();
+    const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t newRouteStage=pid_get_map1_route_stage();
+    const uint8_t newRouteFault=pid_get_map1_route_fault_code();
+    if(pid_get_selected_map()==1 &&
+       !oldMap1Boost && pid_is_map1_late_boost_engaged()){
+      char event[140];
+      snprintf(event,sizeof(event),
+        "HS_STAGE BOOST map=1 runEnc=%ld base=%d peak=%d start=%ld t_ms=%lu",
+        (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
+        pid_get_high_speed_peak(),(long)pid_get_map1_late_boost_start(),
+        (unsigned long)millis());
+      reply(event);
+    }
+    if(pid_get_selected_map()==2 && newCase!=LINE_CASE_STOPPED){
+      const uint8_t newMap2Stage=pid_get_map2_sensor_stage();
+      const uint8_t newMap2Hold=pid_get_map2_hold_state();
+      if(newMap2Stage!=oldMap2Stage || newMap2Hold!=oldMap2Hold){
+        char msg[120];
+        snprintf(msg,sizeof(msg),
+          "MAP2_STAGE stage=%u hold=%u runEnc=%ld t_ms=%lu",
+          (unsigned)newMap2Stage,(unsigned)newMap2Hold,
+          (long)pid_get_run_encoder_progress(),(unsigned long)millis());
+        reply(msg);
+      }
+    }
+    // A latched finish or PID stop must end AUTO, otherwise Python remains
+    // in AUTO while both PWM outputs are zero and START stays locked.
+    // Snapshot the stop reason BEFORE safeStop() clears PID state.
+    if(newCase==LINE_CASE_STOPPED){
+      const bool fullBlackFinish=pid_finish_line_latched();
+      const uint8_t stopMap=pid_get_selected_map();
+      const int32_t stopEnc=pid_get_run_encoder_progress();
+      safeStop();
+      // Drop queued pre-stop telemetry before announcing terminal state.
+      btDropPendingTelemetry();
+      if(newRouteFault!=0U){
+        char faultEvent[120];
+        snprintf(faultEvent,sizeof(faultEvent),
+          "ROUTE_FAULT code=%u map=%u runEnc=%ld t_ms=%lu",
+          (unsigned)newRouteFault,(unsigned)stopMap,
+          (long)stopEnc,(unsigned long)millis());
+        reply(faultEvent);
+      }
+      char stopEvent[150];
+      snprintf(stopEvent,sizeof(stopEvent),
+        "%s map=%u runEnc=%ld route_fault=%u t_ms=%lu",
+        fullBlackFinish ? "AUTO_FINISHED: FULL_BLACK_3" :
+        newRouteFault ? "AUTO_STOPPED: ROUTE_FAULT" :
+                        "AUTO_STOPPED: PID_STOPPED",
+        (unsigned)stopMap,(long)stopEnc,(unsigned)newRouteFault,
+        (unsigned long)millis());
+      reply(stopEvent);
+    }
+    if(newCase!=LINE_CASE_STOPPED && newRouteStage!=oldRouteStage &&
+       newRouteStage>0U && newRouteStage<5U){
+      static const char* const routeNames[]={
+        "OFF","STRAIGHT_1","SEMICIRCLE","RIGHT_TURN","STRAIGHT_2"
+      };
+      char routeEvent[130];
+      snprintf(routeEvent,sizeof(routeEvent),
+        "ROUTE_STAGE %s map=1 runEnc=%ld t_ms=%lu",
+        routeNames[newRouteStage],(long)pid_get_run_encoder_progress(),
+        (unsigned long)millis());
+      reply(routeEvent);
+    }
+    if(newCase!=LINE_CASE_STOPPED &&
+       newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
+      static const char* const labels[]={
+        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD",
+        "WAIT_LINE","BOOST"
+      };
+      if(newHighSpeedStage<9U){
+        char b[160];
+        if(pid_get_map1_late_boost_start()>0){
+          snprintf(b,sizeof(b),
+            "HS_STAGE %s map=1 runEnc=%ld base=%d peak=%d start=%ld t_ms=%lu",
+            labels[newHighSpeedStage],(long)pid_get_run_encoder_progress(),
+            pid_get_base_speed(),pid_get_high_speed_peak(),
+            (long)pid_get_map1_late_boost_start(),(unsigned long)millis());
+        }else{
+          snprintf(b,sizeof(b),
+            "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+            labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
+            (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
+            pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
+            (unsigned long)millis());
+        }
+        reply(b);
+      }
+    }
+    // Only log transitions, never print from the high-frequency PID controller.
+    // The Python app already mirrors text replies into the MAP-specific TXT.
+    if(oldCase!=newCase &&
+       (oldCase==LINE_CASE_GAP_BRIDGE || newCase==LINE_CASE_GAP_BRIDGE)){
+      const bool entered=newCase==LINE_CASE_GAP_BRIDGE;
+      const char* event=entered ? "GAP_START" :
+        (newCase==LINE_CASE_SHARP_LEFT || newCase==LINE_CASE_SHARP_RIGHT
+            ? "GAP_TIMEOUT_SEARCH" : "GAP_RECOVERED");
+      char b[150];
+      snprintf(b,sizeof(b),
+        "%s map=%u runEnc=%ld pwmL=%d pwmR=%d t_ms=%lu",
+        event,(unsigned)pid_get_selected_map(),
+        (long)pid_get_run_encoder_progress(),
+        motor_get_left_speed(),motor_get_right_speed(),
+        (unsigned long)millis());
+      reply(b);
+    }
+  }
+  if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
+    motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
+  }
+  // No stale bursts; bounded nonblocking enqueue at the selected stream rate.
+  const uint32_t txNow=micros();
+  if(streamPeriodUs&&!adcBenchActive()){
+    const uint32_t elapsed=txNow-lastTxUs;
+    if(elapsed>=streamPeriodUs){
+      const uint32_t slots=elapsed/streamPeriodUs;
+      lastTxUs+=slots*streamPeriodUs;
+      if(slots>1)skippedSlots+=slots-1;
+      if(sppStarted&&btConnected()){
+        stageStartUs=micros();
+        sendFrame();
+        perfRecord(PERF_TX,micros()-stageStartUs);
+      }
+    }
+  }
+  perfLoopEnd(micros()-loopStartUs);
+  // Loop start-to-start time includes yield and background scheduler work.
+  yield();
 }

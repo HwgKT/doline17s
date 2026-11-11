@@ -49,6 +49,14 @@ void ble_send_sensor_states(void);
  */
 void ble_send_pwm_telemetry(int16_t left, int16_t right, float error, const char* caseName);
 
+/**
+ * Send compact binary debug snapshot over BLE: PWM L/R, encoder pulse counts,
+ * 16 raw ADC readings and 16 calibrated readings. Fragment size stays below
+ * the default MTU notification payload limit.
+ */
+void ble_send_debug_telemetry(int16_t left, int16_t right,
+                              uint32_t encoder_left, uint32_t encoder_right);
+
 // =================== CẤU HÌNH TỐC ĐỘ ĐỘNG CƠ ===================
 
 /**

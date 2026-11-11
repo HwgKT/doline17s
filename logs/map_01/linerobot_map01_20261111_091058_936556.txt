@@ -1,0 +1,64 @@
+[2026-11-11T09:10:58.937+07:00] CSV BẮT ĐẦU: D:\EC\doline17s\logs\map_01\linerobot_map01_20261111_091058_936556.csv
+[2026-11-11T09:10:58.938+07:00] TX > AUTO:1
+[2026-11-11T09:10:58.978+07:00] RX < MODE: AUTO PID
+[2026-11-11T09:10:59.025+07:00] RX < ADC_RUN_MODE: 0 method=IDF_GPIO_1
+[2026-11-11T09:10:59.026+07:00] RX < RUN_ORIGIN map=1 encL0=11914 encR0=12291 base=130 peak=140 kp=1.60 ki=0.00 kd=0.80 t_ms=594394
+[2026-11-11T09:10:59.026+07:00] RX < HS_STAGE OFF map=1 runEnc=0 base=130 peak=140 brake=1800 end=2300 hold=110 minEnd=3100 t_ms=594395
+[2026-11-11T09:10:59.027+07:00] PID t=594397ms adc=2750,3812,2929,3628,2798,2768,2160,2278,2111,2096,3255,2096,3280,3328,2727,3574 cal=1000,1000,1000,1000,1000,1000,1000,1000,966,1000,1000,1000,1000,1000,1000,1000 logic=1111111111111111 pwm=(130,130) enc=(11914,12291) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:10:59.118+07:00] RX < FINISH_ARMED: LINE_CONFIRMED
+[2026-11-11T09:10:59.119+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594549 dt_ms=2 pwm_prev=161 pwm_req=-69 zero_ms=-1 v_before=500.0 v_after=500.0 delta_enc=1 t_ms=594551
+[2026-11-11T09:10:59.164+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594560 dt_ms=12 pwm_prev=63 pwm_req=-76 zero_ms=-1 v_before=750.0 v_after=750.0 delta_enc=4 t_ms=594572
+[2026-11-11T09:10:59.165+07:00] PID t=594597ms adc=1328,2666,1461,2622,1470,1262,898,1052,2202,1811,1963,818,2102,1917,1335,2066 cal=191,260,207,412,135,141,179,267,1000,887,148,142,257,252,199,240 logic=0001000011000000 pwm=(131,128) enc=(11995,12381) err=9.701 p=18.231 i=0.000 d=-16.796 out=1.435
+[2026-11-11T09:10:59.210+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594646 dt_ms=2 pwm_prev=98 pwm_req=-87 zero_ms=-1 v_before=761.9 v_after=761.9 delta_enc=1 t_ms=594648
+[2026-11-11T09:10:59.242+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594650 dt_ms=4 pwm_prev=255 pwm_req=-87 zero_ms=-1 v_before=761.9 v_after=761.9 delta_enc=3 t_ms=594654
+[2026-11-11T09:10:59.243+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594658 dt_ms=5 pwm_prev=118 pwm_req=-87 zero_ms=-1 v_before=850.0 v_after=850.0 delta_enc=5 t_ms=594663
+[2026-11-11T09:10:59.334+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594739 dt_ms=4 pwm_prev=71 pwm_req=-87 zero_ms=-1 v_before=809.5 v_after=809.5 delta_enc=3 t_ms=594743
+[2026-11-11T09:10:59.335+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594756 dt_ms=1 pwm_prev=230 pwm_req=-87 zero_ms=-1 v_before=809.5 v_after=809.5 delta_enc=2 t_ms=594757
+[2026-11-11T09:10:59.336+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594763 dt_ms=2 pwm_prev=69 pwm_req=-63 zero_ms=-1 v_before=1000.0 v_after=1000.0 delta_enc=2 t_ms=594765
+[2026-11-11T09:10:59.336+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594765 dt_ms=3 pwm_prev=255 pwm_req=-84 zero_ms=-1 v_before=1090.9 v_after=1090.9 delta_enc=3 t_ms=594768
+[2026-11-11T09:10:59.381+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594774 dt_ms=2 pwm_prev=61 pwm_req=-103 zero_ms=-1 v_before=1090.9 v_after=1090.9 delta_enc=1 t_ms=594776
+[2026-11-11T09:10:59.382+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594778 dt_ms=2 pwm_prev=255 pwm_req=-105 zero_ms=-1 v_before=1090.9 v_after=1000.0 delta_enc=2 t_ms=594780
+[2026-11-11T09:10:59.383+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594784 dt_ms=5 pwm_prev=255 pwm_req=-61 zero_ms=-1 v_before=1200.0 v_after=1200.0 delta_enc=3 t_ms=594789
+[2026-11-11T09:10:59.383+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594806 dt_ms=3 pwm_prev=133 pwm_req=-78 zero_ms=-1 v_before=1238.1 v_after=1238.1 delta_enc=3 t_ms=594809
+[2026-11-11T09:10:59.383+07:00] PID t=594798ms adc=1303,2524,1346,2491,1468,1238,929,2145,2163,965,1940,816,1998,1808,1328,1974 cal=173,136,131,303,134,125,202,930,1000,225,130,140,168,190,195,181 logic=0000000110000000 pwm=(117,142) enc=(12183,12565) err=0.181 p=0.291 i=0.000 d=-12.294 out=-12.003
+[2026-11-11T09:10:59.428+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594815 dt_ms=12 pwm_prev=143 pwm_req=-82 zero_ms=-1 v_before=904.8 v_after=1100.0 delta_enc=9 t_ms=594827
+[2026-11-11T09:10:59.428+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594839 dt_ms=2 pwm_prev=143 pwm_req=-78 zero_ms=-1 v_before=1150.0 v_after=1200.0 delta_enc=1 t_ms=594841
+[2026-11-11T09:10:59.429+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594841 dt_ms=2 pwm_prev=255 pwm_req=-70 zero_ms=-1 v_before=1100.0 v_after=950.0 delta_enc=3 t_ms=594843
+[2026-11-11T09:10:59.429+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594854 dt_ms=2 pwm_prev=124 pwm_req=-78 zero_ms=-1 v_before=1200.0 v_after=1200.0 delta_enc=1 t_ms=594856
+[2026-11-11T09:10:59.429+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594856 dt_ms=3 pwm_prev=255 pwm_req=-69 zero_ms=-1 v_before=950.0 v_after=950.0 delta_enc=3 t_ms=594859
+[2026-11-11T09:10:59.430+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594865 dt_ms=2 pwm_prev=138 pwm_req=-69 zero_ms=-1 v_before=1100.0 v_after=1100.0 delta_enc=1 t_ms=594867
+[2026-11-11T09:10:59.521+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594936 dt_ms=5 pwm_prev=100 pwm_req=-60 zero_ms=-1 v_before=1250.0 v_after=1250.0 delta_enc=5 t_ms=594941
+[2026-11-11T09:10:59.522+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=594944 dt_ms=1 pwm_prev=185 pwm_req=-84 zero_ms=-1 v_before=1200.0 v_after=1272.7 delta_enc=2 t_ms=594945
+[2026-11-11T09:10:59.526+07:00] TX > DIAG
+[2026-11-11T09:10:59.569+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=594979 dt_ms=1 pwm_prev=125 pwm_req=-67 zero_ms=-1 v_before=1381.0 v_after=1381.0 delta_enc=2 t_ms=594980
+[2026-11-11T09:10:59.569+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=618.3Hz pid=161.3Hz queued=100.0Hz sent=100.0Hz drop=0 failed=0 missed=0 pending=0 encL=12395 encR=12785 case=1 line=1 lost=7 reacq=163 map=1 runEnc=487 hs=0 peak=140 route=0 rf=0 clu=0180
+[2026-11-11T09:10:59.570+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=595004 dt_ms=5 pwm_prev=142 pwm_req=-78 zero_ms=-1 v_before=1350.0 v_after=1333.3 delta_enc=6 t_ms=595009
+[2026-11-11T09:10:59.570+07:00] PID t=595008ms adc=1462,2666,1467,2607,1493,1363,1008,245,2256,1213,2032,931,2055,1807,1318,2011 cal=291,260,211,399,152,205,260,0,1000,419,202,231,216,189,189,204 logic=0000000011000000 pwm=(220,39) enc=(12426,12818) err=7.953 p=14.546 i=0.000 d=75.831 out=90.377
+[2026-11-11T09:10:59.616+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=595024 dt_ms=2 pwm_prev=148 pwm_req=-61 zero_ms=-1 v_before=1190.5 v_after=1450.0 delta_enc=2 t_ms=595026
+[2026-11-11T09:10:59.617+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=595031 dt_ms=1 pwm_prev=136 pwm_req=-66 zero_ms=-1 v_before=1450.0 v_after=1450.0 delta_enc=2 t_ms=595032
+[2026-11-11T09:10:59.617+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=595032 dt_ms=3 pwm_prev=255 pwm_req=-78 zero_ms=-1 v_before=1100.0 v_after=1100.0 delta_enc=4 t_ms=595035
+[2026-11-11T09:10:59.617+07:00] RX < [WHEEL_REV] wheel=L result=CANCEL t0_ms=595035 dt_ms=6 pwm_prev=255 pwm_req=-67 zero_ms=-1 v_before=1450.0 v_after=1450.0 delta_enc=7 t_ms=595041
+[2026-11-11T09:10:59.617+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=595045 dt_ms=4 pwm_prev=204 pwm_req=-75 zero_ms=-1 v_before=1100.0 v_after=1476.2 delta_enc=4 t_ms=595049
+[2026-11-11T09:10:59.662+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=595054 dt_ms=5 pwm_prev=71 pwm_req=-83 zero_ms=-1 v_before=1476.2 v_after=1476.2 delta_enc=4 t_ms=595059
+[2026-11-11T09:10:59.709+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=595071 dt_ms=36 pwm_prev=91 pwm_req=-191 zero_ms=-1 v_before=950.0 v_after=476.2 delta_enc=-9 t_ms=595107
+[2026-11-11T09:10:59.801+07:00] PID t=595208ms adc=1463,2646,1437,2538,1562,1452,998,994,1247,981,2042,918,2063,1834,1336,2026 cal=292,242,191,342,201,262,253,231,293,238,210,220,223,204,199,214 logic=0000000000000000 pwm=(-90,90) enc=(12678,12961) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:10:59.971+07:00] PID t=595408ms adc=1269,2517,1289,2382,1336,1167,802,805,1042,816,1854,747,1866,1597,1115,1813 cal=147,130,94,212,40,80,108,117,133,109,63,86,54,69,69,77 logic=0000000000000000 pwm=(-90,90) enc=(12674,13155) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:00.064+07:00] RX < [WHEEL_REV] wheel=L result=DONE t0_ms=595162 dt_ms=271 pwm_prev=127 pwm_req=-90 zero_ms=69 v_before=1190.5 v_after=-150.0 delta_enc=20 t_ms=595433
+[2026-11-11T09:11:00.327+07:00] PID t=595617ms adc=1296,2524,1322,2512,1531,1869,1741,98,1615,1120,1877,752,1885,1680,1158,1840 cal=167,136,116,320,179,529,802,0,579,347,81,89,71,116,95,94 logic=0000011010000000 pwm=(107,152) enc=(12637,13346) err=-11.707 p=-22.678 i=-0.000 d=0.000 out=-22.678
+[2026-11-11T09:11:00.374+07:00] RX < [WHEEL_REV] wheel=R result=CANCEL t0_ms=595624 dt_ms=7 pwm_prev=140 pwm_req=-62 zero_ms=-1 v_before=800.0 v_after=800.0 delta_enc=5 t_ms=595631
+[2026-11-11T09:11:00.374+07:00] RX < [WHEEL_REV] wheel=L result=DONE t0_ms=595583 dt_ms=52 pwm_prev=-80 pwm_req=140 zero_ms=32 v_before=-300.0 v_after=250.0 delta_enc=10 t_ms=595635
+[2026-11-11T09:11:00.559+07:00] PID t=595818ms adc=1201,2321,1168,2287,1317,1083,818,100,1089,816,1872,762,1850,1686,1291,1999 cal=97,0,14,132,27,26,120,0,169,109,77,97,41,120,173,197 logic=0000000000000000 pwm=(90,-90) enc=(12712,13409) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:00.604+07:00] RX < [WHEEL_REV] wheel=R result=DONE t0_ms=595709 dt_ms=129 pwm_prev=120 pwm_req=-90 zero_ms=48 v_before=571.4 v_after=-200.0 delta_enc=-3 t_ms=595838
+[2026-11-11T09:11:00.743+07:00] PID t=596027ms adc=1200,2327,1182,2305,1346,1182,769,79,1008,873,2559,1840,3071,1701,1167,1833 cal=96,0,23,147,47,90,84,0,106,154,615,948,1000,128,100,90 logic=0000000000111000 pwm=(0,0) enc=(12797,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:00.853+07:00] PID t=596228ms adc=1220,2340,1210,2330,1344,1229,809,112,1040,912,2889,1927,3101,1713,1167,1822 cal=111,0,42,168,46,120,113,0,131,184,873,1000,1000,135,100,83 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:01.010+07:00] PID t=596428ms adc=1181,2308,1178,2270,1314,1200,788,68,995,863,2866,1903,3063,1680,1127,1776 cal=82,0,21,118,24,101,98,0,96,146,855,998,1000,116,77,53 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:01.195+07:00] PID t=596637ms adc=1181,2320,1163,2269,1312,1199,774,64,989,864,2870,1887,3047,1662,1133,1771 cal=82,0,11,117,23,101,87,0,91,146,859,985,1000,106,80,50 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:01.411+07:00] PID t=596838ms adc=1186,2305,1168,2269,1318,1199,762,80,991,862,2880,1886,3046,1665,1125,1761 cal=85,0,14,117,27,101,79,0,93,145,866,985,1000,108,75,43 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:01.560+07:00] TX > DIAG
+[2026-11-11T09:11:01.594+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=587.6Hz pid=587.6Hz queued=99.8Hz sent=99.8Hz drop=0 failed=0 missed=0 pending=0 encL=12800 encR=13379 case=1 line=1 lost=7 reacq=166 map=1 runEnc=987 hs=0 peak=140 route=0 rf=0 clu=1C00
+[2026-11-11T09:11:01.594+07:00] PID t=597038ms adc=1200,2325,1177,2261,1325,1215,766,62,997,864,2896,1900,3051,1692,1136,1760 cal=96,0,20,111,32,111,82,0,98,146,879,996,1000,123,82,43 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:01.848+07:00] PID t=597247ms adc=1174,2304,1152,2250,1299,1188,752,50,959,833,2873,1868,3030,1651,1104,1773 cal=76,0,3,101,14,93,71,0,68,122,861,970,1000,100,63,51 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:02.064+07:00] PID t=597447ms adc=1168,2304,1136,2245,1294,1189,746,64,958,833,2865,1888,3024,1653,1111,1746 cal=72,0,0,97,10,94,67,0,67,122,855,986,1000,101,67,34 logic=0000000000111000 pwm=(0,0) enc=(12800,13379) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-11T09:11:02.205+07:00] TX > STOP
+[2026-11-11T09:11:02.235+07:00] RX < MOTOR: STOP
+[2026-11-11T09:11:02.237+07:00] CSV đang chốt (ESP32 ĐÃ XÁC NHẬN DỪNG: MOTOR: STOP): D:\EC\doline17s\logs\map_01\linerobot_map01_20261111_091058_936556.csv
