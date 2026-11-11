@@ -1430,6 +1430,15 @@ class App(tk.Tk):
         elif message.startswith("ERR: MAP2_SENSOR_PROFILE_"):
             self.map2_sensor_confirmed=False
             self.map2_sensor_status.set("MAP 2 mắt PID: ESP32 từ chối — xem Terminal")
+        if message.startswith("MAP2_STAGE "):
+            match = re.search(r"stage=(\d+) hold=(\d+) runEnc=(-?\d+)", message)
+            if match:
+                stage, hold, tick = map(int, match.groups())
+                names = {0: "RUN", 1: "CĂN LINE",
+                         2: "GIỮ LINE 10ms", 3: "LỖI CHECKPOINT"}
+                self.map2_sensor_status.set(
+                    f"MAP 2: GĐ {stage}/4 | {names.get(hold, 'UNKNOWN')} "
+                    f"| ENC={tick}")
         sensor_profile_match = re.fullmatch(
             r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
