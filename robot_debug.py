@@ -215,6 +215,12 @@ class App(tk.Tk):
         self.sensor_profile_status = tk.StringVar(
             value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
         self.sensor_profile_window = None
+        # Map 2: confirmed tick boundaries, separate from Map 1 sensor masks.
+        self.map2_tick_stages = ()
+        self.map2_tick_confirmed = False
+        self.map2_tick_window = None
+        self.map2_tick_status = tk.StringVar(value="MAP 2 ticks: chờ ESP32")
+        self.map2_tick_input = tk.StringVar(value="")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -303,6 +309,20 @@ class App(tk.Tk):
             sensor_profile_bar, text="Đọc từ ESP32",
             command=lambda: self.send_command("SENSOR_PROFILE"))
         self.sensor_profile_read_btn.pack(side="right")
+
+        map2_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
+        map2_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.map2_tick_btn = ttk.Button(
+            map2_bar, text="MAP 2 — Mốc tick / Dừng căn line",
+            command=self.open_map2_tick_editor)
+        self.map2_tick_btn.pack(side="left", padx=(0, 8))
+        self.label(map2_bar, textvariable=self.map2_tick_status,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(
+                       side="left", fill="x", expand=True)
+        self.map2_tick_read_btn = ttk.Button(
+            map2_bar, text="Đọc MAP 2 từ ESP32",
+            command=lambda: self.send_command("MAP2_TICKS"))
+        self.map2_tick_read_btn.pack(side="right")
 
         # Calibration is a prerequisite for START. Keep its controls visible at
         # minimum window size rather than below the non-scrollable HS_PEAK panel.
@@ -736,6 +756,9 @@ class App(tk.Tk):
         self.send_command("ROUTE_LOCK")
         self.sensor_profile_confirmed = False
         self.send_command("SENSOR_PROFILE")
+        self.map2_tick_confirmed = False
+        self.map2_tick_status.set("MAP 2 ticks: đang đọc từ ESP32...")
+        self.send_command("MAP2_TICKS")
         self.send_command("PID")
         self.send_command("STREAM:" + self.stream_rate.get())
 
@@ -760,6 +783,8 @@ class App(tk.Tk):
         self.route_status.set("ROUTE: mất kết nối ESP32")
         self.sensor_profile_confirmed = False
         self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
+        self.map2_tick_confirmed = False
+        self.map2_tick_status.set("MAP 2 ticks: mất kết nối ESP32")
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
         self.estop_latched = None
@@ -821,6 +846,85 @@ class App(tk.Tk):
         cmd = self.cmd_var.get().strip()
         if self.send_command(cmd):
             self.cmd_var.set("")
+
+    def open_map2_tick_editor(self):
+        """Configure checkpoints for Map 2 only, never for Map 1 or 3."""
+        if self.map2_tick_window is not None:
+            try:
+                self.map2_tick_window.lift()
+                return
+            except tk.TclError:
+                self.map2_tick_window = None
+        win = tk.Toplevel(self)
+        self.map2_tick_window = win
+        win.title("MAP 2 — Mốc tick và căn chỉnh line")
+        win.geometry("620x270")
+        win.minsize(540, 250)
+        win.configure(bg=PANEL)
+        win.transient(self)
+        win.protocol("WM_DELETE_WINDOW", lambda: self.close_map2_tick_editor())
+        self.map2_tick_input.set(",".join(map(str, self.map2_tick_stages)))
+        self.label(win, "Mốc kết thúc giai đoạn (tick tích lũy):",
+                   bg=PANEL, font=("Segoe UI", 11, "bold")).pack(
+                       anchor="w", padx=14, pady=(14, 4))
+        ttk.Entry(win, textvariable=self.map2_tick_input, width=72).pack(
+            fill="x", padx=14)
+        self.label(win,
+                   "Ví dụ: 300,1400,2300 — dừng tại từng mốc; để trống để tắt.",
+                   bg=PANEL, fg=MUTED).pack(anchor="w", padx=14, pady=(5, 4))
+        self.label(win,
+                   "Tối đa 8 mốc nguyên dương tăng dần. Xe phải dừng trước khi gửi.",
+                   bg=PANEL, fg=AMBER).pack(anchor="w", padx=14, pady=(2, 8))
+        feedback = tk.StringVar(value=self.map2_tick_status.get())
+        self.label(win, textvariable=feedback, bg=PANEL, fg=CYAN,
+                   font=("Consolas", 9)).pack(anchor="w", padx=14, pady=4)
+        actions = tk.Frame(win, bg=PANEL)
+        actions.pack(fill="x", padx=14, pady=8)
+        def apply():
+            if not self._can_edit_map2_ticks():
+                feedback.set("Không thể cập nhật: cần kết nối và dừng AUTO.")
+                return
+            raw = self.map2_tick_input.get().strip()
+            if not raw:
+                values = []
+            else:
+                tokens = [token.strip() for token in raw.split(",")]
+                if (len(tokens) > 8 or not all(token.isdecimal()
+                    and token.isascii() for token in tokens)):
+                    feedback.set("Lỗi: chỉ nhập tối đa 8 số nguyên, cách nhau bằng dấu phẩy.")
+                    return
+                values = [int(token) for token in tokens]
+                if (not all(0 < value <= 10000000 for value in values)
+                        or any(b <= a for a, b in zip(values, values[1:]))):
+                    feedback.set("Lỗi: các mốc phải tăng dần, trong khoảng 1..10000000.")
+                    return
+            command = "MAP2_TICKS:" + (",".join(map(str, values)) if values else "0")
+            if self.send_command(command):
+                self.map2_tick_confirmed = False
+                feedback.set("Đã gửi. Chờ ESP32 xác nhận MAP2_TICKS...")
+                self.map2_tick_status.set("MAP 2 ticks: đang chờ ACK...")
+        ttk.Button(actions, text="Áp dụng xuống ESP32", command=apply).pack(
+            side="left", padx=(0, 6))
+        ttk.Button(actions, text="Đọc từ ESP32",
+                   command=lambda: self.send_command("MAP2_TICKS")).pack(
+                       side="left", padx=4)
+        ttk.Button(actions, text="Đóng",
+                   command=self.close_map2_tick_editor).pack(side="right")
+
+    def close_map2_tick_editor(self):
+        if self.map2_tick_window is not None:
+            try:
+                self.map2_tick_window.destroy()
+            except tk.TclError:
+                pass
+        self.map2_tick_window = None
+
+    def _can_edit_map2_ticks(self):
+        return (self.reader is not None and self.reader.is_alive()
+                and not self.auto_running and not self.start_pending
+                and self.run_csv.active is None
+                and self.stop_ack_deadline is None
+                and not self.stop_verify_pending)
 
     def open_sensor_profile_editor(self):
         """Edit per-stage masks and switch ticks; changes require robot stopped."""
@@ -1049,6 +1153,11 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        if hasattr(self, "map2_tick_btn"):
+            self.map2_tick_btn.configure(
+                state="normal" if self.selected_map == 2 else "disabled")
+            self.map2_tick_read_btn.configure(
+                state="normal" if connected else "disabled")
         if hasattr(self, "sensor_profile_btn"):
             self.sensor_profile_btn.configure(state="normal")
             self.sensor_profile_read_btn.configure(
@@ -1301,6 +1410,38 @@ class App(tk.Tk):
         if message.startswith("RUN_ORIGIN "):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
+        if message.startswith("MAP2_TICKS COUNT="):
+            match = re.fullmatch(
+                r"MAP2_TICKS COUNT=(\d+) NEXT=(\d+) STATE=(\d+) TICKS=(.*)",
+                message)
+            if match:
+                count, stage, state = map(int, match.group(1, 2, 3))
+                raw = match.group(4)
+                try:
+                    values = tuple(int(t) for t in raw.split(",")) if raw else ()
+                except ValueError:
+                    values = ()
+                if len(values) == count:
+                    self.map2_tick_stages = values
+                    self.map2_tick_confirmed = True
+                    self.map2_tick_status.set(
+                        "MAP 2 ticks: " +
+                        (",".join(map(str, values)) if values else "TẮT") +
+                        f" | giai đoạn {stage}/{count} | trạng thái {state} (ESP32)")
+                    if self.map2_tick_window is not None:
+                        self.map2_tick_input.set(",".join(map(str, values)))
+        elif message.startswith("MAP2_CHECKPOINT "):
+            match = re.search(r"stage=(\d+)/(\d+) state=(\d+) runEnc=(-?\d+)", message)
+            if match:
+                stage, total, state, tick = map(int, match.groups())
+                names = {0: "CHẠY", 1: "DỪNG BÁNH",
+                         2: "CĂN LINE", 3: "LỖI — AUTO DỪNG"}
+                self.map2_tick_status.set(
+                    f"MAP 2 | {names.get(state, 'KHÔNG RÕ')} "
+                    f"| đoạn {stage}/{total} | ENC={tick}")
+        elif message.startswith("ERR: MAP2_TICKS_"):
+            self.map2_tick_confirmed = False
+            self.map2_tick_status.set("MAP 2 ticks: ESP32 từ chối — xem Terminal")
         sensor_profile_match = re.fullmatch(
             r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
             r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
