@@ -87,6 +87,12 @@ void pid_get_map3_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map3_sensor_stage(void);
 // Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
 uint8_t pid_get_map2_hold_state(void);
+// Map-specific BASE schedules: 1..8 stages, last continues to FINISH.
+#define PID_MAP_PROFILE_MAX_STAGES 8
+bool pid_set_map_speed_profile_v2(uint8_t mapId, uint8_t stageCount,
+                                  const int32_t *endTicks, const uint8_t *basePwm);
+void pid_get_map_speed_profile_v2(uint8_t mapId, uint8_t *stageCount,
+                                  int32_t *endTicks, uint8_t *basePwm);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
