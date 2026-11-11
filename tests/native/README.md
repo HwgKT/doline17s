@@ -56,3 +56,22 @@ Test coverage:
 This **does not validate actual ESP32 pin wiring, motor polarity, timing under
 RTOS load, Bluetooth SPP delivery or the compiled full firmware**. Perform the
 real hardware acceptance test with raised wheels and then a straight black line.
+
+## All-black START and FINISH smoke test (mainHighSpeedv2)
+
+```bash
+g++ -std=c++17 -Wall -Wextra -Itests/native -Iinclude \
+  src/pid_controller.cpp tests/native/black_pad_start_finish_smoke.cpp \
+  -o black_pad_start_finish_smoke
+./black_pad_start_finish_smoke
+```
+
+This uses real PID logic with mocked sensors, motors and clock. It checks that
+16/16 black at START does not trigger an immediate finish, that a 30 ms
+stable narrow centered line arms the finish, that noise and 15/16 black do
+not arm/stop, that 16/16 black at FINISH latches STOP after three PID samples,
+and that restarting resets the arming state. The AUTO command's 16/16 START
+guard is additionally covered by the source-level GPIO34 test.
+
+The encoder-based high-speed profile is still disabled by default in this
+branch. These tests do not constitute a real ESP32 build or hardware test.

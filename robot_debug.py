@@ -82,13 +82,15 @@ class Reader(threading.Thread):
         self.bad = 0
         self.frames_rx = 0
         self.frames_dropped = 0
+        self.saw_auto_frame = False
+        self.stopped_frame_count = 0
 
     def run(self):
         while self.running:
             try:
                 chunk = self.ser.read(self.ser.in_waiting or 1)
-            except (serial.SerialException, OSError):
-                self.control_queue.put(("error", "Bluetooth/COM đã ngắt kết nối"))
+            except (serial.SerialException, OSError) as exc:
+                self.control_queue.put(("error", f"Bluetooth/COM lỗi đọc: {exc}"))
                 break
             if chunk:
                 self.buf.extend(chunk)
@@ -130,6 +132,21 @@ class Reader(threading.Thread):
             if xor_sum(data) == self.buf[2 + PAYLOAD_LEN]:
                 self.frames_rx += 1
                 sample = struct.unpack(FMT, data)
+                # Redundant STOP confirmation: if the FINISH text reply is
+                # lost, three post-AUTO frames with mode=0 and both PWM=0
+                # still let Tk latch the timer. Never trigger during SEARCH:
+                # SEARCH keeps firmware AUTO mode=1.
+                if sample[26] == 1:
+                    self.saw_auto_frame = True
+                    self.stopped_frame_count = 0
+                elif (self.saw_auto_frame and
+                      sample[19] == 0 and sample[20] == 0):
+                    self.stopped_frame_count += 1
+                    if self.stopped_frame_count == 3:
+                        self.saw_auto_frame = False
+                        self.control_queue.put(("stopped_sample", sample[0]))
+                else:
+                    self.stopped_frame_count = 0
                 # Logging precedes GUI delivery; Tk slowdown cannot throttle disk writes.
                 if self.recorder is not None:
                     self.recorder.submit(sample)
@@ -183,6 +200,8 @@ class App(tk.Tk):
         self.stream_rate = tk.StringVar(value="100")
         self.prev = None
         self.wheel_speed = [0.0, 0.0]
+        self.encoder_reset_pending = False
+        self.encoder_reset_pending_at = None
         self.frames = 0
         self.last_rx_total = 0
         self.last_csv_total = 0
@@ -194,7 +213,9 @@ class App(tk.Tk):
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
         self.high_speed_peak = 220  # Expected startup default; read back from firmware.
-        self.hs_brake_start = 1800  # Read back actual threshold for Peak >= 230.
+        self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
+        self.hs_late_start = 10000
+        self.hs_late_mode = False
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
@@ -203,7 +224,25 @@ class App(tk.Tk):
         self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: -- | BRAKE 1800 (<230), 1600 (230–239), 1400 (240–255) → 2300 | HOLD 110")
+            value="HS: MAP 1 từ 10k tick | chờ ESP32 xác nhận")
+        self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
+        # Three-stage sensor selection, stored in ESP32 RAM until power-off.
+        self.sensor_profile = (650, 1350, 0xFFC0, 0x03FF, 0xFFFF)
+        self.sensor_profile_confirmed = False
+        self.sensor_profile_status = tk.StringVar(
+            value="PID mắt: chờ ESP32 (mặc định 650 / 1350 ticks)")
+        self.sensor_profile_window = None
+        # Eight Map 1 BASE targets; encoder X thresholds are read back from ESP32.
+        self.map1_x_ticks = [3800, 7400, 8350, 10500, 11300, 12800, 15000]
+        self.map1_base_values = [140, 140, 140, 240, 210, 240, 210, 255]
+        self.map1_base_confirmed = False
+        self.map1_base_pending = None
+        self.map1_base_window = None
+        self.map1_base_vars = []
+        self.map1_base_stage_labels = []
+        self.map1_base_dirty = False
+        self.map1_base_status = tk.StringVar(
+            value="MAP 1 BASE: chờ ESP32 xác nhận")
         self.values = {}
         self.last_adc = [0] * 16
         # Display only firmware calibration. Keep last valid NVS profile on failures.
@@ -219,6 +258,13 @@ class App(tk.Tk):
         self.auto_running = False
         self.run_elapsed_seconds = 0.0
         self.run_started_at = None
+        # Monotonic ESP32 timestamps for accurate racing duration; wrap at 2^32 ms.
+        self.run_origin_esp_ms = None
+        self.run_finish_esp_ms = None
+        self.last_esp_elapsed_seconds = None
+        self.last_esp_sample_received_at = None
+        self.run_finished_latched = False
+        self.run_live_elapsed_floor = 0.0
         self.run_timer_var = tk.StringVar(value="00:00:00")
         self._build()
         self.update_control_buttons()  # Includes HS widgets created after START/STOP.
@@ -226,6 +272,8 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind_all("<Escape>", lambda _event: self.stop_line())
         self.after(30, self.tick)
+        # Stopwatch refresh independent of sensor cases and SPP telemetry.
+        self.after(20, self.tick_run_timer)
 
     def label(self, parent, text="", fg=FG, bg=None, **kw):
         return tk.Label(parent, text=text, fg=fg, bg=BG if bg is None else bg, **kw)
@@ -274,8 +322,38 @@ class App(tk.Tk):
                    font=("Consolas", 9, "bold")).pack(anchor="w", padx=8, pady=(1, 0))
         self.label(diag_bar, textvariable=self.high_speed_status, fg=AMBER, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
+        self.label(diag_bar, textvariable=self.route_status, fg=CYAN, bg=PANEL,
+                   font=("Consolas", 8, "bold")).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
+
+        sensor_profile_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
+        sensor_profile_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.sensor_profile_btn = ttk.Button(
+            sensor_profile_bar, text="Cấu hình mắt PID / ticks",
+            command=self.open_sensor_profile_editor)
+        self.sensor_profile_btn.pack(side="left", padx=(0, 6))
+        self.label(sensor_profile_bar, textvariable=self.sensor_profile_status,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9)).pack(
+                       side="left", fill="x", expand=True)
+        self.sensor_profile_read_btn = ttk.Button(
+            sensor_profile_bar, text="Đọc từ ESP32",
+            command=lambda: self.send_command("SENSOR_PROFILE"))
+        self.sensor_profile_read_btn.pack(side="right")
+
+        map1_base_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
+        map1_base_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.map1_base_editor_btn = ttk.Button(
+            map1_base_bar, text="Chỉnh tốc 8 đoạn Map 1",
+            command=self.open_map1_base_editor)
+        self.map1_base_editor_btn.pack(side="left", padx=(0, 8))
+        self.label(map1_base_bar, textvariable=self.map1_base_status,
+                   bg=PANEL, fg=CYAN, font=("Consolas", 9),
+                   anchor="w").pack(side="left", fill="x", expand=True)
+        self.map1_base_read_btn = ttk.Button(
+            map1_base_bar, text="Đọc tốc từ ESP32",
+            command=lambda: self.send_command("MAP1_BASE_PROFILE"))
+        self.map1_base_read_btn.pack(side="right")
 
         # Calibration is a prerequisite for START. Keep its controls visible at
         # minimum window size rather than below the non-scrollable HS_PEAK panel.
@@ -366,6 +444,15 @@ class App(tk.Tk):
         self.label(left, textvariable=self.logic_var, fg=CYAN,
                    font=("Consolas", 10, "bold")).pack(anchor="w", pady=(0, 8))
 
+        # Encoder reset must be visible WITHOUT scrolling below the Scope.
+        encoder_header = tk.Frame(left, bg=BG)
+        encoder_header.pack(fill="x", pady=(3, 0))
+        self.label(encoder_header, "Encoder / tốc độ / PID", fg=MUTED).pack(
+            side="left", padx=(2, 0))
+        self.reset_encoder_btn = ttk.Button(
+            encoder_header, text="Reset ENC", width=11,
+            command=self.reset_encoder)
+        self.reset_encoder_btn.pack(side="right", padx=(0, 4))
         metrics = tk.Frame(left, bg=PANEL)
         metrics.pack(fill="x", pady=4)
         names = [("encL", "Encoder L"), ("encR", "Encoder R"),
@@ -385,10 +472,6 @@ class App(tk.Tk):
         self.label(left, "Scope: PWM trái / PWM phải / PID out", fg=MUTED).pack(anchor="w", pady=(11, 3))
         self.scope = tk.Canvas(left, bg=PANEL, width=570, height=165, highlightthickness=0)
         self.scope.pack(fill="x")
-        encoder_actions = tk.Frame(left, bg=BG)
-        encoder_actions.pack(fill="x", pady=5)
-        ttk.Button(encoder_actions, text="Reset ENC",
-                   command=lambda: self.send_command("ENC_RESET")).pack(side="left", padx=4)
         self.label(left, "RAW: 0–4095  |  T_i=W_i+40%×(B_i−W_i)  |  CAL: 0–1000  |  0=TRẮNG, 1=ĐEN",
                    fg=MUTED).pack(anchor="w")
 
@@ -436,10 +519,10 @@ class App(tk.Tk):
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # HS_PEAK changes the first straight only, independently of Base.
+        # MAP 1: HS_PEAK sets target BASE after 10k; others keep legacy HS.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK", bg=PANEL,
+        self.label(hs_row, "HS_PEAK (10k+)", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.label(hs_row, textvariable=self.hs_peak_value_text,
                    bg=PANEL, fg=CYAN, font=("Consolas", 9),
@@ -659,17 +742,24 @@ class App(tk.Tk):
             self.log(str(exc))
             return
         self.reader.start()
+        self.encoder_reset_pending = False
+        self.encoder_reset_pending_at = None
         self.hs_brake_start = 1800
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
         self.hs_peak_value_text.set("— / 255")
-        self.hs_peak_feedback.set("Đang đọc HS_PEAK từ ESP32...")
+        self.hs_peak_feedback.set("Đang đọc HS_PEAK (BASE sau 10k) từ ESP32...")
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
         self.set_auto_running(False)
+        self.run_origin_esp_ms = None
+        self.run_finish_esp_ms = None
+        self.last_esp_elapsed_seconds = None
+        self.last_esp_sample_received_at = None
+        self.run_finished_latched = False
         self.control_state.set("Đang kết nối — chờ STATUS từ firmware.")
         self.adc_status.set("ADC: chờ STATUS")
         self.control_state_label.configure(fg=AMBER)
@@ -699,6 +789,13 @@ class App(tk.Tk):
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
         self.send_command("HS_PEAK")
+        self.send_command("ROUTE_LOCK")
+        self.sensor_profile_confirmed = False
+        self.send_command("SENSOR_PROFILE")
+        self.map1_base_confirmed = False
+        self.map1_base_pending = None
+        self.map1_base_status.set("MAP 1 BASE: chờ ESP32 xác nhận")
+        self.send_command("MAP1_BASE_PROFILE")
         self.send_command("PID")
         self.send_command("STREAM:" + self.stream_rate.get())
 
@@ -717,7 +814,12 @@ class App(tk.Tk):
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
+        self.encoder_reset_pending = False
+        self.encoder_reset_pending_at = None
         self.hs_peak_feedback.set("Chưa kết nối ESP32 — HS chưa xác nhận")
+        self.route_status.set("ROUTE: mất kết nối ESP32")
+        self.sensor_profile_confirmed = False
+        self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
         self.connect_btn.config(text="Kết nối")
         self.status_label.config(text="Chưa kết nối", fg=ROSE)
         self.estop_latched = None
@@ -728,6 +830,7 @@ class App(tk.Tk):
         self.stop_verify_deadline = None
         self.stop_verify_retries = 0
         self.set_auto_running(False)
+        self.run_finished_latched = True
         self.control_state.set("Đã ngắt SPP — không thể xác nhận tình trạng động cơ.")
         self.adc_status.set("ADC: chưa kết nối")
         self.next_diag_poll = None
@@ -747,20 +850,246 @@ class App(tk.Tk):
         try:
             self.reader.send(command)
             self.log(f"TX > {command}")
-            if command.upper() in ("ENC_RESET", "RESET_ENCODER"):
-                # Discard the old tick/time baseline before computing speed.
-                self.prev = None
-                self.wheel_speed = [0.0, 0.0]
             return True
+        except serial.SerialTimeoutException as exc:
+            # Virtual COM write timeout != established Bluetooth disconnect.
+            # Keep RX alive so delayed FINISH remains receivable.
+            self.log(f"SPP WRITE TIMEOUT ({command}): {exc}; giữ COM để chờ RX.")
+            if command == "DIAG":
+                self.next_diag_poll = None
+            self.status_label.config(text="SPP TX bị nghẽn — vẫn giữ COM", fg=AMBER)
+            return False
         except (serial.SerialException, OSError) as exc:
             self.log(f"Lỗi gửi: {exc}")
             self.disconnect()
             return False
 
+    def _can_reset_encoder(self):
+        return (self.reader is not None and self.reader.is_alive()
+                and not self.encoder_reset_pending
+                and not self.auto_running and not self.start_pending
+                and self.stop_ack_deadline is None
+                and not self.stop_verify_pending
+                and self.run_csv.active is None)
+
+    def reset_encoder(self):
+        if not self._can_reset_encoder():
+            self.log("Reset ENC chỉ thực hiện khi robot đã dừng, không START/STOP đang chờ.")
+            return False
+        self.encoder_reset_pending = True
+        self.encoder_reset_pending_at = time.monotonic()
+        self.update_control_buttons()
+        if not self.send_command("ENC_RESET"):
+            self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
+            self.update_control_buttons()
+            return False
+        return True
+
     def send_terminal(self):
         cmd = self.cmd_var.get().strip()
         if self.send_command(cmd):
             self.cmd_var.set("")
+
+    def open_map1_base_editor(self):
+        if self.map1_base_window is not None:
+            try:
+                if self.map1_base_window.winfo_exists():
+                    self.map1_base_window.lift()
+                    self.send_command("MAP1_BASE_PROFILE")
+                    return
+            except tk.TclError:
+                self.map1_base_window = None
+
+        win = tk.Toplevel(self)
+        self.map1_base_window = win
+        win.title("MAP 1 — BASE theo 8 đoạn encoder")
+        win.configure(bg=PANEL)
+        win.geometry("560x500")
+        win.minsize(520, 460)
+        win.transient(self)
+
+        self.label(
+            win,
+            "Nhập BASE mục tiêu cho từng đoạn. PID gains giữ nguyên; "
+            "speed governor vẫn có thể giảm PWM thực tế theo sai số line.",
+            bg=PANEL, fg=MUTED, wraplength=520, justify="left"
+        ).pack(anchor="w", padx=12, pady=(10, 7))
+
+        table = tk.Frame(win, bg=PANEL, padx=12)
+        table.pack(fill="both", expand=True)
+        headers = (("Đoạn", 18), ("Encoder", 22), ("BASE PWM", 12))
+        for col, (caption, width) in enumerate(headers):
+            self.label(table, caption, bg=PANEL, fg=CYAN,
+                       width=width, anchor="w").grid(
+                           row=0, column=col, sticky="w", padx=4, pady=(2, 7))
+
+        self.map1_base_vars = []
+        self.map1_base_stage_labels = []
+        self.map1_base_dirty = False
+        for i, value in enumerate(self.map1_base_values):
+            start = 0 if i == 0 else self.map1_x_ticks[i - 1]
+            end = self.map1_x_ticks[i] if i < 7 else None
+            encoder_text = (f"{start:,} – {end:,}" if end is not None
+                            else f"≥ {start:,} (về đích)")
+            self.label(table, f"Đoạn {i + 1}", bg=PANEL, width=18,
+                       anchor="w").grid(row=i + 1, column=0, sticky="w",
+                                        padx=4, pady=4)
+            range_label = self.label(table, encoder_text, bg=PANEL,
+                                     fg=MUTED, width=22, anchor="w")
+            range_label.grid(row=i + 1, column=1, sticky="w", padx=4, pady=4)
+            self.map1_base_stage_labels.append(range_label)
+            var = tk.StringVar(value=str(value))
+            var.trace_add("write", lambda *_: setattr(self, "map1_base_dirty", True))
+            self.map1_base_vars.append(var)
+            ttk.Entry(table, textvariable=var, width=10,
+                      justify="center").grid(row=i + 1, column=2,
+                                             sticky="w", padx=4, pady=4)
+
+        feedback = tk.StringVar(
+            value="Chỉ áp dụng khi đã kết nối SPP, chọn MAP 1 và robot STOP.")
+        self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER,
+                   wraplength=520, justify="left").pack(
+                       anchor="w", padx=12, pady=(8, 4))
+
+        actions = tk.Frame(win, bg=PANEL, padx=12, pady=8)
+        actions.pack(fill="x")
+
+        def read_profile():
+            if self.reader is None or not self.reader.is_alive():
+                feedback.set("Chưa kết nối Bluetooth Classic SPP.")
+                return
+            self.map1_base_dirty = False
+            self.map1_base_pending = None
+            if self.send_command("MAP1_BASE_PROFILE"):
+                feedback.set("Đang đọc mốc encoder và BASE từ ESP32...")
+
+        def apply_profile():
+            if (self.selected_map != 1 or self.reader is None
+                    or not self.reader.is_alive() or self.auto_running
+                    or self.start_pending or self.stop_ack_deadline is not None
+                    or self.stop_verify_pending or self.run_csv.active is not None):
+                feedback.set(
+                    "Cần kết nối SPP, chọn MAP 1, robot STOP và CSV đã đóng.")
+                return
+            try:
+                values = [int(var.get().strip()) for var in self.map1_base_vars]
+            except ValueError:
+                feedback.set("BASE phải là số nguyên.")
+                return
+            if len(values) != 8 or any(v < 45 or v > 255 for v in values):
+                feedback.set("Mỗi BASE phải nằm trong khoảng 45–255 PWM.")
+                return
+            command = "MAP1_BASE_PROFILE:" + ",".join(str(v) for v in values)
+            if self.send_command(command):
+                self.map1_base_pending = tuple(values)
+                self.map1_base_confirmed = False
+                self.map1_base_dirty = False
+                self.map1_base_status.set("MAP 1 BASE: đang chờ ESP32 xác nhận")
+                feedback.set("Đã gửi cấu hình; chỉ coi là áp dụng sau khi nhận ACK.")
+
+        def load_defaults():
+            defaults = [140, 140, 140, 240, 210, 240, 210, 255]
+            for var, value in zip(self.map1_base_vars, defaults):
+                var.set(str(value))
+            feedback.set("Đã điền BASE mặc định của firmware; nhấn Áp dụng để gửi.")
+
+        ttk.Button(actions, text="Đọc từ ESP32",
+                   command=read_profile).pack(side="left", padx=(0, 6))
+        ttk.Button(actions, text="Áp dụng BASE",
+                   command=apply_profile).pack(side="left", padx=6)
+        ttk.Button(actions, text="Mặc định",
+                   command=load_defaults).pack(side="left", padx=6)
+
+        def close_window():
+            self.map1_base_window = None
+            self.map1_base_vars = []
+            self.map1_base_stage_labels = []
+            win.destroy()
+
+        ttk.Button(actions, text="Đóng",
+                   command=close_window).pack(side="right")
+        win.protocol("WM_DELETE_WINDOW", close_window)
+        read_profile()
+
+    def open_sensor_profile_editor(self):
+        """Edit per-stage masks and switch ticks; changes require robot stopped."""
+        if self.sensor_profile_window is not None:
+            try:
+                self.sensor_profile_window.lift()
+                return
+            except tk.TclError:
+                self.sensor_profile_window = None
+        win = tk.Toplevel(self)
+        self.sensor_profile_window = win
+        win.title("MAP 1 — chọn mắt PID theo encoder")
+        win.configure(bg=PANEL)
+        win.geometry("780x390")
+        win.minsize(730, 360)
+        win.transient(self)
+        t1, t2, m1, m2, m3 = self.sensor_profile
+        threshold1 = tk.StringVar(value=str(t1))
+        threshold2 = tk.StringVar(value=str(t2))
+        row = tk.Frame(win, bg=PANEL, padx=12, pady=10)
+        row.pack(fill="x")
+        self.label(row, "Mốc 1 (ticks):", bg=PANEL).pack(side="left")
+        ttk.Entry(row, textvariable=threshold1, width=9).pack(side="left", padx=(5, 20))
+        self.label(row, "Mốc 2 (ticks):", bg=PANEL).pack(side="left")
+        ttk.Entry(row, textvariable=threshold2, width=9).pack(side="left", padx=5)
+        self.label(win, "Tích chọn mắt được DÙNG CHO PID. ADC / mất line / FINISH vẫn đọc đủ 16 mắt.",
+                   bg=PANEL, fg=MUTED).pack(anchor="w", padx=12)
+        values = []
+        for index, (label, mask) in enumerate(
+                (("GĐ 1: 0 → mốc 1", m1),
+                 ("GĐ 2: mốc 1 → mốc 2", m2),
+                 ("GĐ 3: từ mốc 2", m3))):
+            group = tk.LabelFrame(win, text=label, bg=PANEL, fg=FG,
+                                  padx=6, pady=7)
+            group.pack(fill="x", padx=10, pady=5)
+            bits = [tk.BooleanVar(value=bool(mask & (1 << i)))
+                    for i in range(16)]
+            values.append(bits)
+            for i, state in enumerate(bits):
+                ttk.Checkbutton(group, text=f"S{i}", variable=state).grid(
+                    row=0, column=i, padx=2)
+        feedback = tk.StringVar(value="Áp dụng khi robot đã STOP; không thay đổi PID gains.")
+        self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER).pack(
+            anchor="w", padx=12, pady=(7, 2))
+        actions = tk.Frame(win, bg=PANEL, padx=12, pady=4)
+        actions.pack(fill="x")
+
+        def apply():
+            if (self.reader is None or not self.reader.is_alive()
+                    or self.auto_running or self.start_pending
+                    or self.stop_ack_deadline is not None
+                    or self.stop_verify_pending or self.run_csv.active is not None):
+                feedback.set("Robot phải dừng và đã kết nối SPP trước khi áp dụng.")
+                return
+            try:
+                a = int(threshold1.get().strip())
+                b = int(threshold2.get().strip())
+            except ValueError:
+                feedback.set("Mốc encoder phải là số nguyên.")
+                return
+            masks = [sum(1 << i for i, selected in enumerate(bits)
+                         if selected.get()) for bits in values]
+            if not (0 < a < b <= 10000000) or any(mask == 0 for mask in masks):
+                feedback.set("Cần 0 < mốc 1 < mốc 2; mỗi giai đoạn phải bật ít nhất 1 mắt.")
+                return
+            command = "SENSOR_PROFILE:{},{},{:04X},{:04X},{:04X}".format(
+                a, b, *masks)
+            if self.send_command(command):
+                self.sensor_profile_confirmed = False
+                self.sensor_profile_status.set("PID mắt: đang chờ ESP32 xác nhận...")
+                feedback.set("Đã gửi cấu hình. Chờ dòng SENSOR_PROFILE từ ESP32.")
+
+        ttk.Button(actions, text="Áp dụng xuống ESP32",
+                   command=apply).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Đọc cấu hình đang dùng",
+                   command=lambda: self.send_command("SENSOR_PROFILE")).pack(side="left")
+        ttk.Button(actions, text="Đóng",
+                   command=win.destroy).pack(side="right")
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
 
     def preview_pwm(self, *_args):
         self.pwm_text.set(f"{round(self.pwm_var.get())} / 255")
@@ -893,6 +1222,7 @@ class App(tk.Tk):
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
+                     and not self.encoder_reset_pending
                      and not self.estop_pending and not self.start_pending
                      and not self.auto_running and self.run_csv.active is None
                      and self.stop_ack_deadline is None
@@ -909,6 +1239,13 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        if hasattr(self, "sensor_profile_btn"):
+            self.sensor_profile_btn.configure(state="normal")
+            self.sensor_profile_read_btn.configure(
+                state="normal" if connected else "disabled")
+        if hasattr(self, "reset_encoder_btn"):
+            self.reset_encoder_btn.configure(
+                state="normal" if self._can_reset_encoder() else "disabled")
         if hasattr(self, "hs_peak_widgets"):
             editable = self._can_edit_hs_peak() and self.hs_peak_pending is None
             for widget in self.hs_peak_widgets:
@@ -931,9 +1268,17 @@ class App(tk.Tk):
         self.update_run_timer_display(now)
 
     def reset_run_timer(self):
+        if self.auto_running:
+            self.log("Không thể reset đồng hồ trong lúc AUTO đang chạy.")
+            return
         self.run_elapsed_seconds = 0.0
-        self.run_started_at = time.monotonic() if self.auto_running else None
+        self.run_started_at = None
         self.update_run_timer_display()
+
+    def tick_run_timer(self):
+        # Always run while Tk is alive; line loss cannot pause this timer.
+        self.update_run_timer_display()
+        self.after(20, self.tick_run_timer)
 
     def update_run_timer_display(self, now=None):
         elapsed = self.run_elapsed_seconds
@@ -962,6 +1307,9 @@ class App(tk.Tk):
             self.run_txt_file = None
 
     def start_line(self):
+        if self.encoder_reset_pending:
+            self.log("Đang chờ ACK reset encoder; chưa gửi START.")
+            return
         if self.selected_map is None:
             self.log("Hãy chọn MAP 1, MAP 2 hoặc MAP 3 trước khi START.")
             return
@@ -999,6 +1347,12 @@ class App(tk.Tk):
             self.update_control_buttons()
             return
         self.last_csv_total = 0
+        self.run_origin_esp_ms = None
+        self.run_finish_esp_ms = None
+        self.last_esp_elapsed_seconds = None
+        self.last_esp_sample_received_at = None
+        self.run_live_elapsed_floor = 0.0
+        self.run_finished_latched = False
         self.stop_ack_deadline = None
         self.start_confirmed = False
         self.csv_status.set(f"CSV GHI: {recorder.path.name}")
@@ -1081,6 +1435,7 @@ class App(tk.Tk):
         self.stop_verify_retries = 0
         self.start_pending = False
         self.set_auto_running(False)
+        self.run_finished_latched = True
         self.finish_run_csv("ESP32 ĐÃ XÁC NHẬN DỪNG: " + reason)
         self.start_confirmed = False
         if self.estop_latched is False:
@@ -1151,6 +1506,76 @@ class App(tk.Tk):
         if message.startswith("RUN_ORIGIN "):
             self.begin_external_run(message)
         self.log(f"RX < {message}")
+        if message.startswith("MAP1_BASE_PROFILE "):
+            try:
+                x_ticks = [
+                    int(re.search(rf"\bX{i}=(\d+)\b", message).group(1))
+                    for i in range(1, 8)
+                ]
+                base_values = [
+                    int(re.search(rf"\bB{i}=(\d+)\b", message).group(1))
+                    for i in range(1, 9)
+                ]
+                if (any(a >= b for a, b in zip(x_ticks, x_ticks[1:]))
+                        or any(v < 45 or v > 255 for v in base_values)):
+                    raise ValueError("invalid Map 1 profile")
+                pending = self.map1_base_pending
+                self.map1_x_ticks = x_ticks
+                self.map1_base_values = base_values
+                if pending is not None and tuple(base_values) != pending:
+                    self.map1_base_pending = None
+                    self.map1_base_confirmed = False
+                    self.map1_base_status.set(
+                        "MAP 1 BASE: ESP32 trả về khác cấu hình vừa gửi")
+                else:
+                    self.map1_base_pending = None
+                    self.map1_base_confirmed = True
+                    self.map1_base_status.set(
+                        "MAP 1 BASE: ESP32 OK | " +
+                        " / ".join(str(v) for v in base_values))
+                    self.map1_base_dirty = False
+                if self.map1_base_window is not None:
+                    try:
+                        if self.map1_base_window.winfo_exists():
+                            if not self.map1_base_dirty or tuple(base_values) == pending:
+                                for var, value in zip(self.map1_base_vars, base_values):
+                                    var.set(str(value))
+                                self.map1_base_dirty = False
+                            for i, label in enumerate(self.map1_base_stage_labels):
+                                start = 0 if i == 0 else x_ticks[i - 1]
+                                end = x_ticks[i] if i < 7 else None
+                                text = (f"{start:,} – {end:,}" if end is not None
+                                        else f"≥ {start:,} (về đích)")
+                                label.configure(text=text)
+                    except tk.TclError:
+                        self.map1_base_window = None
+            except (AttributeError, ValueError):
+                self.map1_base_confirmed = False
+                self.map1_base_status.set("MAP 1 BASE: phản hồi ESP32 không hợp lệ")
+        elif message.startswith("ERR: MAP1_BASE_PROFILE_"):
+            self.map1_base_pending = None
+            self.map1_base_confirmed = False
+            self.map1_base_status.set("MAP 1 BASE: ESP32 từ chối — xem Terminal")
+        sensor_profile_match = re.fullmatch(
+            r"SENSOR_PROFILE T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) "
+            r"M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4})", message)
+        if sensor_profile_match:
+            a, b = (int(sensor_profile_match.group(i)) for i in (1, 2))
+            masks = tuple(int(sensor_profile_match.group(i), 16)
+                          for i in (3, 4, 5))
+            self.sensor_profile = (a, b, *masks)
+            self.sensor_profile_confirmed = True
+            self.sensor_profile_status.set(
+                f"PID mắt: {a}/{b} tick | "
+                + " / ".join(f"{m:04X}" for m in masks) + " (ESP32 OK)")
+            if self.sensor_profile_window is not None:
+                try:
+                    self.sensor_profile_window.title(
+                        "MAP 1 — đã nhận cấu hình từ ESP32 (đóng/mở lại để tải)")
+                except tk.TclError:
+                    self.sensor_profile_window = None
+        elif message == "ERR: SENSOR_PROFILE_INVALID" or message == "ERR: SENSOR_PROFILE_REQUIRES_STOPPED":
+            self.sensor_profile_status.set("PID mắt: ESP32 từ chối thay đổi — xem Terminal")
         if message == "ESTOP: LATCHED" or message == "ERR: ESTOP_LATCHED":
             self.stop_ack_deadline = None
             self.stop_verify_pending = False
@@ -1172,11 +1597,31 @@ class App(tk.Tk):
             self.control_state.set("Đã mở khóa E-STOP — động cơ vẫn dừng.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
+        elif message == "ENC_RESET: OK":
+            # Only the ESP32 acknowledgement confirms that counts were reset.
+            self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
+            self.prev = None
+            self.wheel_speed = [0.0, 0.0]
+            for key in ("encL", "encR", "spdL", "spdR"):
+                if key in self.values:
+                    self.values[key].set("0")
+            self.update_control_buttons()
+            self.log("Đã reset encoder trên ESP32 (ACK).")
+            self.send_command("ENC")  # Verify actual L/R counters after ACK.
+        elif message == "ERR: ENC_RESET_REQUIRES_STOPPED":
+            self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
+            self.update_control_buttons()
+            self.log("ESP32 từ chối reset encoder: xe vẫn đang chạy.")
         elif message == "MODE: AUTO PID":
+            self.run_finished_latched = False
+            self.run_elapsed_seconds = 0.0
+            self.run_started_at = None
             self.start_pending = False
             self.start_confirmed = True
             self.set_auto_running(True)
-            self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
+            self.control_state.set("AUTO ĐANG CHẠY — đi thẳng tìm line rồi chuyển PID.")
             self.control_state_label.configure(fg=GREEN)
             self.update_control_buttons()
         elif message in ("ERR: MAP_NOT_SELECTED", "ERR: MAP_USE_1_2_3",
@@ -1201,17 +1646,54 @@ class App(tk.Tk):
                 self.set_auto_running(False)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: " + message)
                 self.update_control_buttons()
+        elif message.startswith("ROUTE_LOCK: ENABLED="):
+            enabled = re.search(r"\bENABLED=(\d)\b", message)
+            route_map = re.search(r"\bMAP=(\d)\b", message)
+            if enabled:
+                map_label = route_map.group(1) if route_map else "?"
+                status = "BẬT" if enabled.group(1) == "1" else "TẮT"
+                self.route_status.set(
+                    f"ROUTE: khóa={status} | Map hiện tại={map_label} | "
+                    "thẳng → nửa vòng → phải → thẳng")
+        elif message.startswith("ROUTE_STAGE "):
+            stage = re.search(r"ROUTE_STAGE (\w+)", message)
+            tick = re.search(r"\brunEnc=(-?\d+)\b", message)
+            if stage:
+                self.route_status.set(
+                    f"ROUTE: {stage.group(1)} | ENC="
+                    f"{tick.group(1) if tick else '--'} | MAP 01")
+        elif message.startswith("ROUTE_FAULT "):
+            code = re.search(r"\bcode=(\d+)\b", message)
+            reasons = {
+                1: "SEARCH cua nửa vòng vượt 250 ms",
+                2: "Thiếu tín hiệu xác nhận cung nửa vòng",
+                3: "Chưa xác nhận được đoạn thẳng sau rẽ phải",
+            }
+            fault_code = int(code.group(1)) if code else -1
+            info = reasons.get(fault_code, "Lỗi lộ trình không xác định")
+            self.route_status.set(f"ROUTE: FAULT #{fault_code} — {info}")
+            self.control_state.set(f"ROUTE FAULT — {info}")
+            self.control_state_label.configure(fg=ROSE)
+        elif message.startswith("ERR: ROUTE_LOCK_"):
+            self.route_status.set(f"ROUTE: ESP32 từ chối — {message}")
+        elif message.startswith("AUTO_STOPPED: ROUTE_FAULT"):
+            self.confirm_stopped(message)
+            self.control_state.set("ROUTE FAULT — xe dừng an toàn; xem ROUTE ở trên.")
+            self.control_state_label.configure(fg=ROSE)
         elif message.startswith("HS_PEAK: PWM="):
             peak_match = re.search(r"\bPWM=(\d+)\b", message)
             if peak_match:
                 confirmed = int(peak_match.group(1))
                 if 100 <= confirmed <= 255:
                     self.high_speed_peak = confirmed
-                    # Prefer the actual BRAKE_START echoed by firmware.
+                    # MAP 1 uses START_ENC; other maps use legacy BRAKE_START.
+                    late_match = re.search(r"\bSTART_ENC=(\d+)\b", message)
+                    self.hs_late_mode = late_match is not None
+                    if late_match:
+                        self.hs_late_start = int(late_match.group(1))
                     start_match = re.search(r"\bBRAKE_START=(\d+)\b", message)
-                    self.hs_brake_start = (
-                        int(start_match.group(1)) if start_match
-                        else (1400 if confirmed >= 240 else 1600 if confirmed >= 230 else 1800))
+                    if start_match:
+                        self.hs_brake_start = int(start_match.group(1))
                     self.hs_peak_confirmed = confirmed
                     expected = self.hs_peak_pending
                     if expected is None or expected == confirmed:
@@ -1228,8 +1710,12 @@ class App(tk.Tk):
                     else:
                         self.hs_peak_feedback.set(
                             f"ESP32 báo {confirmed}; chờ xác nhận PWM {expected}")
-                    self.high_speed_status.set(
-                        f"HS: READY | PEAK={confirmed} | BRAKE={self.hs_brake_start}-2300 | HOLD=110")
+                    if self.hs_late_mode:
+                        self.high_speed_status.set(
+                            f"HS: READY | MAP 1 ENC≥{self.hs_late_start} | BASE đích={confirmed}")
+                    else:
+                        self.high_speed_status.set(
+                            f"HS: READY | PEAK={confirmed} | BRAKE={self.hs_brake_start}-2300 | HOLD=110")
                     self.update_control_buttons()
         elif message.startswith("ERR: HS_PEAK_"):
             if self.hs_peak_pending is not None:
@@ -1247,22 +1733,45 @@ class App(tk.Tk):
             if peak:
                 self.high_speed_peak = int(peak.group(1))
             start = re.search(r"\bbrake=(\d+)\b", message)
-            self.hs_brake_start = (int(start.group(1)) if start
-                                   else (1400 if self.high_speed_peak >= 240 else 1600 if self.high_speed_peak >= 230 else 1800))
+            if start:
+                self.hs_brake_start = int(start.group(1))
+            late_start = re.search(r"\bstart=(\d+)\b", message)
+            if late_start:
+                self.hs_late_start = int(late_start.group(1))
+                self.hs_late_mode = True
             stage = re.search(r"HS_STAGE (\w+)", message)
             tick = re.search(r"\brunEnc=(-?\d+)", message)
             if stage:
-                self.high_speed_status.set(
-                    f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
-                )
+                if late_start or stage.group(1) in ("WAIT_LINE", "BOOST"):
+                    self.high_speed_status.set(
+                        f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
+                        f"| tăng BASE sau {self.hs_late_start} | PEAK={self.high_speed_peak}"
+                    )
+                else:
+                    self.high_speed_status.set(
+                        f"HS: {stage.group(1)} | ENC={tick.group(1) if tick else '--'} "
+                        f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
+                    )
         elif message.startswith("DIAG:"):
+            route_stage = re.search(r"\broute=(\d+)\b", message)
+            route_fault = re.search(r"\brf=(\d+)\b", message)
+            route_tick = re.search(r"\brunEnc=(-?\d+)\b", message)
+            if route_stage and int(route_stage.group(1)) in (1, 2, 3, 4):
+                names = ("OFF", "STRAIGHT_1", "SEMICIRCLE",
+                         "RIGHT_TURN", "STRAIGHT_2", "FAULT")
+                self.route_status.set(
+                    f"ROUTE: {names[int(route_stage.group(1))]} | "
+                    f"ENC={route_tick.group(1) if route_tick else '--'}")
+            if route_fault and int(route_fault.group(1)) != 0:
+                self.route_status.set(
+                    f"ROUTE: FAULT #{route_fault.group(1)} | xem log TXT")
             peak = re.search(r"\bpeak=(\d+)\b", message)
             if peak:
                 value = int(peak.group(1))
                 if 100 <= value <= 255:
                     self.high_speed_peak = value
-                    self.hs_brake_start = 1400 if value >= 240 else 1600 if value >= 230 else 1800
+                    if not getattr(self, "hs_late_mode", False):
+                        self.hs_brake_start = 1400 if value >= 240 else 1600 if value >= 230 else 1800
                     # DIAG is telemetry, not an ACK for a pending HS write.
                     if self.hs_peak_pending is None:
                         self.hs_peak_confirmed = value
@@ -1272,13 +1781,22 @@ class App(tk.Tk):
             hs = re.search(r"\bhs=(\d+)\b", message)
             tick = re.search(r"\brunEnc=(-?\d+)\b", message)
             if hs:
-                names = ("OFF", "RESERVED", "CRUISE", "BRAKE", "COMPLETE", "ABORTED", "HOLD")
+                names = ("OFF", "RAMP", "CRUISE", "BRAKE", "COMPLETE",
+                         "ABORTED", "HOLD", "WAIT_LINE", "BOOST")
                 state = int(hs.group(1))
                 title = names[state] if 0 <= state < len(names) else "UNKNOWN"
-                self.high_speed_status.set(
-                    f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                    f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
-                )
+                if state in (7, 8) or (
+                        getattr(self, "hs_late_mode", False)
+                        and getattr(self, "selected_map", None) == 1):
+                    self.high_speed_status.set(
+                        f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
+                        f"| 10k+ BASE→{self.high_speed_peak}"
+                    )
+                else:
+                    self.high_speed_status.set(
+                        f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
+                        f"| PEAK={self.high_speed_peak} | BRAKE={self.hs_brake_start}-2300 | HOLD=110"
+                    )
             loop = re.search(r"\bloop=(\d+(?:\.\d+)?)Hz\b", message)
             pid = re.search(r"\bpid=(\d+(?:\.\d+)?)Hz\b", message)
             sent = re.search(r"\bsent=(\d+(?:\.\d+)?)Hz\b", message)
@@ -1312,7 +1830,10 @@ class App(tk.Tk):
                 self.estop_latched = estop.group(1) == "1"
                 self.estop_pending = False
                 self.start_pending = False
-                self.set_auto_running(bool(auto and auto.group(1) == "1"))
+                # Do not resurrect a finished run from a delayed STATUS reply.
+                reported_auto = bool(auto and auto.group(1) == "1")
+                if not self.run_finished_latched or not reported_auto:
+                    self.set_auto_running(reported_auto)
                 if self.estop_latched:
                     self.set_auto_running(False)
                     self.control_state.set("E-STOP đang khóa — gửi RESET_ESTOP trong terminal để mở khóa.")
@@ -1404,6 +1925,10 @@ class App(tk.Tk):
                 kind, payload = self.controls_q.get_nowait()
                 if kind == "text":
                     self.on_text(payload)
+                elif kind == "stopped_sample":
+                    if (self.auto_running or self.start_confirmed) and not self.run_finished_latched:
+                        self.confirm_stopped(
+                            f"TELEMETRY AUTO=0 PWM=0 x3 t_ms={payload}; FINISH ACK có thể thất lạc")
                 elif kind == "error":
                     self.disconnect()
                     self.status_label.config(text=payload, fg=ROSE)
@@ -1415,7 +1940,12 @@ class App(tk.Tk):
         except queue.Empty:
             pass
         try:
-            for _ in range(512):
+            # Bound Tk frame processing to ~7 ms; Reader records all binary
+            # samples separately, so CSV logging is not rate limited here.
+            ui_deadline = time.monotonic() + 0.007
+            for _ in range(128):
+                if time.monotonic() >= ui_deadline:
+                    break
                 kind, payload = self.q.get_nowait()
                 if kind == "data":
                     self.on_sample(payload)
@@ -1427,7 +1957,6 @@ class App(tk.Tk):
         if last is not None:
             self.update_view(last)
         now = time.monotonic()
-        self.update_run_timer_display(now)
         if (self.hs_peak_pending is not None and self.hs_peak_pending_at is not None
                 and now - self.hs_peak_pending_at >= 3.0):
             expected = self.hs_peak_pending
@@ -1439,6 +1968,13 @@ class App(tk.Tk):
             self.log(f"HS_PEAK={expected}: timeout xác nhận, chưa coi là đã áp dụng.")
             self.update_control_buttons()
             self.send_command("HS_PEAK")
+        if (self.encoder_reset_pending and self.encoder_reset_pending_at is not None
+                and now - self.encoder_reset_pending_at >= 3.0):
+            self.encoder_reset_pending = False
+            self.encoder_reset_pending_at = None
+            self.log("Reset ENC: chưa nhận ACK từ ESP32, kiểm tra lại bằng lệnh ENC.")
+            self.update_control_buttons()
+            self.send_command("ENC")
         if now - self.rate_time >= 1:
             interval = now - self.rate_time
             total = self.reader.frames_rx if self.reader else self.last_rx_total
@@ -1464,8 +2000,11 @@ class App(tk.Tk):
         # One small SPP text request per 2 seconds; no USB traffic.
         if self.next_diag_poll is not None and now >= self.next_diag_poll:
             if self.reader is not None and self.reader.is_alive():
-                self.send_command("DIAG")
                 self.next_diag_poll = now + self.diag_interval_s
+                # DIAG is informational; a blocking COM write used to freeze
+                # Tk's timer during a race or a line-loss recovery.
+                if not (self.auto_running or self.start_pending):
+                    self.send_command("DIAG")
             else:
                 self.next_diag_poll = None
         if self.stop_ack_deadline is not None and now >= self.stop_ack_deadline:

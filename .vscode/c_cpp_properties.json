@@ -8,8 +8,8 @@
         {
             "name": "PlatformIO",
             "includePath": [
-                "D:/CLBDIENTU/Line_folowing robot/mai/include",
-                "D:/CLBDIENTU/Line_folowing robot/mai/src",
+                "D:/CLBDIENTU/doline17s/include",
+                "D:/CLBDIENTU/doline17s/src",
                 "C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/libraries/Preferences/src",
                 "C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/libraries/BluetoothSerial/src",
                 "C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/tools/sdk/esp32/include/newlib/platform_include",
@@ -244,8 +244,8 @@
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
-                    "D:/CLBDIENTU/Line_folowing robot/mai/include",
-                    "D:/CLBDIENTU/Line_folowing robot/mai/src",
+                    "D:/CLBDIENTU/doline17s/include",
+                    "D:/CLBDIENTU/doline17s/src",
                     "C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/libraries/Preferences/src",
                     "C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/libraries/BluetoothSerial/src",
                     "C:/Users/Admin/.platformio/packages/framework-arduinoespressif32@3.20017.241212+sha.dcc1105b/tools/sdk/esp32/include/newlib/platform_include",

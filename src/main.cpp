@@ -19,9 +19,8 @@ constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t CAL_WHITE_LED_BLINK_MS=40; // fast, GPIO2 toggle interval
 constexpr uint32_t CAL_BLACK_LED_BLINK_MS=90; // slower, GPIO2 toggle interval
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
-// GPIO34 START accepts one or more black sensors among the six central
-// eyes S5..S10. This widens the allowable placement around the line.
-constexpr uint16_t BUTTON34_START_CENTER_MASK=0x07E0U;
+// FINISH is a 16/16 BLACK pad. START may occur on BLACK, WHITE or a line.
+// Both GUI and GPIO34 share the same AUTO safety/validation checks.
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
@@ -99,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 TASKS ADC_BENCH ADC_BENCH_STOP ADC_BENCH_STATUS AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF PID HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -122,11 +121,11 @@ void command(const String &raw) {
     const float sec=dt?dt*1e-6f:1.0f;
     const BtTxStats tx=btGetTxStats();
     int32_t encL=0,encR=0;encoder_get_counts(&encL,&encR);
-    char b[290];
+    char b[360];
     snprintf(b,sizeof(b),
       "DIAG: bt=%d auto=%d target=%u loop=%.1fHz pid=%.1fHz queued=%.1fHz sent=%.1fHz "
       "drop=%lu failed=%lu missed=%lu pending=%lu encL=%ld encR=%ld "
-      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u peak=%d",
+      "case=%u line=%u lost=%lu reacq=%lu map=%u runEnc=%ld hs=%u peak=%d route=%u rf=%u clu=%04X",
       btConnected()?1:0,pid_is_auto_mode()?1:0,(unsigned)streamHz,
       loopCount/sec,pidCount/sec,
       (tx.queued-lastTxStats.queued)/sec,(tx.sent-lastTxStats.sent)/sec,
@@ -138,7 +137,10 @@ void command(const String &raw) {
       (unsigned long)pid_get_confirmed_line_loss_count(),
       (unsigned long)pid_get_line_reacquisition_count(),
       (unsigned)pid_get_selected_map(),(long)pid_get_run_encoder_progress(),
-      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak());
+      (unsigned)pid_get_high_speed_stage(),pid_get_high_speed_peak(),
+      (unsigned)pid_get_map1_route_stage(),
+      (unsigned)pid_get_map1_route_fault_code(),
+      (unsigned)pid_get_map1_selected_line_mask());
     lastDiagUs=t;loopCount=pidCount=txCount=0;
     lastTxStats=tx;skippedSlots=0;
     reply(b);return;
@@ -155,12 +157,116 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Eight Map 1 BASE targets, editable over SPP only while the robot is stopped.
+  // Encoder X1..X7 thresholds are read-only; updates live in ESP32 RAM.
+  if(s=="MAP1_BASE_PROFILE"){
+    int32_t x[7]={0};
+    uint8_t base[8]={0};
+    pid_get_map1_speed_profile(x,base);
+    char b[220];
+    snprintf(b,sizeof(b),
+      "MAP1_BASE_PROFILE X1=%ld X2=%ld X3=%ld X4=%ld X5=%ld X6=%ld X7=%ld "
+      "B1=%u B2=%u B3=%u B4=%u B5=%u B6=%u B7=%u B8=%u",
+      (long)x[0],(long)x[1],(long)x[2],(long)x[3],(long)x[4],(long)x[5],(long)x[6],
+      (unsigned)base[0],(unsigned)base[1],(unsigned)base[2],(unsigned)base[3],
+      (unsigned)base[4],(unsigned)base[5],(unsigned)base[6],(unsigned)base[7]);
+    reply(b);return;
+  }
+  if(s.startsWith("MAP1_BASE_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: MAP1_BASE_PROFILE_REQUIRES_STOPPED");return;
+    }
+    if(pid_get_selected_map()!=1){
+      reply("ERR: MAP1_BASE_PROFILE_MAP1_ONLY");return;
+    }
+    int value[8]={0};
+    char trailing=0;
+    const int count=sscanf(s.c_str()+18,
+      "%d,%d,%d,%d,%d,%d,%d,%d %c",
+      &value[0],&value[1],&value[2],&value[3],
+      &value[4],&value[5],&value[6],&value[7],&trailing);
+    if(count!=8){
+      reply("ERR: MAP1_BASE_PROFILE_FORMAT");return;
+    }
+    uint8_t base[8];
+    for(uint8_t i=0;i<8;++i){
+      if(value[i]<45 || value[i]>255){
+        reply("ERR: MAP1_BASE_PROFILE_RANGE_45_255");return;
+      }
+      base[i]=(uint8_t)value[i];
+    }
+    if(!pid_set_map1_base_profile(base)){
+      reply("ERR: MAP1_BASE_PROFILE_REJECTED");return;
+    }
+    command("MAP1_BASE_PROFILE");return;
+  }
+
+  // Read/update all three Map 1 PID sensor masks without opening a terminal.
+  // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
+  if(s=="SENSOR_PROFILE"){
+    int32_t t1=0,t2=0;
+    uint16_t m1=0,m2=0,m3=0;
+    pid_get_map1_sensor_profile(&t1,&t2,&m1,&m2,&m3);
+    char b[130];
+    snprintf(b,sizeof(b),
+      "SENSOR_PROFILE T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
+      (long)t1,(long)t2,(unsigned)m1,(unsigned)m2,(unsigned)m3);
+    reply(b);return;
+  }
+  if(s.startsWith("SENSOR_PROFILE:")){
+    if(pid_is_auto_mode() || manualActive){
+      reply("ERR: SENSOR_PROFILE_REQUIRES_STOPPED");return;
+    }
+    long t1=0,t2=0;
+    unsigned m1=0,m2=0,m3=0;
+    char trailing=0;
+    const int count=sscanf(s.c_str()+15,"%ld,%ld,%x,%x,%x %c",
+                            &t1,&t2,&m1,&m2,&m3,&trailing);
+    if(count!=5 || t1<=0 || t2<=t1 || t2>10000000L ||
+       m1==0 || m2==0 || m3==0 ||
+       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU ||
+       !pid_set_map1_sensor_profile((int32_t)t1,(int32_t)t2,
+                                   (uint16_t)m1,(uint16_t)m2,(uint16_t)m3)){
+      reply("ERR: SENSOR_PROFILE_INVALID");return;
+    }
+    command("SENSOR_PROFILE");return;
+  }
+  if(s=="ROUTE_LOCK"){
+    char b[128];
+    snprintf(b,sizeof(b),
+      "ROUTE_LOCK: ENABLED=%u MAP=%u STATE=%u FAULT=%u",
+      (unsigned)(pid_get_map1_route_lock()?1:0),
+      (unsigned)pid_get_selected_map(),
+      (unsigned)pid_get_map1_route_stage(),
+      (unsigned)pid_get_map1_route_fault_code());
+    reply(b);return;
+  }
+  if(s.startsWith("ROUTE_LOCK:")){
+    if(pid_is_auto_mode()||manualActive){
+      reply("ERR: ROUTE_LOCK_REQUIRES_STOPPED");return;
+    }
+    const String arg=s.substring(11);
+    if(arg!="0"&&arg!="1"){
+      reply("ERR: ROUTE_LOCK_USE_0_OR_1");return;
+    }
+    pid_set_map1_route_lock(arg=="1");
+    reply(String("ROUTE_LOCK: ENABLED=")+(pid_get_map1_route_lock()?1:0)+
+          " MAP="+pid_get_selected_map()+" STATE=0 FAULT=0");
+    return;
+  }
   if(s=="HS_PEAK"){
     char b[160];
-    snprintf(b,sizeof(b),
-      "HS_PEAK: PWM=%d BASE=%d RAMP=OFF START=0 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
-      pid_get_high_speed_peak(),pid_get_base_speed(),
-      (long)pid_get_high_speed_brake_start());
+    if(pid_get_map1_late_boost_start()>0){
+      snprintf(b,sizeof(b),
+        "HS_PEAK: PWM=%d BASE=%d START_ENC=%ld MODE=MAP1_LATE_BASE",
+        pid_get_high_speed_peak(),pid_get_base_speed(),
+        (long)pid_get_map1_late_boost_start());
+    }else{
+      snprintf(b,sizeof(b),
+        "HS_PEAK: PWM=%d BASE=%d RAMP_END=300 BRAKE_START=%ld BRAKE_END=2300 HOLD_PWM=110 HOLD_MIN_END=3100",
+        pid_get_high_speed_peak(),pid_get_base_speed(),
+        (long)pid_get_high_speed_brake_start());
+    }
     reply(b);return;
   }
   if(s.startsWith("HS_PEAK:")){
@@ -189,6 +295,12 @@ void command(const String &raw) {
     reply(b);return;
   }
   if(s=="ENC_RESET"||s=="RESET_ENCODER"){
+    // Resetting absolute counts in AUTO would corrupt runEnc (and the
+    // 10k BOOST scheduler). Also require both motor outputs at rest.
+    if(pid_is_auto_mode()||manualActive||
+       motor_get_left_speed()!=0||motor_get_right_speed()!=0){
+      reply("ERR: ENC_RESET_REQUIRES_STOPPED");return;
+    }
     encoder_reset_counts();
     reply("ENC_RESET: OK");return;
   }
@@ -206,35 +318,6 @@ void command(const String &raw) {
     String b="SENSORS: ";
     for(int i=0;i<N_SENSORS;++i)b+=(sensor_is_black(i)?'1':'0');
     reply(b);return;
-  }
-  // Read/update the Map 1 NORMAL_PID sensor masks; masks are hexadecimal.
-  if(s=="SENSOR_PROFILE"){
-    int32_t t1=0,t2=0;
-    uint16_t m1=0,m2=0,m3=0;
-    pid_get_map1_sensor_profile(&t1,&t2,&m1,&m2,&m3);
-    char b[130];
-    snprintf(b,sizeof(b),
-      "SENSOR_PROFILE T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
-      (long)t1,(long)t2,(unsigned)m1,(unsigned)m2,(unsigned)m3);
-    reply(b);return;
-  }
-  if(s.startsWith("SENSOR_PROFILE:")){
-    if(pid_is_auto_mode() || manualActive){
-      reply("ERR: SENSOR_PROFILE_REQUIRES_STOPPED");return;
-    }
-    long t1=0,t2=0;
-    unsigned m1=0,m2=0,m3=0;
-    char trailing=0;
-    const int count=sscanf(s.c_str()+15,"%ld,%ld,%x,%x,%x %c",
-                            &t1,&t2,&m1,&m2,&m3,&trailing);
-    if(count!=5 || t1<=0 || t2<=t1 || t2>10000000L ||
-       m1==0 || m2==0 || m3==0 ||
-       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU ||
-       !pid_set_map1_sensor_profile((int32_t)t1,(int32_t)t2,
-                                   (uint16_t)m1,(uint16_t)m2,(uint16_t)m3)){
-      reply("ERR: SENSOR_PROFILE_INVALID");return;
-    }
-    command("SENSOR_PROFILE");return;
   }
   // Explicit track profile, independent of the Python CSV destination.
   if(s=="MAP"){
@@ -284,6 +367,9 @@ void command(const String &raw) {
     if(pid_get_selected_map()==0){
       reply("ERR: MAP_NOT_SELECTED");return;
     }
+    // Start is permitted from BLACK, WHITE, or a narrow line.
+    // PID initially coasts straight until the center line is confirmed;
+    // the full-black FINISH detector remains disarmed during acquisition.
     manualActive=false;
     pid_set_auto_mode(true);
     reply("MODE: AUTO PID");
@@ -297,13 +383,28 @@ void command(const String &raw) {
        pid_get_kp(),pid_get_ki(),pid_get_kd(),
        (unsigned long)millis());
     reply(runInfo);
-    char cruiseEvent[160];
-    snprintf(cruiseEvent,sizeof(cruiseEvent),
-      "HS_STAGE CRUISE map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
-      (unsigned)pid_get_selected_map(),pid_get_base_speed(),
-      pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
-      (unsigned long)millis());
-    reply(cruiseEvent);
+    char rampEvent[160];
+    if(pid_get_map1_late_boost_start()>0){
+      snprintf(rampEvent,sizeof(rampEvent),
+        "HS_STAGE OFF map=1 runEnc=0 base=%d peak=%d start=%ld t_ms=%lu",
+        pid_get_base_speed(),pid_get_high_speed_peak(),
+        (long)pid_get_map1_late_boost_start(),(unsigned long)millis());
+    }else{
+      snprintf(rampEvent,sizeof(rampEvent),
+        "HS_STAGE %s map=%u runEnc=0 base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+        pid_get_high_speed_stage()==0 ? "OFF" : "RAMP",
+        (unsigned)pid_get_selected_map(),pid_get_base_speed(),
+        pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
+        (unsigned long)millis());
+    }
+    reply(rampEvent);
+    if(pid_get_selected_map()==1 && pid_get_map1_route_lock()){
+      char routeEvent[110];
+      snprintf(routeEvent,sizeof(routeEvent),
+        "ROUTE_STAGE STRAIGHT_1 map=1 runEnc=0 t_ms=%lu",
+        (unsigned long)millis());
+      reply(routeEvent);
+    }
     return;
   }
   // Fixed-polarity 16-channel calibration: WHITE, then BLACK.
@@ -475,23 +576,10 @@ void loop() {
     }else if(button34Phase==BUTTON34_BLACK_CAPTURING){
       reply("ERR: BUTTON34_WAIT_CAL_BLACK_DONE");
     }else{
-      // Preserve previous placement rule: any of central S5..S10 is enough,
-      // but full 16/16 black indicates bad calibration / instant finish.
-      if(calibrationReady && !sensor_is_calibrating() && sensor_adc_ready()){
-        const uint16_t bits=sensor_get_line_bits();
-        if(bits==0xFFFFU){
-          reply("ERR: BUTTON34_ALL_BLACK_16_CHECK_CALIBRATION");
-        }else if((bits & BUTTON34_START_CENTER_MASK)==0U){
-          reply("ERR: BUTTON34_NO_CENTER_LINE_S5_TO_S10");
-        }else{
-          reply("BUTTON34: START_REQUEST");
-          command("AUTO");
-          if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
-        }
-      }else{
-        // AUTO command keeps the existing ADC/CAL/ESTOP guards.
-        command("AUTO");
-      }
+      // Reuse the same AUTO validation as the GUI (no black-pad requirement).
+      reply("BUTTON34: START_REQUEST");
+      command("AUTO");
+      if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
     }
   }
   const bool wasCalibrating=sensor_is_calibrating();
@@ -524,10 +612,17 @@ void loop() {
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t oldRouteStage=pid_get_map1_route_stage();
+    const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
+    if(!wasFinishArmed && pid_finish_detection_armed()){
+      reply("FINISH_ARMED: LINE_CONFIRMED");
+    }
     perfRecord(PERF_PID, micros()-stageStartUs);
     const LineCase_t newCase=pid_get_current_case();
     const uint8_t newHighSpeedStage=pid_get_high_speed_stage();
+    const uint8_t newRouteStage=pid_get_map1_route_stage();
+    const uint8_t newRouteFault=pid_get_map1_route_fault_code();
     // A latched finish or PID stop must end AUTO, otherwise Python remains
     // in AUTO while both PWM outputs are zero and START stays locked.
     // Snapshot the stop reason BEFORE safeStop() clears PID state.
@@ -538,26 +633,58 @@ void loop() {
       safeStop();
       // Drop queued pre-stop telemetry before announcing terminal state.
       btDropPendingTelemetry();
-      char stopEvent[128];
+      if(newRouteFault!=0U){
+        char faultEvent[120];
+        snprintf(faultEvent,sizeof(faultEvent),
+          "ROUTE_FAULT code=%u map=%u runEnc=%ld t_ms=%lu",
+          (unsigned)newRouteFault,(unsigned)stopMap,
+          (long)stopEnc,(unsigned long)millis());
+        reply(faultEvent);
+      }
+      char stopEvent[150];
       snprintf(stopEvent,sizeof(stopEvent),
-        "%s map=%u runEnc=%ld t_ms=%lu",
+        "%s map=%u runEnc=%ld route_fault=%u t_ms=%lu",
         fullBlackFinish ? "AUTO_FINISHED: FULL_BLACK_3" :
-                          "AUTO_STOPPED: PID_STOPPED",
-        (unsigned)stopMap,(long)stopEnc,(unsigned long)millis());
+        newRouteFault ? "AUTO_STOPPED: ROUTE_FAULT" :
+                        "AUTO_STOPPED: PID_STOPPED",
+        (unsigned)stopMap,(long)stopEnc,(unsigned)newRouteFault,
+        (unsigned long)millis());
       reply(stopEvent);
     }
-    if(newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
-      static const char* const labels[]={
-        "OFF","RESERVED","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD"
+    if(newCase!=LINE_CASE_STOPPED && newRouteStage!=oldRouteStage &&
+       newRouteStage>0U && newRouteStage<5U){
+      static const char* const routeNames[]={
+        "OFF","STRAIGHT_1","SEMICIRCLE","RIGHT_TURN","STRAIGHT_2"
       };
-      if(newHighSpeedStage<7U){
+      char routeEvent[130];
+      snprintf(routeEvent,sizeof(routeEvent),
+        "ROUTE_STAGE %s map=1 runEnc=%ld t_ms=%lu",
+        routeNames[newRouteStage],(long)pid_get_run_encoder_progress(),
+        (unsigned long)millis());
+      reply(routeEvent);
+    }
+    if(newCase!=LINE_CASE_STOPPED &&
+       newHighSpeedStage!=oldHighSpeedStage && newHighSpeedStage!=0U){
+      static const char* const labels[]={
+        "OFF","RAMP","CRUISE","BRAKE","COMPLETE","ABORTED","HOLD",
+        "WAIT_LINE","BOOST"
+      };
+      if(newHighSpeedStage<9U){
         char b[160];
-        snprintf(b,sizeof(b),
-          "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
-          labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
-          (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
-          pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
-          (unsigned long)millis());
+        if(pid_get_map1_late_boost_start()>0){
+          snprintf(b,sizeof(b),
+            "HS_STAGE %s map=1 runEnc=%ld base=%d peak=%d start=%ld t_ms=%lu",
+            labels[newHighSpeedStage],(long)pid_get_run_encoder_progress(),
+            pid_get_base_speed(),pid_get_high_speed_peak(),
+            (long)pid_get_map1_late_boost_start(),(unsigned long)millis());
+        }else{
+          snprintf(b,sizeof(b),
+            "HS_STAGE %s map=%u runEnc=%ld base=%d peak=%d brake=%ld end=2300 hold=110 minEnd=3100 t_ms=%lu",
+            labels[newHighSpeedStage],(unsigned)pid_get_selected_map(),
+            (long)pid_get_run_encoder_progress(),pid_get_base_speed(),
+            pid_get_high_speed_peak(),(long)pid_get_high_speed_brake_start(),
+            (unsigned long)millis());
+        }
         reply(b);
       }
     }
