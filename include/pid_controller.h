@@ -74,6 +74,14 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
+// Map 2 only: up to 8 strictly increasing relative encoder tick checkpoints.
+// Set while AUTO is off; count=0 disables checkpoint pauses.
+// State: 0=RUN 1=SETTLING 2=ALIGNING 3=FAULT (requires AUTO restart).
+bool pid_set_map2_tick_stages(const int32_t *ticks, uint8_t count);
+uint8_t pid_get_map2_tick_count(void);
+int32_t pid_get_map2_tick(uint8_t index);
+uint8_t pid_get_map2_tick_stage(void);
+uint8_t pid_get_map2_checkpoint_state(void);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
