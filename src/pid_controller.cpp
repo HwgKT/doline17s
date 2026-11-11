@@ -991,8 +991,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint32_t now = millis();
     const uint16_t mask = sensor_get_line_bits();
 
-    // Map 2 pure-PID experiment: no corner, SEARCH, dashed-gap, checkpoint,
-    // stage-mask or speed-scheduler FSM. START may be on an all-black pad:
+    // Map 2 PID test: no proactive corner, early-turn, dashed-gap,
+    // checkpoint, staged-mask or BASE scheduler. On confirmed line loss,
+    // use v2-style SEARCH but with forward/stop-only wheels.
+    // START may be on an all-black pad:
     // advance straight at full configured BASE until a centered, narrow line
     // is confirmed. FINISH remains disarmed while leaving the START pad.
     if (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED) {
@@ -1036,17 +1038,60 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         } else {
             fullLineFrames = 0;
         }
+        // v2-style reacquisition: SEARCH continues until a physical line
+        // is reliably detected for three consecutive controller frames.
+        if (isSearchTurn()) {
+            if ((uint32_t)(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
+                // End AUTO safely if the search cannot find the track.
+                turnState = TURN_NONE;
+                centeredTurnFrames = 0;
+                lineLocked = false;
+                missing = acquiring = false;
+                return LINE_CASE_STOPPED;
+            }
+            const bool reliableReacquisition =
+                (blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
+                (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION);
+            if (reliableReacquisition) {
+                if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
+                    ++centeredTurnFrames;
+            } else {
+                centeredTurnFrames = 0;
+            }
+            if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
+                turnState = TURN_NONE;
+                centeredTurnFrames = 0;
+                missing = acquiring = false;
+                lineLocked = true;
+                if (previouslyLocked) ++reacquisitions;
+                previouslyLocked = true;
+                clearPidState();
+                derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
+                reacquireSpeedFrames = REACQUIRE_SPEED_RAMP_FRAMES;
+                return LINE_CASE_NORMAL_PID;
+            }
+            return isLeftTurn() ? LINE_CASE_SHARP_LEFT : LINE_CASE_SHARP_RIGHT;
+        }
         if (blackCount == 0) {
             if (!missing) {
                 missing = true;
                 missingSinceMs = now;
             }
-            // Immediately stop PWM; exit AUTO if absent for >=30 ms.
+            // Stop PWM immediately, then enter SEARCH after 30 ms absent.
             if ((uint32_t)(now - missingSinceMs) >= LINE_LOSS_MS) {
                 missing = false;
                 lineLocked = false;
                 ++confirmedLosses;
-                return LINE_CASE_STOPPED;
+                const TurnState direction = lastKnownPosition < 0.0f
+                    ? TURN_LEFT : lastKnownPosition > 0.0f
+                    ? TURN_RIGHT : lastTurnDirection;
+                lastTurnDirection = direction;
+                turnState = searchStateFor(direction);
+                searchStartedMs = now;
+                centeredTurnFrames = 0;
+                clearPidState();
+                return isLeftTurn() ? LINE_CASE_SHARP_LEFT
+                                    : LINE_CASE_SHARP_RIGHT;
             }
             return LINE_CASE_LOST_LINE;
         }
@@ -1561,7 +1606,11 @@ void pid_line_follow_step(void) {
         resetWheelSpeedPid();
     if (currentCase == LINE_CASE_SHARP_LEFT) {
         clearPidState();
-        if (turnState == SEARCH_LEFT) {
+        if (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED &&
+            turnState == SEARCH_LEFT) {
+            // v2 direction with no reverse: stop LEFT wheel, advance RIGHT.
+            motor_set_speeds(0, LINE_SEARCH_PWM);
+        } else if (turnState == SEARCH_LEFT) {
             if (earlyTurnActive)
                 motor_set_speeds(-EARLY_TURN_INNER_REVERSE_PWM,
                                   EARLY_TURN_OUTER_FORWARD_PWM);
@@ -1576,7 +1625,11 @@ void pid_line_follow_step(void) {
         }
     } else if (currentCase == LINE_CASE_SHARP_RIGHT) {
         clearPidState();
-        if (turnState == SEARCH_RIGHT) {
+        if (selectedMap == 2 && MAP2_PURE_PID_TEST_ENABLED &&
+            turnState == SEARCH_RIGHT) {
+            // v2 direction with no reverse: advance LEFT, stop RIGHT.
+            motor_set_speeds(LINE_SEARCH_PWM, 0);
+        } else if (turnState == SEARCH_RIGHT) {
             if (earlyTurnActive)
                 motor_set_speeds(EARLY_TURN_OUTER_FORWARD_PWM,
                                  -EARLY_TURN_INNER_REVERSE_PWM);
