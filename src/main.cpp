@@ -73,6 +73,26 @@ bool parseSpeed(const String &s,int &val) {
   if(end==s.c_str()||*end||v<0||v>255)return false;
   val=(int)v;return true;
 }
+bool parseMapProfileCsv(const String &csv,long *values,uint8_t capacity,
+                         uint8_t *parsedCount,bool alternatingHex) {
+  if(!values || !parsedCount || csv.length()>=220U) return false;
+  char buffer[220];
+  csv.toCharArray(buffer,sizeof(buffer));
+  char *save=nullptr;
+  char *token=strtok_r(buffer,",",&save);
+  uint8_t count=0;
+  while(token){
+    if(count>=capacity || !*token) return false;
+    char *end=nullptr;
+    const int base=(alternatingHex && count>=3U && (count%2U)==1U)?16:10;
+    const long value=strtol(token,&end,base);
+    if(end==token || !end || *end!='\0') return false;
+    values[count++]=value;
+    token=strtok_r(nullptr,",",&save);
+  }
+  *parsedCount=count;
+  return true;
+}
 void showPid() {
   char b[100];
   snprintf(b,sizeof(b),"PID: Kp=%.2f Ki=%.2f Kd=%.2f Base=%d",
@@ -98,7 +118,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP_SPEED_PROFILE_V2 MAP_SPEED_PROFILE_V2:map,count,endTick,base,... MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -178,6 +198,46 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
+  // Variable-length BASE profile; the final stage uses endTick=0 (FINISH).
+  if(s.startsWith("MAP_SPEED_PROFILE_V2:")){
+    const String payload=s.substring(String("MAP_SPEED_PROFILE_V2:").length());
+    if(payload.indexOf(',')<0){
+      int mapId=payload.toInt();
+      if(payload!=String(mapId) || mapId<1 || mapId>3){reply("ERR: MAP_SPEED_PROFILE_V2_MAP");return;}
+      uint8_t stages=0;int32_t ticks[PID_MAP_PROFILE_MAX_STAGES-1]={0};
+      uint8_t bases[PID_MAP_PROFILE_MAX_STAGES]={0};
+      pid_get_map_speed_profile_v2((uint8_t)mapId,&stages,ticks,bases);
+      char out[240];int used=snprintf(out,sizeof(out),"MAP_SPEED_PROFILE_V2:%d,%u",mapId,(unsigned)stages);
+      for(uint8_t i=0;i<stages && used>0 && used<(int)sizeof(out);++i){
+        const long endTick=(i+1U<stages)?(long)ticks[i]:0L;
+        used+=snprintf(out+used,sizeof(out)-(size_t)used,",%ld,%u",endTick,(unsigned)bases[i]);
+      }
+      reply(out);return;
+    }
+    if(pid_is_auto_mode() || manualActive){reply("ERR: MAP_SPEED_PROFILE_V2_STOP_REQUIRED");return;}
+    long values[2U+2U*PID_MAP_PROFILE_MAX_STAGES]={0};uint8_t parsed=0;
+    if(!parseMapProfileCsv(payload,values,2U+2U*PID_MAP_PROFILE_MAX_STAGES,&parsed,false) ||
+       parsed<4U || (parsed%2U)!=0U){reply("ERR: MAP_SPEED_PROFILE_V2_FORMAT");return;}
+    const int mapId=(int)values[0],stages=(int)values[1];
+    if(mapId<1 || mapId>3 || pid_get_selected_map()!=mapId){reply("ERR: MAP_SPEED_PROFILE_V2_SELECT_MAP");return;}
+    if(stages<1 || stages>PID_MAP_PROFILE_MAX_STAGES || parsed!=(uint8_t)(2+2*stages)){
+      reply("ERR: MAP_SPEED_PROFILE_V2_STAGE_COUNT_1_8");return;
+    }
+    int32_t ticks[PID_MAP_PROFILE_MAX_STAGES-1]={0};
+    uint8_t bases[PID_MAP_PROFILE_MAX_STAGES]={0};
+    for(int i=0;i<stages;++i){
+      const long endTick=values[2+2*i],base=values[3+2*i];
+      if(i+1==stages){if(endTick!=0){reply("ERR: MAP_SPEED_PROFILE_V2_LAST_STAGE_MUST_FINISH");return;}}
+      else {if(endTick<=0 || endTick>10000000L){reply("ERR: MAP_SPEED_PROFILE_V2_TICK_RANGE");return;}ticks[i]=(int32_t)endTick;}
+      if(base<45 || base>255){reply("ERR: MAP_SPEED_PROFILE_V2_BASE_RANGE_45_255");return;}
+      bases[i]=(uint8_t)base;
+    }
+    if(!pid_set_map_speed_profile_v2((uint8_t)mapId,(uint8_t)stages,ticks,bases)){
+      reply("ERR: MAP_SPEED_PROFILE_V2_INVALID_OR_UNSORTED_TICKS");return;
+    }
+    command(String("MAP_SPEED_PROFILE_V2:")+String(mapId));return;
+  }
+
   // MAP 2: four masks, three tick boundaries; HEX masks like SENSOR_PROFILE.
   if(s=="MAP2_SENSOR_PROFILE"){
     int32_t t[3]={}; uint16_t m[4]={};
