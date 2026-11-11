@@ -692,7 +692,7 @@ void loop() {
   }
   updateLedIndicator(now);
   if(pidTestActive){stageStartUs=micros();pidTestStep();++pidCount;perfRecord(PERF_PID,micros()-stageStartUs);}
-  if(pid_is_auto_mode()&&!sensor_is_calibrating(){
+  if(pid_is_auto_mode()&&!sensor_is_calibrating()){
     stageStartUs=micros();
     const LineCase_t oldCase=pid_get_current_case();
     const uint8_t oldHighSpeedStage=pid_get_high_speed_stage();
