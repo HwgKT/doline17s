@@ -60,11 +60,6 @@ void pid_set_base_speed(int16_t speed);
  * @brief Bật hoặc tắt chế độ tự động dò line
  */
 void pid_set_auto_mode(bool enable);
-// Map 1 physical-button run: override only PID sensor masks for this AUTO.
-// left=true uses S0..S9 then S7..S15; right=true reverses those stages.
-// fullEyes=true uses all 16 sensors throughout; SPP profiles are untouched.
-bool pid_set_map1_button_mode(bool left, bool fullEyes);
-
 
 /**
  * @brief Kiểm tra xem đang chạy tự động dò line hay lái tay
@@ -73,6 +68,10 @@ bool pid_is_auto_mode(void);
 // Set track profile before AUTO. Valid MAP values: 1, 2, 3.
 bool pid_select_map(uint8_t mapId);
 uint8_t pid_get_selected_map(void);
+// Configure Map 1 physical/app side mode while AUTO is stopped.
+// left=true: S0-S9 then S7-S15; left=false: reverse; fullEyes=true: all 16.
+bool pid_set_map1_button_mode(bool left, bool fullEyes);
+void pid_clear_map1_button_mode(void);
 // Map 1 only: encoder thresholds and three independent 16-bit PID sensor masks.
 // Requires AUTO disabled; never changes physical ADC/line detection.
 bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,

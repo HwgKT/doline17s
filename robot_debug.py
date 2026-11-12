@@ -165,11 +165,12 @@ class App(tk.Tk):
         self.stop_verify_retries = 0
         self.start_confirmed = False
         self.csv_status = tk.StringVar(value="CSV: chờ START")
-        self.selected_map = 1  # v7 defaults AUTO to MAP 1; MAP 2/3 remain selectable explicitly.
+        self.selected_map = 1  # Default AUTO to MAP 1; explicit MAP 2/3 selection remains available.
         self.map_status = tk.StringVar(value="Đã chọn 1 (mặc định)")
         self.map_buttons = {}
         self.map1_side = None
         self.map1_side_confirmed = False
+        self.physical_calib_ready = False  # ESP32 BUTTON_STATE is authoritative.
         self.map1_side_status = tk.StringVar(value="MAP 1: chưa xác nhận bên")
         self.map1_eye_mode = tk.StringVar(value="TICK")
         self.run_txt_file = None
@@ -199,7 +200,7 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 180  # MAP1 CODE_MAT peak; PURE_PID disables late boost.
+        self.high_speed_peak = 180  # Map 1 startup default; firmware reply is authoritative.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
         self.hs_late_start = 8000
         self.hs_late_mode = False
@@ -308,7 +309,7 @@ class App(tk.Tk):
 
         side_bar = tk.Frame(self, bg=PANEL, padx=8, pady=2)
         side_bar.pack(fill="x", padx=8, pady=(0, 2))
-        self.label(side_bar, "MAP 1 — Chọn bên / chế độ:", bg=PANEL, fg=CYAN).pack(side="left", padx=(0, 6))
+        self.label(side_bar, "MAP 1 — Chọn bên:", bg=PANEL, fg=CYAN).pack(side="left", padx=(0, 6))
         self.map1_left_btn = ttk.Button(side_bar, text="TRÁI",
                                         command=lambda: self.choose_map1_side("LEFT"))
         self.map1_left_btn.pack(side="left", padx=2)
@@ -321,8 +322,6 @@ class App(tk.Tk):
                                            values=("TICK", "FULL16"),
                                            state="readonly", width=8)
         self.map1_eye_combo.pack(side="left", padx=5)
-        self.label(side_bar, "TICK: 140→180 | FULL16: PID 140",
-                   bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(side="left", padx=4)
         self.label(side_bar, textvariable=self.map1_side_status,
                    bg=PANEL, fg=AMBER).pack(side="left", padx=6)
 
@@ -494,7 +493,7 @@ class App(tk.Tk):
         self.label(pwm_row, "PWM", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.pwm_var = tk.DoubleVar(value=140)
-        self.pwm_text = tk.StringVar(value="120 / 255")
+        self.pwm_text = tk.StringVar(value="140 / 255")
         self.label(pwm_row, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
                    font=("Consolas", 9), width=9, anchor="e").pack(side="right")
         self.pwm_slider = ttk.Scale(
@@ -763,7 +762,7 @@ class App(tk.Tk):
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
         self.hs_peak_value_text.set("— / 255")
-        self.hs_peak_feedback.set("Đang đọc HS_PEAK (BASE sau 10k) từ ESP32...")
+        self.hs_peak_feedback.set("Đang đọc HS_PEAK (BASE sau 8000 tick) từ ESP32...")
         self.estop_latched = None
         self.estop_pending = False
         self.start_pending = False
@@ -798,6 +797,7 @@ class App(tk.Tk):
         self.send_command("CAL_DUMP")
         self.map1_side = None
         self.map1_side_confirmed = False
+        self.physical_calib_ready = False
         self.map1_side_status.set("MAP 1: đang đọc trạng thái nút...")
         self.send_command("SIDE:STATUS")
         self.send_command("HS_PEAK")
@@ -834,6 +834,7 @@ class App(tk.Tk):
         self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
         self.map1_side = None
         self.map1_side_confirmed = False
+        self.physical_calib_ready = False
         self.map1_side_status.set("MAP 1: mất kết nối")
         self.map2_sensor_confirmed = False
         self.map2_sensor_status.set("MAP 2 mắt PID: mất kết nối ESP32")
@@ -1189,13 +1190,16 @@ class App(tk.Tk):
                    command=lambda: choose_preset("left")).pack(side="left", padx=(0, 8))
         ttk.Button(preset_bar, text="Phải (S7-S15 / S0-S9 / Full)",
                    command=lambda: choose_preset("right")).pack(side="left")
-        feedback = tk.StringVar(value="Áp dụng khi robot đã STOP; không thay đổi PID gains.")
+        feedback = tk.StringVar(value="Cấu hình chung. Khi chọn Trái/Phải, preset hướng có ưu tiên lúc START.")
         self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER).pack(
             anchor="w", padx=12, pady=(7, 2))
         actions = tk.Frame(win, bg=PANEL, padx=12, pady=4)
         actions.pack(fill="x")
 
         def apply():
+            if self.map1_side is not None:
+                feedback.set("Đang chọn Trái/Phải: mask lúc START theo preset hướng. Hãy hủy bên trước khi sửa cấu hình chung.")
+                return
             if (self.reader is None or not self.reader.is_alive()
                     or self.auto_running or self.start_pending
                     or self.stop_ack_deadline is not None
@@ -1360,12 +1364,18 @@ class App(tk.Tk):
         if self.selected_map != 1:
             self.log("Chọn MAP 1 trước khi đặt bên.")
             return
+        if not self.physical_calib_ready:
+            self.log("ESP32 chưa xác nhận CAL trắng/đen của phiên này.")
+            return
         if self.send_command("SIDE:" + side):
             self.map1_side_confirmed = False
             self.map1_side_status.set("MAP 1: chờ ESP32 xác nhận...")
             self.update_control_buttons()
 
     def clear_map1_side(self):
+        if not self.physical_calib_ready:
+            self.log("ESP32 chưa xác nhận CAL; không thể hủy bên.")
+            return
         if self.send_command("SIDE:CLEAR"):
             self.map1_side_confirmed = False
             self.map1_side_status.set("MAP 1: chờ ESP32 hủy bên...")
@@ -1382,7 +1392,8 @@ class App(tk.Tk):
                      and self.hs_peak_pending is None
                      and self.hs_peak_confirmed is not None
                      and not self.hs_peak_dirty
-                     and self.calibration_ok and self.selected_map is not None
+                     and self.calibration_ok and self.physical_calib_ready
+                     and self.selected_map is not None
                      and (self.selected_map != 1 or self.map1_side_confirmed)
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
@@ -1392,7 +1403,8 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
-        side_editable = connected and self.selected_map == 1 and not locked
+        side_editable = (connected and self.selected_map == 1
+                         and self.physical_calib_ready and not locked)
         for button in (self.map1_left_btn, self.map1_right_btn, self.map1_clear_btn):
             button.configure(state="normal" if side_editable else "disabled")
         self.map1_eye_combo.configure(state="readonly" if side_editable else "disabled")
@@ -1482,6 +1494,10 @@ class App(tk.Tk):
             return
         if self.reader is None or not self.reader.is_alive():
             self.log("Chưa kết nối Bluetooth SPP.")
+            return
+        if not self.physical_calib_ready:
+            self.log("ESP32 chưa xác nhận CAL trắng và đen trong phiên này.")
+            self.send_command("SIDE:STATUS")
             return
         if not self.calibration_ok or any(v is None for v in self.cal_thresholds):
             self.log("Chưa nhận đủ 16 ngưỡng TH từ ESP32; gửi lại CAL_DUMP.")
@@ -1660,8 +1676,11 @@ class App(tk.Tk):
             r"side=(LEFT|RIGHT|NONE) confirmed=([01])", message)
         if side_state:
             phase, side, confirmed = side_state.groups()
+            self.physical_calib_ready = phase in ("SELECT", "READY", "RUNNING")
             self.map1_side = None if side == "NONE" else side
-            self.map1_side_confirmed = confirmed == "1"
+            if side == "NONE":
+                self.map1_eye_mode.set("TICK")  # No stale FULL16 choice after STOP.
+            self.map1_side_confirmed = self.physical_calib_ready and confirmed == "1"
             names = {"LEFT": "TRÁI", "RIGHT": "PHẢI", "NONE": "chưa chọn"}
             self.map1_side_status.set(
                 f"MAP 1: {names[side]} | "+(
@@ -1711,6 +1730,14 @@ class App(tk.Tk):
                 f"MAP 1: {'TRÁI' if side == 'LEFT' else 'PHẢI'} | "
                 f"{t1}/{t2} | {m1}/{m2}/{m3} | "
                 + ("ESP32 OK" if confirmed == "1" else "Chưa xác nhận"))
+            # The effective mask reported by ESP32 wins over the generic
+            # Map 1 editor profile and remains correct for FULL16 runs.
+            self.sensor_profile = (
+                int(t1), int(t2), int(m1, 16), int(m2, 16), int(m3, 16))
+            self.sensor_profile_confirmed = confirmed == "1"
+            self.sensor_profile_status.set(
+                f"PID mắt đang chọn: {side} | {t1}/{t2} | {m1}/{m2}/{m3}"
+                + (" (ESP32 OK)" if confirmed == "1" else " (chưa xác nhận)"))
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
@@ -2112,6 +2139,9 @@ class App(tk.Tk):
         elif message == "CAL_WHITE_DONE":
             self.cal_state.set("Đã lấy TRẮNG. Đặt nền ĐEN rồi bấm 2. Lấy ĐEN.")
         elif message == "CAL_WHITE_STARTED":
+            self.physical_calib_ready = False
+            self.map1_side_confirmed = False
+            self.update_control_buttons()
             self.cal_state.set("Đang thu 128 khung TRẮNG.")
         elif message == "CAL_BLACK_STARTED":
             self.cal_state.set("Đang thu 128 khung ĐEN.")
@@ -2123,6 +2153,9 @@ class App(tk.Tk):
             self.update_control_buttons()
             self.send_command("CAL_DUMP")
         elif message == "CAL_FAILED":
+            self.physical_calib_ready = False
+            self.map1_side_confirmed = False
+            self.update_control_buttons()
             self.cal_state.set("Calib mới thất bại; giữ profile cũ nếu có.")
         elif message.startswith("CAL_STATUS"):
             self.cal_state.set(message)

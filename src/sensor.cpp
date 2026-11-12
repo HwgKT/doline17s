@@ -31,6 +31,8 @@ uint32_t sums[N_SENSORS] = {};
 uint64_t squares[N_SENSORS] = {};
 uint16_t whiteStage[N_SENSORS] = {}, whiteNoise[N_SENSORS] = {};
 uint32_t frames = 0;
+int lastButtonRead = LOW, buttonState = LOW;
+unsigned long lastButtonChange = 0;
 
 // Baseline: IDF ADC1 + direct GPIO MUX, 6-us settle, one discarded
 // conversion, one retained conversion, 3-us post-sample wait.
@@ -167,6 +169,9 @@ void finish() {
 void sensor_init(void) {
   pinMode(PIN_MUX_S0, OUTPUT); pinMode(PIN_MUX_S1, OUTPUT);
   pinMode(PIN_MUX_S2, OUTPUT); pinMode(PIN_MUX_S3, OUTPUT);
+  pinMode(PIN_START_BUTTON, INPUT); // external pull-up; GPIO34 has no internal pull
+  lastButtonRead = buttonState = digitalRead(PIN_START_BUTTON);
+  lastButtonChange = millis(); // require a fresh press after initial release
   analogReadResolution(12);
   // Use the same ADC1 settings as the benchmark (12-bit, attenuation 11 dB).
   fastAdcErrors = 0;
@@ -265,6 +270,16 @@ void sensor_print_calibration(void) {
   for (int i = 0; i < N_SENSORS; ++i)
     sppLogPrintf("[CAL] eye=%02d W=%u B=%u TH=%u\n",
       i, minValues[i], maxValues[i], thresholds[i]);
+}
+bool sensor_start_button_pressed(void) {
+  const int read = digitalRead(PIN_START_BUTTON);
+  if (read != lastButtonRead) lastButtonChange = millis();
+  bool pressed = false;
+  if (millis() - lastButtonChange > BUTTON_DEBOUNCE_MS && read != buttonState) {
+    buttonState = read; pressed = buttonState == LOW;
+  }
+  lastButtonRead = read;
+  return pressed;
 }
 uint16_t sensor_get_calibrated(uint8_t index) {
   if (!calibrationReady || index >= N_SENSORS) return 0;
