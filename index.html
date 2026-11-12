@@ -881,7 +881,7 @@
         <span>🎮 ĐIỀU KHIỂN ĐỘNG CƠ</span>
         <small style="font-weight: 400; color: var(--text-muted);">
           Phím: <span class="key-hint">W</span> <span class="key-hint">A</span> <span class="key-hint">S</span>
-          <span class="key-hint">D</span> | Siêu Bám: <span class="key-hint">G</span> | Dừng: <span
+          <span class="key-hint">D</span> | Chế độ Map 1: chọn bên trước | Dừng: <span
             class="key-hint">Space</span>
         </small>
       </div>
@@ -902,6 +902,7 @@
           <div id="map1CalState" style="font-size: 12px; color: #fbbf24;">Chưa có xác nhận CAL từ ESP32</div>
           <div id="map1SideState" style="font-size: 12px; color: #cbd5e1;">Chưa chọn bên</div>
           <div id="map1SensorProfile" style="font-size: 11px; color: #94a3b8;">Mask: chưa đọc từ ESP32</div>
+          <div id="map1SpeedState" style="font-size: 11px; color: #94a3b8;">BASE/HS: chờ ESP32 xác nhận</div>
           <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             <button id="btnSideLeft" class="btn-action-sm" onclick="requestMap1Side('LEFT')" disabled>Chọn TRÁI</button>
             <button id="btnSideRight" class="btn-action-sm" onclick="requestMap1Side('RIGHT')" disabled>Chọn PHẢI</button>
@@ -1115,7 +1116,7 @@
     let connectionType = null; // 'ble' hoặc 'serial'
 
     let autoPollInterval = null;
-    let autoPollActive = true;
+    let autoPollActive = false;
 
     // Khởi tạo giao diện 16 mắt cảm biến
     const sensorBar = document.getElementById('sensorBar');
@@ -1148,8 +1149,149 @@
       document.getElementById('terminalLogs').innerHTML = '';
     }
 
+    // v6 authority lives in ESP32, not in a click or a saved NVS snapshot.
+    const webV6State = {
+      phase: 'CALIB', calReady: false, side: 'NONE', confirmed: false,
+      mask: null, eyeMode: 'TICK_MASK', peak: null
+    };
+    function resetWebV6State() {
+      Object.assign(webV6State, {
+        phase: 'CALIB', calReady: false, side: 'NONE', confirmed: false,
+        mask: null, eyeMode: 'TICK_MASK', peak: null
+      });
+      renderWebV6State();
+    }
+    function renderWebV6State() {
+      const connectedAndStopped = isConnected && webV6State.phase !== 'RUNNING';
+      const editable = connectedAndStopped && webV6State.calReady;
+      const startable = editable && webV6State.confirmed && webV6State.side !== 'NONE';
+      const sideName = webV6State.side === 'LEFT' ? 'TRÁI' :
+                       webV6State.side === 'RIGHT' ? 'PHẢI' : 'chưa chọn';
+      document.getElementById('map1CalState').textContent =
+        webV6State.calReady ? 'CAL TRẮNG + ĐEN: ESP32 đã xác nhận trong phiên này' :
+          'Chưa hoàn tất CAL phiên hiện tại — không được START';
+      document.getElementById('map1SideState').textContent =
+        'Bên: ' + sideName + ' | ' + (
+          webV6State.confirmed ? 'ESP32 OK' :
+          webV6State.phase === 'RUNNING' ? 'RUNNING' : 'chưa xác nhận'
+        );
+      document.getElementById('map1SensorProfile').textContent =
+        'Mắt PID: ' + (webV6State.mask || 'chưa đọc profile') +
+        ' | Chế độ START: ' + webV6State.eyeMode;
+      document.getElementById('map1SpeedState').textContent =
+        'BASE: ' + document.getElementById('inputBase').value +
+        ' | HS_PEAK: ' + (webV6State.peak ?? '—') +
+        ' | ngưỡng Map 1: 8000 tick';
+      for(const id of ['btnSideLeft', 'btnSideRight'])
+        document.getElementById(id).disabled = !editable;
+      document.getElementById('btnSideClear').disabled =
+        !editable || webV6State.side === 'NONE';
+      document.getElementById('btnSideRefresh').disabled = !isConnected;
+      document.getElementById('btnMap1StartTick').disabled = !startable;
+      document.getElementById('btnMap1StartFull').disabled = !startable;
+      const badge = document.getElementById('calibStatusBadge');
+      badge.textContent = webV6State.calReady ? 'ESP32 CAL OK' : 'Chờ CAL phiên này';
+    }
+    async function refreshV6Status() {
+      for(const cmd of ['SIDE:STATUS', 'CAL_STATUS', 'PID', 'HS_PEAK'])
+        if(!await sendCommand(cmd)) return;
+    }
+    async function requestMap1Side(side) {
+      if(!isConnected || !webV6State.calReady || webV6State.phase === 'RUNNING') {
+        log('Cần kết nối và hoàn tất CAL trước khi chọn bên.', 'err');
+        return;
+      }
+      // The selected side is updated only by BUTTON_STATE from ESP32.
+      await sendCommand('SIDE:' + side);
+    }
+    async function requestMap1SideClear() {
+      if(!isConnected || !webV6State.calReady || webV6State.side === 'NONE') return;
+      await sendCommand('SIDE:CLEAR');
+    }
+    async function requestMap1Start(fullEyes) {
+      if(!isConnected || !webV6State.calReady || !webV6State.confirmed ||
+         webV6State.side === 'NONE' || webV6State.phase === 'RUNNING') {
+        log('ESP32 chưa xác nhận CAL và hướng; từ chối START.', 'err');
+        return;
+      }
+      await sendCommand(fullEyes ? 'SIDE_START:FULL' : 'SIDE_START:TICK');
+    }
+    async function requestV6Calibration(surface) {
+      if(!isConnected || webV6State.phase === 'RUNNING') {
+        log('Chỉ hiệu chuẩn khi đã kết nối và động cơ đã dừng.', 'err');
+        return;
+      }
+      await sendCommand(surface === 'WHITE' ? 'CAL_WHITE' : 'CAL_BLACK');
+    }
+    function handleV6Response(line) {
+      const state = line.match(/^BUTTON_STATE phase=(CALIB|SELECT|READY|RUNNING) side=(LEFT|RIGHT|NONE) confirmed=([01])$/);
+      if(state) {
+        webV6State.phase = state[1];
+        webV6State.calReady = state[1] !== 'CALIB';
+        webV6State.side = state[2];
+        webV6State.confirmed = webV6State.calReady && state[3] === '1';
+        if(webV6State.side === 'NONE') webV6State.mask = null;
+        renderWebV6State();
+        return true;
+      }
+      const profile = line.match(/^BUTTON_PROFILE side=(LEFT|RIGHT) T1=(\d+) T2=(\d+) M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) M3=([0-9A-Fa-f]{4}) confirmed=([01])$/);
+      if(profile) {
+        webV6State.mask = profile[4] + '/' + profile[5] + '/' + profile[6] +
+                          ' @ ' + profile[2] + '/' + profile[3] + ' tick';
+        renderWebV6State();
+        return true;
+      }
+      const run = line.match(/^BUTTON_RUN map=1 side=(LEFT|RIGHT) eyes=(FULL16|TICK_MASK)$/);
+      if(run) {
+        webV6State.eyeMode = run[2];
+        webV6State.phase = 'RUNNING';
+        renderWebV6State();
+        return true;
+      }
+      const hs = line.match(/^HS_PEAK: PWM=(\d+) BASE=(\d+)/);
+      if(hs) {
+        webV6State.peak = Number(hs[1]);
+        renderWebV6State();
+        return true;
+      }
+      if(line === 'CAL_WHITE_DONE' || line === 'CAL_OK_SAVED') {
+        log('LED GPIO2 đã xác nhận: ' + line, 'rx');
+        // Wait for BUTTON_STATE phase=SELECT after CAL_OK_SAVED.
+        return true;
+      }
+      if(line === 'CAL_WHITE_STARTED' || line === 'CAL_BLACK_STARTED' ||
+         line === 'CAL_WHITE_ACCEPTED' || line === 'CAL_BLACK_ACCEPTED' ||
+         line === 'CAL_FAILED') {
+        if(line === 'CAL_FAILED') {
+          webV6State.calReady = false;
+          webV6State.confirmed = false;
+          webV6State.phase = 'CALIB';
+          renderWebV6State();
+        }
+        return true;
+      }
+      if(line.startsWith('ERR: SIDE_') || line.startsWith('ERR: BUTTON_') ||
+         line.startsWith('ERR: CALIB_')) {
+        log('ESP32 từ chối: ' + line, 'err');
+        return true;
+      }
+      if(line === 'MODE: AUTO PID') {
+        webV6State.phase = 'RUNNING';
+        renderWebV6State();
+        return true;
+      }
+      if(line.startsWith('AUTO_FINISHED:') || line.startsWith('AUTO_STOPPED:') ||
+         line === 'MOTOR: STOP') {
+        // Re-read authoritative state, do not guess the side after STOP.
+        if(isConnected) sendCommand('SIDE:STATUS');
+        return false;
+      }
+      return false;
+    }
+
     function updateConnectionStatus(connected, typeName = '') {
       isConnected = connected;
+      resetWebV6State();
       const badge = document.getElementById('statusBadge');
       const text = document.getElementById('statusText');
       const btnBle = document.getElementById('btnConnectBle');
@@ -1167,8 +1309,8 @@
       } else {
         badge.classList.remove('connected');
         text.textContent = 'Chưa kết nối';
-        btnBle.innerHTML = '<span>📡 Kết nối Bluetooth</span>';
-        btnSerial.innerHTML = '<span>🔌 Cáp USB Serial</span>';
+        btnBle.innerHTML = '<span>BLE cũ (không dùng trên v6)</span>';
+        btnSerial.innerHTML = '<span>Kết nối SPP qua COM</span>';
         connectionType = null;
         stopAutoPoll();
         const autoPollButton = document.getElementById('btnAutoPoll');
