@@ -137,6 +137,31 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount);
  */
 void pid_line_follow_step(void);
 
+// MAP 1 only: bounded diagnostic event queue (no SPP work in PID).
+enum Map1LogType : uint8_t {
+ MAP1_LOG_TURN_IN=1, MAP1_LOG_TURN_OUT=2,
+ MAP1_LOG_SEARCH_IN=3, MAP1_LOG_SEARCH_OUT=4,
+ MAP1_LOG_PWM_REVERSE=5, MAP1_LOG_BOOST_ON=6, MAP1_LOG_BOOST_OFF=7,
+ MAP1_LOG_FINISH_CANDIDATE=8, MAP1_LOG_FINISH_CANCEL=9, MAP1_LOG_FINISH_OK=10
+};
+enum Map1LogSource : uint8_t {
+ MAP1_SOURCE_NONE=0, MAP1_SOURCE_SHARP=1, MAP1_SOURCE_CENTROID=2,
+ MAP1_SOURCE_DIRECT_EDGE=3, MAP1_SOURCE_IMMEDIATE=4, MAP1_SOURCE_NORMAL=5
+};
+struct Map1LogEvent {
+ uint32_t t_ms;
+ int32_t run_enc;
+ uint16_t sensor_bits;
+ uint16_t active_mask;
+ int16_t pwm_l, pwm_r, err_x10;
+ uint16_t duration_ms;
+ uint8_t type, source;
+ int8_t direction;
+ uint8_t extra;
+};
+bool pid_pop_map1_log(Map1LogEvent *out);
+uint32_t pid_map1_log_dropped(void);
+
 // =================== HÀM TRUY VẤN DEBUG ===================
 LineCase_t pid_get_current_case(void);
 const char *pid_get_case_name(LineCase_t c);
