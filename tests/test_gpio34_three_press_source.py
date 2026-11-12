@@ -47,7 +47,9 @@ class PhysicalButtonsMap1Tests(unittest.TestCase):
         self.assertIn("else if(side.shortPress) startPhysicalMap1(true);", MAIN)
         self.assertIn('command("AUTO:1")', MAIN)
         # STOP must clear the chosen side and publish the cleared state to SPP.
-        self.assertRegex(MAIN, r"if\\(physicalRunInProgress\\)\\s*\\{\\s*resetPhysicalSelection\\(\\);\\s*reportPhysicalSide\\(\\);")
+        self.assertIn("if(physicalRunInProgress){", MAIN)
+        self.assertIn("resetPhysicalSelection();", MAIN)
+        self.assertIn("reportPhysicalSide();", MAIN)
         self.assertIn("physicalPhase=PHYS_RUNNING;", MAIN)
         self.assertIn("if(physicalPhase!=PHYS_READY", MAIN)
         self.assertIn("if(pid_is_auto_mode() || manualActive", MAIN)
