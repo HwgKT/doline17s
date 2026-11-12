@@ -29,6 +29,13 @@ class SideSyncTests(unittest.TestCase):
     def test_recalibration_clears_gui_side_immediately(self):
         self.assertIn('physicalPhase=PHYS_WAIT_WHITE;\n      physicalSide=SIDE_NONE;\n      reply("CAL_WHITE_ACCEPTED");\n      reportPhysicalSide();',MAIN)
         self.assertIn('physicalPhase=PHYS_WAIT_BLACK;\n      physicalSide=SIDE_NONE;\n      reply("CAL_BLACK_ACCEPTED");\n      reportPhysicalSide();',MAIN)
+    def test_no_direct_auto_map1_side_bypass(self):
+        self.assertIn('if(physicalPhase!=PHYS_READY || physicalSide==SIDE_NONE)',MAIN)
+        self.assertIn('reply("ERR: SIDE_CONFIRM_REQUIRED")',MAIN)
+        self.assertIn('if(!map1StartModePreconfigured &&',MAIN)
+        self.assertIn('map1StartModePreconfigured=true;',MAIN)
+        self.assertIn('map1StartModePreconfigured=false;',MAIN)
+        self.assertIn('physicalRunInProgress=true;',MAIN)
     def test_other_maps_unchanged(self):
         self.assertIn('else f"AUTO:{self.selected_map}"',APP)
 if __name__=="__main__": unittest.main()
