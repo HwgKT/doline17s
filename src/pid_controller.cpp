@@ -758,7 +758,7 @@ bool pid_select_map(uint8_t mapId) {
     // app resends AUTO:<same map> after an intentional manual adjustment.
     if (selectedMap != mapId) {
         pidConfig.baseSpeed = MAP_DEFAULT_BASE_PWM[mapId - 1];
-        highSpeedPeakPwm = MAP_DEFAULT_HS_PEAK_PWM;
+        highSpeedPeakPwm = mapId == 1 ? MAP_DEFAULT_HS_PEAK_PWM : 240; // Preserve Map 2/3 HS defaults.
     }
     selectedMap = mapId;
     return true;
