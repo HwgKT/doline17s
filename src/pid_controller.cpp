@@ -181,6 +181,12 @@ int32_t map1SensorStage2Ticks = 650;
 int32_t map1SensorStage3Ticks = 1350;
 // Stage 1: disable S0..S4; stage 2: disable S9..S15; stage 3: all sensors.
 uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
+// Temporary run-scoped physical button override, independent of SPP SENSOR_PROFILE.
+bool map1ButtonOverride = false;
+bool map1ButtonLeft = true;
+bool map1ButtonFullEyes = false;
+constexpr int32_t MAP1_BUTTON_TICK1 = 650;
+constexpr int32_t MAP1_BUTTON_TICK2 = 1500;
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
@@ -225,6 +231,14 @@ static uint16_t map1PidSensorMask() {
     const int32_t traveled = map1SensorTravelTicks();
     // A pivot or a temporary reversal must not reactivate a previous group.
     if (traveled > map1SensorMaxTicks) map1SensorMaxTicks = traveled;
+    if (map1ButtonOverride) {
+        if (map1ButtonFullEyes) return 0xFFFFU;
+        if (map1SensorMaxTicks < MAP1_BUTTON_TICK1)
+            return map1ButtonLeft ? 0x03FFU : 0xFF80U;
+        if (map1SensorMaxTicks < MAP1_BUTTON_TICK2)
+            return map1ButtonLeft ? 0xFF80U : 0x03FFU;
+        return 0xFFFFU;
+    }
     if (map1SensorMaxTicks < map1SensorStage2Ticks)
         return map1SensorStageMasks[0];
     if (map1SensorMaxTicks < map1SensorStage3Ticks)
@@ -737,6 +751,8 @@ void pid_set_base_speed(int16_t speed) {
     pidConfig.baseSpeed = speed < 0 ? 0 : (speed > 255 ? 255 : speed);
  }
 void pid_set_auto_mode(bool enabled) {
+    // Do not leak physical-button masks to later GUI/SPP AUTO runs.
+    if (!enabled) map1ButtonOverride = false;
     autoMode = enabled;
     currentCase = LINE_CASE_STOPPED;
     resetLineTracking();
@@ -750,6 +766,13 @@ void pid_set_auto_mode(bool enabled) {
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
+bool pid_set_map1_button_mode(bool left, bool fullEyes) {
+    if (autoMode || selectedMap != 1) return false;
+    map1ButtonOverride = true;
+    map1ButtonLeft = left;
+    map1ButtonFullEyes = fullEyes;
+    return true;
+}
 bool pid_set_map1_route_lock(bool enabled) {
     if (autoMode) return false;
     map1RouteLockEnabled = enabled;
