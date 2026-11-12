@@ -1180,7 +1180,7 @@
         ' | Chế độ START: ' + webV6State.eyeMode;
       document.getElementById('map1SpeedState').textContent =
         'BASE: ' + document.getElementById('inputBase').value +
-        ' | HS_PEAK: ' + (webV6State.peak ?? '200 (chờ ESP32)') +
+        ' | HS_PEAK: ' + (webV6State.peak ?? '180 (chờ ESP32)') +
         ' | ngưỡng Map 1: 8000 tick';
       for(const id of ['btnSideLeft', 'btnSideRight'])
         document.getElementById(id).disabled = !editable;
