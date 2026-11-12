@@ -75,7 +75,9 @@ constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 #endif
 // The old encoder-position speed envelope is disabled. Encoder is now used
 // for wheel-speed feedback and (separately) the sensor mask stages only.
-constexpr bool ENCODER_SPEED_PROFILE_ENABLED = false;
+constexpr bool ENCODER_SPEED_PROFILE_ENABLED = true;
+// Keep encoder-position GAP bridging disabled while testing HS PWM profile.
+constexpr bool ENCODER_GAP_BRIDGE_ENABLED = false;
 constexpr uint32_t GAP_TIMEOUT_MS = 100;
 // First straight trapezoid in relative motor-encoder ticks.
 // An experimental open-loop PWM envelope, not closed-loop wheel velocity.
@@ -1026,7 +1028,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         derivativeWarmupFrames = REACQUIRE_DERIVATIVE_HOLD_FRAMES;
     }
 
-    if (ENCODER_SPEED_PROFILE_ENABLED && blackCount == 0 &&
+    if (ENCODER_GAP_BRIDGE_ENABLED && blackCount == 0 &&
         turnState == TURN_NONE && lineLocked && !startupLossActive &&
         selectedMap >= 1 && selectedMap <= 3) {
         const int32_t progress = runEncoderProgress();
@@ -1489,6 +1491,14 @@ void pid_line_follow_step(void) {
         if (map1ReadyForBoost && centeredForBoost)
             map1LateBoostEngaged = true;
         float base = (float)activeBaseSpeed();
+        // Apply the HS_PEAK trapezoidal PWM envelope while its stage is active.
+        // Outside this stage, retain the selected map's BASE schedule.
+        if (ENCODER_SPEED_PROFILE_ENABLED &&
+            (highSpeedStage == HS_ACCEL || highSpeedStage == HS_CRUISE ||
+             highSpeedStage == HS_BRAKE || highSpeedStage == HS_CORNER_HOLD)) {
+            base = highSpeedForwardTarget(highSpeedMaxProgress, base);
+        }
+        // Existing Map 1 late boost remains the final override after 10500 ticks.
         if (map1ReadyForBoost && centeredForBoost)
             base = (float)highSpeedPeakPwm;
         governedForwardSpeed = base;
