@@ -210,7 +210,7 @@ class App(tk.Tk):
             value="HS: MAP 1 từ 10500 tick | chờ ESP32 xác nhận")
         self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
-        self.sensor_profile = (350, 1500, 0x01FF, 0xFF80, 0xFFFF)
+        self.sensor_profile = (650, 1500, 0x03FF, 0xFF80, 0xFFFF)
         self.sensor_profile_confirmed = False
         self.sensor_profile_status = tk.StringVar(
             value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
@@ -1108,8 +1108,8 @@ class App(tk.Tk):
         self.sensor_profile_window = win
         win.title("MAP 1 — chọn mắt PID theo encoder")
         win.configure(bg=PANEL)
-        win.geometry("780x390")
-        win.minsize(730, 360)
+        win.geometry("780x455")
+        win.minsize(730, 415)
         win.transient(self)
         t1, t2, m1, m2, m3 = self.sensor_profile
         threshold1 = tk.StringVar(value=str(t1))
@@ -1136,6 +1136,27 @@ class App(tk.Tk):
             for i, state in enumerate(bits):
                 ttk.Checkbutton(group, text=f"S{i}", variable=state).grid(
                     row=0, column=i, padx=2)
+        # Quick presets only change the editor fields. The operator must
+        # explicitly apply them to ESP32; all 16 ADC channels remain sampled.
+        preset_bar = tk.Frame(win, bg=PANEL, padx=12, pady=4)
+        preset_bar.pack(fill="x")
+
+        def choose_preset(preset):
+            threshold1.set("650")
+            threshold2.set("1500")
+            masks = ((0x03FF, 0xFF80, 0xFFFF) if preset == "left"
+                     else (0xFF80, 0x03FF, 0xFFFF))
+            for stage_vars, mask in zip(values, masks):
+                for sensor_index, bit in enumerate(stage_vars):
+                    bit.set(bool(mask & (1 << sensor_index)))
+            feedback.set("Đã chọn preset " + ("TRÁI" if preset == "left" else "PHẢI") +
+                         ": 650/1500 ticks. Nhấn Áp dụng xuống ESP32 để lưu.")
+
+        self.label(preset_bar, "Cấu hình nhanh:", bg=PANEL).pack(side="left", padx=(0, 8))
+        ttk.Button(preset_bar, text="Trái (S0-S9 / S7-S15 / Full)",
+                   command=lambda: choose_preset("left")).pack(side="left", padx=(0, 8))
+        ttk.Button(preset_bar, text="Phải (S7-S15 / S0-S9 / Full)",
+                   command=lambda: choose_preset("right")).pack(side="left")
         feedback = tk.StringVar(value="Áp dụng khi robot đã STOP; không thay đổi PID gains.")
         self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER).pack(
             anchor="w", padx=12, pady=(7, 2))
