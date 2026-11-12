@@ -177,6 +177,8 @@ int32_t map1SensorMaxTicks = 0;
 int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
 // Map 2: four independent PID eye groups and three monotonic tick thresholds.
 // Defaults all 16 eyes in every stage; does not affect physical observations.
+// Disable MAP2 checkpoint stops; preserve continuous tick-based sensor stages.
+constexpr bool MAP2_CHECKPOINT_ENABLED = false;
 int32_t map2SensorTickEnds[3] = {1000, 2000, 3000};
 uint16_t map2SensorMasks[4] = {0xFFFFU,0xFFFFU,0xFFFFU,0xFFFFU};
 int32_t map2SensorMaxTravel = 0;
@@ -194,8 +196,6 @@ uint8_t map3BasePwms[4] = {140, 210, 140, 255};
 int32_t map3MaxTravelTicks = 0;
 uint32_t map2HoldStartMs = 0, map2StableSinceMs = 0;
 int32_t map2StableEncL = 0, map2StableEncR = 0;
-// Checkpoint hold disabled: MAP2 stage transitions do not stop for line alignment.
-constexpr bool MAP2_CHECKPOINT_ENABLED = false;
 constexpr uint32_t MAP2_STABLE_LINE_MS = 10;
 constexpr uint32_t MAP2_HOLD_TIMEOUT_MS = 1500;
 constexpr float MAP2_STABLE_LINE_ERROR = 12.0f;
@@ -219,6 +219,14 @@ static uint16_t map2PidSensorMask() {
     if (selectedMap != 2 || !autoMode) return 0xFFFFU;
     const int32_t traveled = map1SensorTravelTicks();
     if (traveled > map2SensorMaxTravel) map2SensorMaxTravel = traveled;
+    // Without checkpoint holds, select the sensor group directly by travel ticks.
+    // Preserve configured thresholds/masks and monotonic stage progress.
+    if (!MAP2_CHECKPOINT_ENABLED) {
+        if (map2SensorMaxTravel >= map2SensorTickEnds[2]) map2SensorActiveStage = 3;
+        else if (map2SensorMaxTravel >= map2SensorTickEnds[1]) map2SensorActiveStage = 2;
+        else if (map2SensorMaxTravel >= map2SensorTickEnds[0]) map2SensorActiveStage = 1;
+        else map2SensorActiveStage = 0;
+    }
     return map2SensorMasks[map2SensorActiveStage];
 }
 static uint16_t map3PidSensorMask() {
