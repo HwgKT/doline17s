@@ -1652,6 +1652,52 @@ class App(tk.Tk):
         self.prev = (t, left, right)
 
     def on_text(self, message):
+        side_state = re.fullmatch(
+            r"BUTTON_STATE phase=(CALIB|SELECT|READY|RUNNING) "
+            r"side=(LEFT|RIGHT|NONE) confirmed=([01])", message)
+        if side_state:
+            phase, side, confirmed = side_state.groups()
+            self.map1_side = None if side == "NONE" else side
+            self.map1_side_confirmed = confirmed == "1"
+            names = {"LEFT": "TRÁI", "RIGHT": "PHẢI", "NONE": "chưa chọn"}
+            self.map1_side_status.set(
+                f"MAP 1: {names[side]} | "+(
+                    "Đã xác nhận" if self.map1_side_confirmed
+                    else "Chờ hiệu chuẩn" if phase == "CALIB"
+                    else "Chưa xác nhận"))
+            self.update_control_buttons()
+        elif message.startswith("BUTTON_SIDE_CONFIRMED: "):
+            side=message.partition(": ")[2]
+            if side in ("LEFT","RIGHT"):
+                self.map1_side=side
+                self.map1_side_confirmed=True
+                self.map1_side_status.set(
+                    f"MAP 1: {'TRÁI' if side=='LEFT' else 'PHẢI'} | Đã xác nhận")
+                self.update_control_buttons()
+        elif message.startswith("BUTTON_SIDE: "):
+            side=message.partition(": ")[2]
+            if side in ("LEFT","RIGHT"):
+                self.map1_side=side
+                self.map1_side_confirmed=False
+                self.map1_side_status.set(
+                    f"MAP 1: {'TRÁI' if side=='LEFT' else 'PHẢI'} | Chưa xác nhận")
+                self.update_control_buttons()
+        elif message=="BUTTON_SIDE_CLEARED":
+            self.map1_side=None
+            self.map1_side_confirmed=False
+            self.map1_side_status.set("MAP 1: đã hủy bên — chọn lại")
+            self.update_control_buttons()
+        elif message.startswith("BUTTON_RUN "):
+            eye=re.search(r"eyes=(FULL16|TICK_MASK)", message)
+            if eye:
+                self.map1_eye_mode.set("FULL16" if eye.group(1)=="FULL16" else "TICK")
+        elif message=="ERR: SIDE_NOT_READY" or message=="ERR: BUTTON_START_NOT_READY":
+            self.map1_side_status.set("MAP 1: ESP32 từ chối — kiểm tra hiệu chuẩn/chọn bên")
+            if self.start_pending:
+                self.start_pending=False
+                self.set_auto_running(False)
+                self.finish_run_csv("AUTO BỊ TỪ CHỐI: "+message)
+            self.update_control_buttons()
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
