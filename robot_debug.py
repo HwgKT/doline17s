@@ -1698,6 +1698,16 @@ class App(tk.Tk):
                 self.set_auto_running(False)
                 self.finish_run_csv("AUTO BỊ TỪ CHỐI: "+message)
             self.update_control_buttons()
+        profile = re.fullmatch(
+            r"BUTTON_PROFILE side=(LEFT|RIGHT) T1=(\d+) T2=(\d+) "
+            r"M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) "
+            r"M3=([0-9A-Fa-f]{4}) confirmed=([01])", message)
+        if profile:
+            side, t1, t2, m1, m2, m3, confirmed = profile.groups()
+            self.map1_side_status.set(
+                f"MAP 1: {'TRÁI' if side == 'LEFT' else 'PHẢI'} | "
+                f"{t1}/{t2} | {m1}/{m2}/{m3} | "
+                + ("ESP32 OK" if confirmed == "1" else "Chưa xác nhận"))
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
@@ -2001,7 +2011,7 @@ class App(tk.Tk):
                         and getattr(self, "selected_map", None) == 1):
                     self.high_speed_status.set(
                         f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                        f"| 10k+ BASE→{self.high_speed_peak}"
+                        f"| {self.hs_late_start}+ BASE→{self.high_speed_peak}"
                     )
                 else:
                     self.high_speed_status.set(
