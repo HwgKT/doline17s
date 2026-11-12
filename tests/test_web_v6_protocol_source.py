@@ -42,9 +42,9 @@ class WebV6ProtocolTests(unittest.TestCase):
     def test_web_default_pid_is_map1_default(self):
         self.assertRegex(WEB, r'id="inputKp"[^>]+value="1\.6"')
         self.assertRegex(WEB, r'id="inputKd"[^>]+value="0\.8"')
-        self.assertRegex(WEB, r'id="inputBase"[^>]+value="130"')
-        self.assertIn('id="speedSlider" min="0" max="255" value="130"', WEB)
-        self.assertIn('("Kd", "0.8"), ("Base", "130")', APP)
+        self.assertRegex(WEB, r'id="inputBase"[^>]+value="140"')
+        self.assertIn('id="speedSlider" min="0" max="255" value="140"', WEB)
+        self.assertIn('("Kd", "0.8"), ("Base", "140")', APP)
 
     def test_legacy_bluetooth_features_are_not_claimed_as_supported(self):
         self.assertIn("Bluetooth Classic SPP", WEB)
