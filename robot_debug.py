@@ -490,7 +490,7 @@ class App(tk.Tk):
         pwm_row.pack(fill="x", pady=(1, 0))
         self.label(pwm_row, "PWM", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
-        self.pwm_var = tk.DoubleVar(value=130)
+        self.pwm_var = tk.DoubleVar(value=140)
         self.pwm_text = tk.StringVar(value="120 / 255")
         self.label(pwm_row, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
                    font=("Consolas", 9), width=9, anchor="e").pack(side="right")
@@ -520,7 +520,7 @@ class App(tk.Tk):
         ttk.Button(pid_row, text="Áp dụng", width=7,
                    command=self.apply_pid).pack(side="right", padx=(2, 0))
         for key, initial in (("Kp", "1.6"), ("Ki", "0"),
-                             ("Kd", "0.8"), ("Base", "130")):
+                             ("Kd", "0.8"), ("Base", "140")):
             field = tk.Frame(pid_row, bg=PANEL)
             field.pack(side="left", padx=(0, 4))
             self.label(field, key, bg=PANEL, fg=MUTED,
