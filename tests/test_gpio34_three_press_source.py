@@ -88,9 +88,9 @@ class Map1TwoButtonTests(unittest.TestCase):
         self.assertIn("map1SensorMaxTicks < 1500", PID)
 
     def test_map1_defaults_and_other_maps_preserved(self):
-        self.assertIn("pid_init(1.6f,0.0f,0.8f,130)", MAIN)
-        self.assertIn("MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150}", PID)
-        self.assertIn("MAP_DEFAULT_HS_PEAK_PWM = 180", PID)
+        self.assertIn("pid_init(1.6f,0.0f,0.8f,140)", MAIN)
+        self.assertIn("MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150}", PID)
+        self.assertIn("MAP_DEFAULT_HS_PEAK_PWM = 200", PID)
         self.assertIn("MAP1_LATE_BOOST_START_TICKS = 8000", PID)
         self.assertIn("mapId == 1 ? MAP_DEFAULT_HS_PEAK_PWM : 240", PID)
         self.assertIn("MAP2_CHECKPOINT_ENABLED = false", PID)
@@ -104,8 +104,8 @@ class Map1TwoButtonTests(unittest.TestCase):
         self.assertIn('self.send_command("SIDE:" + side)', APP)
         self.assertIn('SIDE_START:TICK', APP)
         self.assertIn('SIDE_START:FULL', APP)
-        self.assertIn('("Kd", "0.8"), ("Base", "130")', APP)
-        self.assertIn('self.pwm_var = tk.DoubleVar(value=130)', APP)
+        self.assertIn('("Kd", "0.8"), ("Base", "140")', APP)
+        self.assertIn('self.pwm_var = tk.DoubleVar(value=140)', APP)
 
 
 if __name__ == "__main__":
