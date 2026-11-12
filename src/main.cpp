@@ -692,7 +692,7 @@ void loop() {
       const uint8_t stopMap=pid_get_selected_map();
       const int32_t stopEnc=pid_get_run_encoder_progress();
       // Keep FINISH_CANDIDATE/CONFIRMED before STOP clears PID state.
-      if(stopMap==1)flushMap1Logs(64);
+      if(stopMap==1)flushMap1Logs(3);
       safeStop();
       // Drop queued pre-stop telemetry before announcing terminal state.
       btDropPendingTelemetry();
@@ -768,8 +768,27 @@ void loop() {
         (unsigned long)millis());
       reply(b);
     }
-    // Event formatting / SPP replies happen outside pid_line_follow_step().
-    if(pid_get_selected_map()==1)flushMap1Logs(2);
+    // Event draining is rate-limited below, outside the control path.
+  }
+  // Drain at most one event / 20 ms; retain pending events after AUTO STOP.
+  // No effect on the other two maps.
+  if(pid_get_selected_map()==1){
+    static uint32_t lastMap1LogDrainMs=0;
+    if((uint32_t)(now-lastMap1LogDrainMs)>=20U){
+      lastMap1LogDrainMs=now;
+      flushMap1Logs(1);
+    }
+    static uint32_t lastMap1DropReportMs=0;
+    static uint32_t lastMap1DropReported=0;
+    const uint32_t dropped=pid_map1_log_dropped();
+    if(dropped!=lastMap1DropReported &&
+       (uint32_t)(now-lastMap1DropReportMs)>=1000U){
+      lastMap1DropReportMs=now;lastMap1DropReported=dropped;
+      char diag[88];
+      snprintf(diag,sizeof(diag),"MAP1_EVT_DROP total=%lu t_ms=%lu",
+               (unsigned long)dropped,(unsigned long)now);
+      reply(diag);
+    }
   }
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
