@@ -931,7 +931,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint16_t mask = sensor_get_line_bits();
     // Stage uses monotonic maximum forward progress, not time or raw encoder
     // sum; wheel reversal during SEARCH must not reactivate earlier zones.
-    if (ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 && !highSpeedAborted) {
+    if (ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 2 && selectedMap <= 3 && !highSpeedAborted) {
         const int32_t progress = runEncoderProgress();
         if (progress > highSpeedMaxProgress) highSpeedMaxProgress = progress;
         if (isSearchTurn() && highSpeedMaxProgress < HS_BRAKE_END_ENC) {
