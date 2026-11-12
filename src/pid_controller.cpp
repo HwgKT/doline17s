@@ -144,8 +144,8 @@ constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // MAP 1 and MAP 2 use their selected fixed BASE. MAP 3 has an independent,
 // configurable four-stage BASE schedule selected by encoder travel.
-// Map 1 only: arm the late BASE boost after 7,600 forward-progress ticks.
-constexpr int32_t MAP1_LATE_BOOST_START_TICKS = 7600;
+// Map 1 only: arm the late BASE boost after 8,000 forward-progress ticks.
+constexpr int32_t MAP1_LATE_BOOST_START_TICKS = 8000;
 constexpr float MAP1_LATE_BOOST_CENTER_ERROR = 15.0f;
 int32_t map1MaxProgress = 0;
 bool map1LateBoostEngaged = false;
@@ -1498,7 +1498,7 @@ void pid_line_follow_step(void) {
              highSpeedStage == HS_BRAKE || highSpeedStage == HS_CORNER_HOLD)) {
             base = highSpeedForwardTarget(highSpeedMaxProgress, base);
         }
-        // Existing Map 1 late boost remains the final override after 7600 ticks.
+        // Existing Map 1 late boost remains the final override after 8000 ticks.
         if (map1ReadyForBoost && centeredForBoost)
             base = (float)highSpeedPeakPwm;
         governedForwardSpeed = base;
