@@ -349,13 +349,13 @@ static void map1PushLog(uint8_t type,uint8_t source=MAP1_SOURCE_NONE,
  e.duration_ms=duration;e.type=type;e.source=source;e.direction=dir;e.extra=extra;
  map1LogWrite=next;
 }
-bool pid_pop_map1_log(Map1LogEvent *out){
+static bool popMap1LogInternal(Map1LogEvent *out){
  if(!out||map1LogRead==map1LogWrite)return false;
  *out=map1LogRing[map1LogRead];
  map1LogRead=(uint8_t)((map1LogRead+1U)%MAP1_LOG_CAPACITY);
  return true;
 }
-uint32_t pid_map1_log_dropped(void){return map1LogDropped;}
+static uint32_t map1LogDroppedInternal(void){return map1LogDropped;}
 
 static int16_t clampPwm(float value) {
     if (value <= 0.0f) return 0;
@@ -689,6 +689,10 @@ static TurnState searchStateFor(TurnState direction) {
     return direction == TURN_LEFT ? SEARCH_LEFT : SEARCH_RIGHT;
 }
 } // namespace
+
+// Public C-linkage entry points; ring implementation is private to namespace.
+bool pid_pop_map1_log(Map1LogEvent *out) { return popMap1LogInternal(out); }
+uint32_t pid_map1_log_dropped(void) { return map1LogDroppedInternal(); }
 
 void pid_init(float kp, float ki, float kd, int16_t baseSpeed) {
     pidConfig.Kp = kp;
