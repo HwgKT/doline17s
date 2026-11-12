@@ -324,6 +324,38 @@ uint32_t acquireSinceMs = 0, missingSinceMs = 0;
 uint32_t confirmedLosses = 0, reacquisitions = 0;
 float governedForwardSpeed = 0.0f;
 
+// The high-speed PID writes only POD events to this ring. The main loop drains it.
+constexpr uint8_t MAP1_LOG_CAPACITY=64;
+Map1LogEvent map1LogRing[MAP1_LOG_CAPACITY]{};
+uint8_t map1LogRead=0,map1LogWrite=0;
+uint32_t map1LogDropped=0;
+uint8_t map1EarlySource=MAP1_SOURCE_NONE, map1SearchSource=MAP1_SOURCE_NONE;
+bool map1SearchWasActive=false,map1TurnWasActive=false,map1BoostWasActive=false;
+uint32_t map1SearchStartMs=0,map1TurnStartMs=0;
+int8_t map1PreviousPwmSignL=0,map1PreviousPwmSignR=0;
+static int8_t map1PwmSign(int16_t x){return (x>0)-(x<0);}
+static void map1PushLog(uint8_t type,uint8_t source=MAP1_SOURCE_NONE,
+                        int8_t dir=0,uint16_t duration=0,uint8_t extra=0){
+ if(selectedMap!=1 || !autoMode)return;
+ uint8_t next=(uint8_t)((map1LogWrite+1U)%MAP1_LOG_CAPACITY);
+ if(next==map1LogRead){++map1LogDropped;return;}
+ Map1LogEvent &e=map1LogRing[map1LogWrite];
+ e.t_ms=millis();e.run_enc=map1MaxProgress;
+ e.sensor_bits=sensor_get_line_bits();e.active_mask=map1PidSensorMask();
+ e.pwm_l=motor_get_left_speed();e.pwm_r=motor_get_right_speed();
+ float v=lastError*10.0f;
+ e.err_x10=(int16_t)(v>32767.f?32767.f:v< -32768.f?-32768.f:v);
+ e.duration_ms=duration;e.type=type;e.source=source;e.direction=dir;e.extra=extra;
+ map1LogWrite=next;
+}
+bool pid_pop_map1_log(Map1LogEvent *out){
+ if(!out||map1LogRead==map1LogWrite)return false;
+ *out=map1LogRing[map1LogRead];
+ map1LogRead=(uint8_t)((map1LogRead+1U)%MAP1_LOG_CAPACITY);
+ return true;
+}
+uint32_t pid_map1_log_dropped(void){return map1LogDropped;}
+
 static int16_t clampPwm(float value) {
     if (value <= 0.0f) return 0;
     if (value >= pidConfig.maxSpeed) return pidConfig.maxSpeed;
@@ -469,6 +501,9 @@ static void resetLineTracking() {
     highSpeedMaxProgress = 0;
     map1MaxProgress = 0;
     map1LateBoostEngaged = false;
+    map1SearchWasActive=map1TurnWasActive=map1BoostWasActive=false;
+    map1EarlySource=map1SearchSource=MAP1_SOURCE_NONE;
+    map1PreviousPwmSignL=map1PreviousPwmSignR=0;
     map1SensorMaxTicks = 0;
     map2MaxProgress = 0;
     map2SensorMaxTravel = 0;
@@ -562,8 +597,14 @@ static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
     directRightEdgeFrames = isolatedRight
         ? (uint8_t)(directRightEdgeFrames < EARLY_TURN_DIRECT_EDGE_FRAMES
             ? directRightEdgeFrames + 1 : EARLY_TURN_DIRECT_EDGE_FRAMES) : 0;
-    if (directLeftEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) return -1;
-    if (directRightEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) return 1;
+    if (directLeftEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) {
+        if(selectedMap==1)map1EarlySource=MAP1_SOURCE_DIRECT_EDGE;
+        return -1;
+    }
+    if (directRightEdgeFrames >= EARLY_TURN_DIRECT_EDGE_FRAMES) {
+        if(selectedMap==1)map1EarlySource=MAP1_SOURCE_DIRECT_EDGE;
+        return 1;
+    }
 
     // Centroid trend remains the existing primary detection method.
     if (blackCount > 6 || oppositeEdges) {
@@ -614,8 +655,14 @@ static int8_t detectEarlyEdgeTurn(uint16_t physicalMask, uint32_t now) {
         ? (uint8_t)(edgeLeftFrames < 3 ? edgeLeftFrames + 1 : 3) : 0;
     edgeRightFrames = rightReached
         ? (uint8_t)(edgeRightFrames < 3 ? edgeRightFrames + 1 : 3) : 0;
-    if (edgeLeftFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) return -1;
-    if (edgeRightFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) return 1;
+    if (edgeLeftFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) {
+        if(selectedMap==1)map1EarlySource=MAP1_SOURCE_CENTROID;
+        return -1;
+    }
+    if (edgeRightFrames >= EARLY_TURN_EDGE_CONFIRM_FRAMES) {
+        if(selectedMap==1)map1EarlySource=MAP1_SOURCE_CENTROID;
+        return 1;
+    }
     return 0;
 }
 static bool isSearchTurn() {
@@ -898,14 +945,19 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     // FINISH is now armed: 16/16 black for three consecutive PID samples
     // stops the robot, using the existing finish logic.
     if (finishDetectionArmed && bitCount16(mask) == FULL_LINE_MIN_SENSORS) {
+        if(selectedMap==1 && fullLineFrames==0)
+            map1PushLog(MAP1_LOG_FINISH_CANDIDATE,MAP1_SOURCE_NONE,0,0,1);
         if (fullLineFrames < FINISH_CONFIRM_FRAMES) ++fullLineFrames;
         if (fullLineFrames >= FINISH_CONFIRM_FRAMES) {
+            if(selectedMap==1)map1PushLog(MAP1_LOG_FINISH_OK,MAP1_SOURCE_NONE,0,0,fullLineFrames);
             finishLineLatched = true;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             return LINE_CASE_STOPPED;
         }
     } else {
+        if(selectedMap==1 && fullLineFrames>0)
+            map1PushLog(MAP1_LOG_FINISH_CANCEL,MAP1_SOURCE_NONE,0,0,fullLineFrames);
         fullLineFrames = 0;
     }
 
@@ -1062,6 +1114,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                  lastKnownPosition <= -EDGE_CORNER_IMMEDIATE_SEARCH_ERROR);
             if (edgeCornerLost) {
                 turnState = searchStateFor(turnState);
+                if(selectedMap==1)map1SearchSource=MAP1_SOURCE_IMMEDIATE;
                 searchStartedMs = now;
                 centeredTurnFrames = 0;
                 turnMissing = false;
@@ -1188,6 +1241,35 @@ void pid_line_follow_step(void) {
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
+    if(selectedMap==1){
+        const uint32_t stamp=millis();
+        const bool searching=isSearchTurn();
+        const int8_t direction=(turnState==TURN_LEFT||turnState==SEARCH_LEFT)?-1:
+                               (turnState==TURN_RIGHT||turnState==SEARCH_RIGHT)?1:0;
+        if(searching && !map1SearchWasActive){
+            map1SearchStartMs=stamp;
+            map1SearchSource=earlyTurnActive?map1EarlySource:
+                 (map1SearchSource==MAP1_SOURCE_IMMEDIATE?MAP1_SOURCE_IMMEDIATE:MAP1_SOURCE_NORMAL);
+            map1PushLog(MAP1_LOG_SEARCH_IN,map1SearchSource,direction);
+        }else if(!searching && map1SearchWasActive){
+            const uint32_t dt=stamp-map1SearchStartMs;
+            map1PushLog(MAP1_LOG_SEARCH_OUT,map1SearchSource,0,
+                        (uint16_t)(dt>65535U?65535U:dt));
+            map1SearchSource=MAP1_SOURCE_NONE;
+            map1EarlySource=MAP1_SOURCE_NONE;
+        }
+        map1SearchWasActive=searching;
+        const bool turning=turnState!=TURN_NONE;
+        if(turning && !map1TurnWasActive){
+            map1TurnStartMs=stamp;
+            map1PushLog(MAP1_LOG_TURN_IN,searching?map1SearchSource:MAP1_SOURCE_SHARP,direction);
+        }else if(!turning && map1TurnWasActive){
+            const uint32_t dt=stamp-map1TurnStartMs;
+            map1PushLog(MAP1_LOG_TURN_OUT,MAP1_SOURCE_NONE,0,
+                        (uint16_t)(dt>65535U?65535U:dt));
+        }
+        map1TurnWasActive=turning;
+    }
     if (map1Route.active && currentCase != LINE_CASE_STOPPED) {
         const bool validRouteLine =
             finishDetectionArmed && lineLocked &&
@@ -1303,6 +1385,14 @@ void pid_line_follow_step(void) {
         float base = (float)pidConfig.baseSpeed;
         if (map1ReadyForBoost && centeredForBoost)
             base = (float)highSpeedPeakPwm;
+        if(selectedMap==1){
+            const bool boosted=map1ReadyForBoost&&centeredForBoost&&
+                               highSpeedPeakPwm!=pidConfig.baseSpeed;
+            if(boosted!=map1BoostWasActive){
+                map1BoostWasActive=boosted;
+                map1PushLog(boosted?MAP1_LOG_BOOST_ON:MAP1_LOG_BOOST_OFF);
+            }
+        }
         governedForwardSpeed = base;
         const float correction = lastCorrection;
 
@@ -1351,6 +1441,22 @@ void pid_line_follow_step(void) {
     } else {
         clearPidState();
         motor_stop(); // Safe stop after confirmed line loss or any sensor fault.
+    }
+    if(selectedMap==1){
+        if(currentCase!=LINE_CASE_NORMAL_PID && map1BoostWasActive){
+            map1BoostWasActive=false;
+            map1PushLog(MAP1_LOG_BOOST_OFF);
+        }
+        const int16_t pl=motor_get_left_speed(),pr=motor_get_right_speed();
+        const int8_t sl=map1PwmSign(pl),sr=map1PwmSign(pr);
+        // A reversal is emitted only for a direct nonzero + to - (or - to +)
+        // transition; zero crossings are tracked via the last nonzero sign.
+        if(sl && map1PreviousPwmSignL && sl!=map1PreviousPwmSignL)
+            map1PushLog(MAP1_LOG_PWM_REVERSE,MAP1_SOURCE_NONE,-1);
+        if(sr && map1PreviousPwmSignR && sr!=map1PreviousPwmSignR)
+            map1PushLog(MAP1_LOG_PWM_REVERSE,MAP1_SOURCE_NONE,1);
+        if(sl)map1PreviousPwmSignL=sl;
+        if(sr)map1PreviousPwmSignR=sr;
     }
 }
 
