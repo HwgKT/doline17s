@@ -90,7 +90,7 @@ class Map1TwoButtonTests(unittest.TestCase):
     def test_map1_defaults_and_other_maps_preserved(self):
         self.assertIn("pid_init(1.6f,0.0f,0.8f,140)", MAIN)
         self.assertIn("MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150}", PID)
-        self.assertIn("MAP_DEFAULT_HS_PEAK_PWM = 200", PID)
+        self.assertIn("MAP_DEFAULT_HS_PEAK_PWM = 180", PID)
         self.assertIn("MAP1_LATE_BOOST_START_TICKS = 8000", PID)
         self.assertIn("mapId == 1 ? MAP_DEFAULT_HS_PEAK_PWM : 240", PID)
         self.assertIn("MAP2_CHECKPOINT_ENABLED = false", PID)
