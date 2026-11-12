@@ -360,6 +360,14 @@ void command(const String &raw) {
     int32_t t1=0,t2=0;
     uint16_t m1=0,m2=0,m3=0;
     pid_get_map1_sensor_profile(&t1,&t2,&m1,&m2,&m3);
+    // Report the side profile that START will actually use, not the
+    // generic editor's unused mask. This keeps SPP/web readbacks aligned.
+    if(physicalCalibrationReady() && physicalSide!=SIDE_NONE) {
+      t1=650;t2=1500;
+      m1=physicalSide==SIDE_LEFT?0x03FFU:0xFF80U;
+      m2=physicalSide==SIDE_LEFT?0xFF80U:0x03FFU;
+      m3=0xFFFFU;
+    }
     char b[130];
     snprintf(b,sizeof(b),
       "SENSOR_PROFILE T1=%ld T2=%ld M1=%04X M2=%04X M3=%04X",
