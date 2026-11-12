@@ -92,7 +92,7 @@ constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 110.0f;
 constexpr float HS_HOLD_CENTER_ERROR = 15.0f; // valid line position near center
-int16_t highSpeedPeakPwm = 180; // Map 1 default; Map 2/3 select their own 240 PWM default.
+int16_t highSpeedPeakPwm = 200; // Map 1 default; Map 2/3 select their own 240 PWM default.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
     HS_FINISHED=4, HS_ABORTED=5, HS_CORNER_HOLD=6
@@ -140,8 +140,8 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1000, 1700}  // MAP 3
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
-constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
-constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 180;
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150};
+constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 200;
 // MAP 1 and MAP 2 use their selected fixed BASE. MAP 3 has an independent,
 // configurable four-stage BASE schedule selected by encoder travel.
 // Map 1 only: arm the late BASE boost after 8,000 forward-progress ticks.
