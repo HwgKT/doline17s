@@ -12,6 +12,7 @@
 #include "spp_debug.h"
 
 void startPhysicalMap1(bool fullEyes);
+void handlePhysicalButtons(uint32_t now);
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
@@ -73,7 +74,6 @@ PhysicalButtonEvent pollPhysicalButton(PhysicalButton &b, uint32_t now) {
   return e;
 }
 void reportPhysicalSide();
-void handlePhysicalButtons(uint32_t now);
 uint32_t lastButton34LedMs=0;
 
 void ledWrite(bool on) {
