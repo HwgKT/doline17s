@@ -510,6 +510,7 @@ void command(const String &raw) {
       physicalPhase=PHYS_WAIT_WHITE;
       physicalSide=SIDE_NONE;
       reply("CAL_WHITE_ACCEPTED");
+      reportPhysicalSide();
     }else reply("CAL_BUSY");
     return;
   }
@@ -521,6 +522,7 @@ void command(const String &raw) {
       physicalPhase=PHYS_WAIT_BLACK;
       physicalSide=SIDE_NONE;
       reply("CAL_BLACK_ACCEPTED");
+      reportPhysicalSide();
     }else reply("CAL_BUSY");
     return;
   }
