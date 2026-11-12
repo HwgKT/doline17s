@@ -793,6 +793,10 @@ class App(tk.Tk):
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
+        self.map1_side = None
+        self.map1_side_confirmed = False
+        self.map1_side_status.set("MAP 1: đang đọc trạng thái nút...")
+        self.send_command("SIDE:STATUS")
         self.send_command("HS_PEAK")
         self.send_command("ROUTE_LOCK")
         self.sensor_profile_confirmed = False
@@ -825,6 +829,9 @@ class App(tk.Tk):
         self.route_status.set("ROUTE: mất kết nối ESP32")
         self.sensor_profile_confirmed = False
         self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
+        self.map1_side = None
+        self.map1_side_confirmed = False
+        self.map1_side_status.set("MAP 1: mất kết nối")
         self.map2_sensor_confirmed = False
         self.map2_sensor_status.set("MAP 2 mắt PID: mất kết nối ESP32")
         self.map3_profile_confirmed = False
@@ -1346,6 +1353,21 @@ class App(tk.Tk):
         self.log(f"Đã chọn MAP {map_id}; các lượt START kế tiếp lưu trong logs/map_{map_id:02d}/")
         self.update_control_buttons()
 
+    def choose_map1_side(self, side):
+        if self.selected_map != 1:
+            self.log("Chọn MAP 1 trước khi đặt bên.")
+            return
+        if self.send_command("SIDE:" + side):
+            self.map1_side_confirmed = False
+            self.map1_side_status.set("MAP 1: chờ ESP32 xác nhận...")
+            self.update_control_buttons()
+
+    def clear_map1_side(self):
+        if self.send_command("SIDE:CLEAR"):
+            self.map1_side_confirmed = False
+            self.map1_side_status.set("MAP 1: chờ ESP32 hủy bên...")
+            self.update_control_buttons()
+
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
@@ -1358,6 +1380,7 @@ class App(tk.Tk):
                      and self.hs_peak_confirmed is not None
                      and not self.hs_peak_dirty
                      and self.calibration_ok and self.selected_map is not None
+                     and (self.selected_map != 1 or self.map1_side_confirmed)
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
@@ -1366,6 +1389,10 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        side_editable = connected and self.selected_map == 1 and not locked
+        for button in (self.map1_left_btn, self.map1_right_btn, self.map1_clear_btn):
+            button.configure(state="normal" if side_editable else "disabled")
+        self.map1_eye_combo.configure(state="readonly" if side_editable else "disabled")
         if hasattr(self,"map2_sensor_btn"):
             self.map2_sensor_btn.configure(
                 state="normal" if self.selected_map == 2 else "disabled")
@@ -1480,8 +1507,10 @@ class App(tk.Tk):
         self.start_confirmed = False
         self.csv_status.set(f"CSV GHI: {recorder.path.name}")
         self.log(f"CSV BẮT ĐẦU: {recorder.path}")
-        # Firmware receives the same MAP ID as the CSV recorder in one START command.
-        if self.send_command(f"AUTO:{self.selected_map}"):
+        # GUI and physical START share the firmware's confirmed side state.
+        auto_command = ("SIDE_START:FULL" if self.map1_eye_mode.get()=="FULL16"
+                        else "SIDE_START:TICK") if self.selected_map == 1 else f"AUTO:{self.selected_map}"
+        if self.send_command(auto_command):
             self.start_pending = True
             self.control_state.set("Đã gửi AUTO — chờ ESP32 xác nhận.")
             self.update_control_buttons()
