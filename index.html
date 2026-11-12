@@ -1324,51 +1324,13 @@
 
     // =================== KẾT NỐI BLUETOOTH (BLE) ===================
     async function toggleBleConnection() {
-      if (isConnected && connectionType === 'ble') {
-        disconnectBle();
-        return;
-      }
-
-      if (!navigator.bluetooth) {
-        alert('Trình duyệt của bạn chưa hỗ trợ Web Bluetooth API. Hãy sử dụng Google Chrome hoặc Microsoft Edge!');
-        return;
-      }
-
-      try {
-        log('Đang quét thiết bị Bluetooth...', 'rx');
-        bleDevice = await navigator.bluetooth.requestDevice({
-          filters: [
-            { namePrefix: 'ESP32' },
-            { services: [NORDIC_SERVICE_UUID] }
-          ],
-          optionalServices: [NORDIC_SERVICE_UUID]
-        });
-
-        bleDevice.addEventListener('gattserverdisconnected', onBleDisconnected);
-
-        log(`Đang kết nối tới ${bleDevice.name || 'ESP32'}...`, 'rx');
-        bleServer = await bleDevice.gatt.connect();
-
-        log('Đang tìm dịch vụ Nordic UART...', 'rx');
-        const service = await bleServer.getPrimaryService(NORDIC_SERVICE_UUID);
-
-        rxCharacteristic = await service.getCharacteristic(RX_CHAR_UUID);
-        txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
-
-        // Bật notify nhận phản hồi từ ESP32
-        await txCharacteristic.startNotifications();
-        txCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
-          handleBleNotification(e.target.value);
-        });
-
-        connectionType = 'ble';
-        updateConnectionStatus(true, 'Bluetooth (BLE)');
-        log('Kết nối Bluetooth THÀNH CÔNG!', 'rx');
-        await sendCommand('PID');
-      } catch (err) {
-        log(`Lỗi kết nối Bluetooth: ${err.message}`, 'err');
-        updateConnectionStatus(false);
-      }
+      // Firmware mainHighSpeedv6 exports Bluetooth Classic SPP, NOT BLE GATT.
+      const message = 'Firmware v6 dùng Bluetooth Classic SPP (LineRobot). ' +
+        'Web Bluetooth BLE Nordic UART không tương thích. ' +
+        'Hãy ghép đôi thiết bị trong Windows và chọn cổng COM Bluetooth bằng Web Serial, ' +
+        'hoặc dùng ứng dụng Python robot_debug.py.';
+      log(message, 'err');
+      alert(message);
     }
 
     function onBleDisconnected() {
@@ -1401,11 +1363,13 @@
 
         serialWriter = serialPort.writable.getWriter();
         connectionType = 'serial';
-        updateConnectionStatus(true, 'USB Serial (115200)');
-        log('Đã mở cổng USB Serial thành công!', 'rx');
+        updateConnectionStatus(true, 'COM SPP (115200)');
+        log('Đã mở cổng COM. Firmware v6 truyền bằng Bluetooth Classic SPP.', 'rx');
 
         readSerialLoop();
-        await sendCommand('PID');
+        // Firmware SPP sends 72-byte binary telemetry by default, while
+        // this web page consumes text ACKs. Disable the binary stream first.
+        if(await sendCommand('STREAM:0')) await refreshV6Status();
       } catch (err) {
         log(`Lỗi cổng Serial: ${err.message}`, 'err');
         updateConnectionStatus(false);
@@ -1545,6 +1509,7 @@
 
     function handleIncomingData(raw) {
       log(`RX <- ${raw}`, 'rx');
+      if(handleV6Response(raw.trim())) return;
 
       // 1. Nhận chuỗi trạng thái 16 mắt cảm biến: "SENSORS: 0000001100000000"
       if (raw.includes('SENSORS:')) {
@@ -1656,6 +1621,7 @@
           document.getElementById('inputBase').value = baseMatch[1];
           document.getElementById('speedSlider').value = baseMatch[1];
           document.getElementById('speedDisplay').textContent = `${baseMatch[1]} / 255`;
+          renderWebV6State();
         }
       }
 
@@ -1719,8 +1685,6 @@
       } else if (key === 'D' || key === 'ARROWRIGHT') {
         highlightBtn('btnRight', true);
         sendCommand('R');
-      } else if (key === 'G') {
-        triggerUltraGrip();
       } else if (key === ' ' || key === 'ESCAPE') {
         highlightBtn('btnStop', true);
         sendCommand('S');
@@ -1799,56 +1763,6 @@
     }
 
     // =================== CÁC HÀM XỬ LÝ SIÊU BÁM & PID ===================
-    function triggerUltraGrip() {
-      sendCommand('BAM');
-      setActiveProfileChip('chipGrip', '🔥 Siêu Bám Pin 3S');
-      document.getElementById('inputKp').value = '1.45';
-      document.getElementById('inputKd').value = '0.00';
-      document.getElementById('inputBase').value = '105';
-      
-      const badge = document.getElementById('pidModeBadge');
-      badge.textContent = 'SIÊU BÁM (AUTO ON)';
-      badge.style.background = 'linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(239, 68, 68, 0.3))';
-      badge.style.color = '#fbbf24';
-      badge.style.border = '1px solid #f59e0b';
-      log('Đã kích hoạt SIÊU BÁM SÀN (PIN 3S) & BẬT AUTO CHẠY NGAY!', 'rx');
-    }
-
-    function selectProfile(type) {
-      if (type === 'GRIP') {
-        triggerUltraGrip();
-      } else if (type === '3S') {
-        sendCommand('3S');
-        setActiveProfileChip('chip3S', '🛡️ Pin 3S Chuẩn');
-        document.getElementById('inputKp').value = '1.55';
-        document.getElementById('inputKd').value = '0.00';
-        document.getElementById('inputBase').value = '115';
-      } else if (type === '2S') {
-        sendCommand('2S');
-        setActiveProfileChip('chip2S', '🔋 Pin 2S An Toàn');
-        document.getElementById('inputKp').value = '1.55';
-        document.getElementById('inputKd').value = '0.00';
-        document.getElementById('inputBase').value = '145';
-      } else if (type === 'RACE') {
-        sendCommand('STAGE2');
-        setActiveProfileChip('chipRace', '🏁 Race 10s');
-        document.getElementById('inputKp').value = '1.65';
-        document.getElementById('inputKd').value = '0.00';
-        document.getElementById('inputBase').value = '135';
-      }
-    }
-
-    function setActiveProfileChip(chipId, labelText) {
-      ['chipGrip', 'chip3S', 'chip2S', 'chipRace'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.remove('active');
-      });
-      const activeEl = document.getElementById(chipId);
-      if (activeEl) activeEl.classList.add('active');
-      const label = document.getElementById('activeProfileLabel');
-      if (label) label.textContent = labelText;
-    }
-
     async function applyCustomPid() {
       const kp = Number(document.getElementById('inputKp').value);
       const ki = Number(document.getElementById('inputKi').value);
