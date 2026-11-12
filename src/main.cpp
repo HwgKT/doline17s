@@ -20,7 +20,7 @@ constexpr uint32_t CAL_WHITE_LED_BLINK_MS=40; // fast, GPIO2 toggle interval
 constexpr uint32_t CAL_BLACK_LED_BLINK_MS=90; // slower, GPIO2 toggle interval
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 // FINISH is a 16/16 BLACK pad. START may occur on BLACK, WHITE or a line.
-// Both GUI and GPIO34 share the same AUTO safety/validation checks.
+// AUTO START and calibration are controlled through SPP commands.
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
 uint8_t manualSpeed=120;
@@ -29,31 +29,12 @@ uint32_t streamPeriodUs=1000000UL/300;
 uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 BtTxStats lastTxStats{};
-// Each boot requires physical presses WHITE -> BLACK -> START.
-// A successful START keeps the button usable for subsequent runs; calibration
-// can also be restarted explicitly through CAL_WHITE via SPP.
-enum Button34Phase : uint8_t {
-  BUTTON34_WHITE_NEXT,
-  BUTTON34_WHITE_CAPTURING,
-  BUTTON34_BLACK_NEXT,
-  BUTTON34_BLACK_CAPTURING,
-  BUTTON34_START_NEXT,
-  BUTTON34_START_REUSE
-};
-Button34Phase button34Phase=BUTTON34_WHITE_NEXT;
-uint32_t lastButton34LedMs=0;
+// LED calibration indication is independent of physical input buttons.
+uint32_t lastCalibrationLedMs=0;
 
 void ledWrite(bool on) {
   ledOn=on;
   digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
-}
-void setButton34Phase(Button34Phase phase) {
-  button34Phase=phase;
-  lastButton34LedMs=millis();
-  // Only illuminate the LED during an active calibration capture.
-  // CAL_WHITE_DONE and CAL_OK_SAVED turn it OFF until the next press.
-  ledWrite(phase==BUTTON34_WHITE_CAPTURING ||
-           phase==BUTTON34_BLACK_CAPTURING);
 }
 void reply(const String &line) { btSendLine(line); }
 void safeStop() {
@@ -424,7 +405,6 @@ void command(const String &raw) {
     if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
     safeStop();
     if(sensor_capture_white()){
-      setButton34Phase(BUTTON34_WHITE_CAPTURING);
       reply("CAL_WHITE_ACCEPTED");
     }else reply("CAL_BUSY");
     return;
@@ -434,7 +414,6 @@ void command(const String &raw) {
     if(sensor_calibration_state()!=CAL_WHITE_READY){reply("CAL_NEED_WHITE");return;}
     safeStop();
     if(sensor_capture_black()){
-      setButton34Phase(BUTTON34_BLACK_CAPTURING);
       reply("CAL_BLACK_ACCEPTED");
     }else reply("CAL_BUSY");
     return;
@@ -500,23 +479,17 @@ void connectionState(uint32_t now) {
     btPrevious=connected;
   }
 }
-// Calibration indicator has priority over the Bluetooth LED:
-// blink only while capturing; OFF after each completed calibration step.
+// Preserve GPIO2 calibration and Bluetooth indication without GPIO34 states.
 void updateLedIndicator(uint32_t now) {
+  const CalState state = sensor_calibration_state();
   const uint32_t blinkMs =
-    button34Phase==BUTTON34_WHITE_CAPTURING ? CAL_WHITE_LED_BLINK_MS :
-    button34Phase==BUTTON34_BLACK_CAPTURING ? CAL_BLACK_LED_BLINK_MS : 0U;
+    state==CAL_WHITE_RUNNING ? CAL_WHITE_LED_BLINK_MS :
+    state==CAL_BLACK_RUNNING ? CAL_BLACK_LED_BLINK_MS : 0U;
   if(blinkMs) {
-    if((uint32_t)(now-lastButton34LedMs)>=blinkMs) {
-      lastButton34LedMs=now;
+    if((uint32_t)(now-lastCalibrationLedMs)>=blinkMs) {
+      lastCalibrationLedMs=now;
       ledWrite(!ledOn);
     }
-    return;
-  }
-  // Do not let a connected Bluetooth SPP session relight GPIO2 while
-  // waiting for CAL_WHITE, CAL_BLACK or START.
-  if(button34Phase!=BUTTON34_START_REUSE){
-    if(ledOn) ledWrite(false);
     return;
   }
   if(sppStarted && btConnected()){
@@ -589,35 +562,6 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  // GPIO34 physical 3-press workflow: WHITE -> BLACK -> START.
-  // GPIO34 itself is debounced once per LOW press in sensor.cpp.
-  if(sensor_start_button_pressed()){
-    if(pid_is_auto_mode() || manualActive){
-      reply("ERR: BUTTON34_REQUIRES_STOPPED");
-    }else if(adcBenchActive()){
-      reply("ERR: ADC_BENCH_ACTIVE");
-    }else if(button34Phase==BUTTON34_WHITE_NEXT){
-      reply("BUTTON34: CAL_WHITE_REQUEST");
-      command("CAL_WHITE"); // changes phase only on accepted capture
-    }else if(button34Phase==BUTTON34_WHITE_CAPTURING){
-      reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
-    }else if(button34Phase==BUTTON34_BLACK_NEXT){
-      if(sensor_is_calibrating() ||
-         sensor_calibration_state()!=CAL_WHITE_READY){
-        reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
-      }else{
-        reply("BUTTON34: CAL_BLACK_REQUEST");
-        command("CAL_BLACK");
-      }
-    }else if(button34Phase==BUTTON34_BLACK_CAPTURING){
-      reply("ERR: BUTTON34_WAIT_CAL_BLACK_DONE");
-    }else{
-      // Reuse the same AUTO validation as the GUI (no black-pad requirement).
-      reply("BUTTON34: START_REQUEST");
-      command("AUTO");
-      if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
-    }
-  }
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
   if(adcBenchActive())adcBenchStep();
@@ -631,15 +575,11 @@ void loop() {
   switch(sensor_take_calibration_event()){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
     case CAL_WHITE_DONE:
-      setButton34Phase(BUTTON34_BLACK_NEXT); // LED OFF, ready for BLACK press
       reply("CAL_WHITE_DONE");break;
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
     case CAL_SAVED:
-      setButton34Phase(BUTTON34_START_NEXT);
       reply("CAL_OK_SAVED");showCalib();break;
     case CAL_ERROR:
-      // An invalid black profile cannot advance to START. Redo WHITE first.
-      setButton34Phase(BUTTON34_WHITE_NEXT);
       reply("CAL_FAILED");showCalib();break;
     default: break;
   }
