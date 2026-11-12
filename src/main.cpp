@@ -49,6 +49,7 @@ PhysicalPhase physicalPhase=PHYS_NEED_WHITE;
 PhysicalSide physicalSide=SIDE_NONE;
 bool physicalRunInProgress=false;
 struct PhysicalButton {
+  explicit PhysicalButton(uint8_t gpio) : pin(gpio) {}
   uint8_t pin;
   uint8_t sample=HIGH, stable=HIGH;
   uint32_t changeMs=0, pressedMs=0;
