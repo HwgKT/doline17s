@@ -199,7 +199,7 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 200  # Startup default; firmware reply is authoritative.
+        self.high_speed_peak = 180  # Map 1 startup default; firmware reply is authoritative.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
         self.hs_late_start = 8000
         self.hs_late_mode = False
@@ -207,8 +207,8 @@ class App(tk.Tk):
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
-        self.hs_peak_var = tk.DoubleVar(value=200)
-        self.hs_peak_value_text = tk.StringVar(value="200 (chưa xác nhận)")
+        self.hs_peak_var = tk.DoubleVar(value=180)
+        self.hs_peak_value_text = tk.StringVar(value="180 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
             value="HS: MAP 1 từ 8000 tick | chờ ESP32 xác nhận")
