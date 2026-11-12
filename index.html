@@ -850,7 +850,7 @@
       <div class="brand-icon">🏎️</div>
       <div class="brand-title">
         <h1>ESP32 LINE ROBOT</h1>
-        <p>Bảng điều khiển Web Bluetooth & Serial (16 Mắt Cảm Biến + Động Cơ)</p>
+        <p>mainHighSpeedv6 · Bluetooth Classic SPP qua cổng COM · trạng thái xác nhận từ ESP32</p>
       </div>
     </div>
 
@@ -862,12 +862,12 @@
 
       <!-- Nút kết nối Bluetooth không dây -->
       <button class="btn-connect btn-ble" id="btnConnectBle" onclick="toggleBleConnection()">
-        <span>📡 Kết nối Bluetooth</span>
+        <span>BLE cũ (không dùng trên v6)</span>
       </button>
 
       <!-- Nút kết nối qua cáp USB Serial nếu cắm máy tính -->
       <button class="btn-connect btn-serial" id="btnConnectSerial" onclick="toggleSerialConnection()">
-        <span>🔌 Cáp USB Serial</span>
+        <span>Kết nối SPP qua COM</span>
       </button>
     </div>
   </header>
@@ -896,55 +896,24 @@
             TAY (MANUAL)</span>
         </div>
 
-        <!-- HERO BUTTON: SIÊU BÁM SÀN (PIN 3S) - BẬT AUTO LUÔN -->
-        <button class="btn-ultra-grip" id="btnUltraGrip" onclick="triggerUltraGrip()">
-          <div class="grip-icon">🏎️⚡</div>
-          <div class="grip-text">
-            <div class="grip-title">
-              <span>BẬT SIÊU BÁM SÀN (PIN 3S)</span>
-              <span class="grip-badge">AUTO CHẠY NGAY</span>
-            </div>
-            <div class="grip-sub">Base: 105 | Kp: 1.45 | Kd: 0 (Phím tắt: G)</div>
+        <!-- Map 1: one authoritative side/calibration state, shared with physical buttons. -->
+        <div style="padding: 12px; background: rgba(0,0,0,0.25); border: 1px solid rgba(79,172,254,0.3); border-radius: 12px; display: grid; gap: 9px;">
+          <strong style="font-size: 13px;">MAP 1 — XÁC NHẬN TRÁI / PHẢI</strong>
+          <div id="map1CalState" style="font-size: 12px; color: #fbbf24;">Chưa có xác nhận CAL từ ESP32</div>
+          <div id="map1SideState" style="font-size: 12px; color: #cbd5e1;">Chưa chọn bên</div>
+          <div id="map1SensorProfile" style="font-size: 11px; color: #94a3b8;">Mask: chưa đọc từ ESP32</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btnSideLeft" class="btn-action-sm" onclick="requestMap1Side('LEFT')" disabled>Chọn TRÁI</button>
+            <button id="btnSideRight" class="btn-action-sm" onclick="requestMap1Side('RIGHT')" disabled>Chọn PHẢI</button>
+            <button id="btnSideClear" class="btn-action-sm" onclick="requestMap1SideClear()" disabled>Hủy bên</button>
+            <button id="btnSideRefresh" class="btn-action-sm" onclick="refreshV6Status()" disabled>Đọc trạng thái</button>
           </div>
-        </button>
-
-        <div style="display: flex; gap: 10px;">
-          <button
-            style="flex: 1; padding: 10px; border-radius: 10px; font-weight: 700; font-size: 13px; border: none; cursor: pointer; background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);"
-            onclick="sendCommand('A')">
-            🚀 BẬT AUTO (A)
-          </button>
-          <button
-            style="flex: 1; padding: 10px; border-radius: 10px; font-weight: 700; font-size: 13px; border: 1px solid rgba(244, 63, 94, 0.4); cursor: pointer; background: rgba(244, 63, 94, 0.15); color: #fda4af;"
-            onclick="sendCommand('M')">
-            🛑 TẮT AUTO (M)
-          </button>
-        </div>
-
-        <!-- CHỌN NHANH PROFILE CÀI SẴN -->
-        <div style="display: flex; flex-direction: column; gap: 6px;">
-          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted);">
-            <span>Profiles tốc độ:</span>
-            <span id="activeProfileLabel" style="color: #fbbf24; font-weight: 600;">Mặc định PID</span>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btnMap1StartTick" class="btn-action-sm" onclick="requestMap1Start(false)" disabled>START theo tick (GPIO34)</button>
+            <button id="btnMap1StartFull" class="btn-action-sm" onclick="requestMap1Start(true)" disabled>START FULL16 (GPIO35)</button>
+            <button class="btn-action-sm" onclick="sendCommand('STOP')">STOP</button>
           </div>
-          <div class="profile-chips">
-            <button class="chip-btn" id="chipGrip" onclick="selectProfile('GRIP')">
-              <span>🔥</span>
-              <span>Siêu Bám (105)</span>
-            </button>
-            <button class="chip-btn" id="chip3S" onclick="selectProfile('3S')">
-              <span>🛡️</span>
-              <span>Pin 3S (115)</span>
-            </button>
-            <button class="chip-btn" id="chip2S" onclick="selectProfile('2S')">
-              <span>🔋</span>
-              <span>Pin 2S (145)</span>
-            </button>
-            <button class="chip-btn" id="chipRace" onclick="selectProfile('RACE')">
-              <span>🏁</span>
-              <span>Race 10s (135)</span>
-            </button>
-          </div>
+          <div style="font-size: 11px; color: #94a3b8;">Chỉ START sau khi CAL trắng/đen và bên được ESP32 xác nhận. Kết thúc lượt chạy phải chọn bên lại. Bluetooth Classic SPP cần cổng COM ghép đôi; không dùng BLE Nordic UART.</div>
         </div>
 
         <!-- TINH CHỈNH PID TRỰC TIẾP TRÊN WEB -->
@@ -956,7 +925,7 @@
           <div class="pid-tuner-grid">
             <div class="pid-input-group">
               <label>Kp (Nhạy)</label>
-              <input type="number" id="inputKp" min="0" max="50" step="0.05" value="2.2">
+              <input type="number" id="inputKp" min="0" max="50" step="0.05" value="1.6">
             </div>
             <div class="pid-input-group">
               <label>Ki</label>
@@ -964,11 +933,11 @@
             </div>
             <div class="pid-input-group">
               <label>Kd (Dập lắc)</label>
-              <input type="number" id="inputKd" min="0" max="50" step="0.01" value="0">
+              <input type="number" id="inputKd" min="0" max="50" step="0.01" value="0.8">
             </div>
             <div class="pid-input-group">
               <label>Speed / Base</label>
-              <input type="number" id="inputBase" min="0" max="255" step="5" value="120">
+              <input type="number" id="inputBase" min="0" max="255" step="1" value="130">
             </div>
           </div>
           <button class="btn-apply-pid" onclick="applyCustomPid()">⚡ ÁP DỤNG THÔNG SỐ PID</button>
@@ -1019,14 +988,14 @@
       <div class="speed-box">
         <div class="speed-header">
           <span>⚡ Tốc độ PWM (Manual / Base Auto):</span>
-          <span class="speed-val" id="speedDisplay">120 / 255</span>
+          <span class="speed-val" id="speedDisplay">130 / 255</span>
         </div>
-        <input type="range" id="speedSlider" min="0" max="255" value="120" oninput="updateSpeed(this.value)">
+        <input type="range" id="speedSlider" min="0" max="255" value="130" oninput="updateSpeed(this.value)">
         <div class="speed-presets">
           <button class="btn-preset" onclick="setPresetSpeed(60)">Chậm (60)</button>
-          <button class="btn-preset" onclick="setPresetSpeed(120)">Vừa (120)</button>
-          <button class="btn-preset" onclick="setPresetSpeed(180)">Nhanh (180)</button>
-          <button class="btn-preset" onclick="setPresetSpeed(255)">Tối đa (255)</button>
+          <button class="btn-preset" onclick="setPresetSpeed(100)">Vừa (100)</button>
+          <button class="btn-preset" onclick="setPresetSpeed(130)">BASE (130)</button>
+          <button class="btn-preset" onclick="setPresetSpeed(170)">Nhanh (170)</button>
         </div>
       </div>
     </div>
@@ -1083,42 +1052,22 @@
         </div>
       </div>
 
-      <!-- BƯỚC CALIBRATION -->
+      <!-- Firmware v6 uses two fixed, ordered calibration captures. -->
       <div class="calib-wizard">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 13px; font-weight: 600; color: #cbd5e1;">🎯 Hiệu chuẩn bằng cách LIA CẢM BIẾN (Sweep
-            Calibration):</span>
+        <div style="font-weight: 600; font-size: 13px;">Hiệu chuẩn hai bước — GPIO34 hoặc giao diện</div>
+        <div style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          Bước 1: đặt toàn bộ thanh cảm biến trên nền TRẮNG, nhấn CAL_WHITE và đợi ESP32 báo thành công (LED nháy 1 lần, chu kỳ 0,5 s).
+          Bước 2: đặt thanh trên nền ĐEN, nhấn CAL_BLACK và đợi báo thành công (LED nháy 2 lần, chu kỳ 0,5 s).
+          Không dùng chế độ lia sweep 4 giây của firmware cũ.
         </div>
-        <div
-          style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.25); padding: 10px 14px; border-radius: 10px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.05);">
-          👉 <b>Cách làm:</b> Bấm nút dưới đây rồi <b>dùng tay lia thanh cảm biến qua lại ngang qua vạch đen 2 - 3
-            lần</b> trong 4 giây. Hệ thống sẽ tự bắt Min (trắng) và Max (đen) rồi tính ngưỡng trung bình cho từng mắt
-          (từ mắt 1 đến 14)!
-        </div>
-
         <div style="display: flex; gap: 10px;">
-          <button
-            style="flex: 2; padding: 14px; border-radius: 12px; border: none; cursor: pointer; background: linear-gradient(135deg, #00f2fe, #4facfe); color: #061122; font-weight: 700; font-size: 14px; box-shadow: 0 0 15px rgba(0, 242, 254, 0.4); display: flex; align-items: center; justify-content: center; gap: 8px;"
-            onclick="sendCommand('C')">
-            <span>🎯 BẮT ĐẦU LIA CALIB (4 Giây)</span>
-          </button>
-          <button
-            style="flex: 1; padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); cursor: pointer; background: rgba(255,255,255,0.06); color: #e2e8f0; font-weight: 600; font-size: 13px;"
-            onclick="sendCommand('K')">
-            ⏹️ Chốt Sớm
-          </button>
+          <button class="btn-calib btn-calib-white" style="flex: 1;" onclick="requestV6Calibration('WHITE')"><strong>CAL_WHITE</strong><small>Lấy nền trắng</small></button>
+          <button class="btn-calib btn-calib-black" style="flex: 1;" onclick="requestV6Calibration('BLACK')"><strong>CAL_BLACK</strong><small>Lấy nền đen</small></button>
         </div>
-
         <div class="calib-extra-actions">
-          <button class="btn-action-sm" onclick="sendCommand('P')">
-            📊 Đọc mắt (P)
-          </button>
-          <button class="btn-action-sm" onclick="sendCommand('INV')">
-            🔄 Đảo Cực (INV)
-          </button>
-          <button class="btn-action-sm" id="btnAutoPoll" onclick="toggleAutoPoll()">
-            ⚡ Tự quét: BẬT
-          </button>
+          <button class="btn-action-sm" onclick="sendCommand('CAL_STATUS')">Đọc CAL</button>
+          <button class="btn-action-sm" onclick="sendCommand('P')">Đọc 16 mắt (P)</button>
+          <button class="btn-action-sm" id="btnAutoPoll" onclick="toggleAutoPoll()">Tự quét: TẮT</button>
         </div>
       </div>
     </div>
@@ -1139,7 +1088,7 @@
       </div>
 
       <div class="terminal-input-bar">
-        <input type="text" id="customCmdInput" placeholder="Nhập lệnh thủ công (ví dụ: F, B, W, K, V:220)..."
+        <input type="text" id="customCmdInput" placeholder="Lệnh v6 (ví dụ: SIDE:STATUS, CAL_STATUS, PID)..."
           onkeydown="if(event.key==='Enter') sendCustomCommand()">
         <button class="btn-send" onclick="sendCustomCommand()">Gửi Lệnh</button>
       </div>
