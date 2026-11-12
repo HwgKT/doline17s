@@ -938,7 +938,7 @@
             </div>
             <div class="pid-input-group">
               <label>Speed / Base</label>
-              <input type="number" id="inputBase" min="0" max="255" step="1" value="130">
+              <input type="number" id="inputBase" min="0" max="255" step="1" value="140">
             </div>
           </div>
           <button class="btn-apply-pid" onclick="applyCustomPid()">⚡ ÁP DỤNG THÔNG SỐ PID</button>
@@ -989,9 +989,9 @@
       <div class="speed-box">
         <div class="speed-header">
           <span>⚡ Tốc độ PWM (Manual / Base Auto):</span>
-          <span class="speed-val" id="speedDisplay">130 / 255</span>
+          <span class="speed-val" id="speedDisplay">140 / 255</span>
         </div>
-        <input type="range" id="speedSlider" min="0" max="255" value="130" oninput="updateSpeed(this.value)">
+        <input type="range" id="speedSlider" min="0" max="255" value="140" oninput="updateSpeed(this.value)">
         <div class="speed-presets">
           <button class="btn-preset" onclick="setPresetSpeed(60)">Chậm (60)</button>
           <button class="btn-preset" onclick="setPresetSpeed(100)">Vừa (100)</button>
@@ -1180,7 +1180,7 @@
         ' | Chế độ START: ' + webV6State.eyeMode;
       document.getElementById('map1SpeedState').textContent =
         'BASE: ' + document.getElementById('inputBase').value +
-        ' | HS_PEAK: ' + (webV6State.peak ?? '—') +
+        ' | HS_PEAK: ' + (webV6State.peak ?? '200 (chờ ESP32)') +
         ' | ngưỡng Map 1: 8000 tick';
       for(const id of ['btnSideLeft', 'btnSideRight'])
         document.getElementById(id).disabled = !editable;
