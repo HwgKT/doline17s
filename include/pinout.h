@@ -23,6 +23,11 @@
 #define PIN_MOTOR_R1       27
 #define PIN_MOTOR_R2       13
 
+// GPIO34/GPIO35: input only, require EXTERNAL pull-ups to 3.3V;
+// normally-open momentary switches connect each pin to GND (active LOW).
+#define PIN_CAL_BUTTON    34
+#define PIN_SELECT_BUTTON 35
+
 #define PIN_DEBUG_LED 2
 #define DEBUG_LED_ACTIVE_HIGH 1
 
