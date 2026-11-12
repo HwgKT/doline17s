@@ -99,7 +99,7 @@ constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 110.0f;
 constexpr float HS_HOLD_CENTER_ERROR = 15.0f; // valid line position near center
-int16_t highSpeedPeakPwm = 240; // All three MAPs default to peak PWM 240.
+int16_t highSpeedPeakPwm = 180; // Default HS peak PWM on all three MAPs.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
     HS_FINISHED=4, HS_ABORTED=5, HS_CORNER_HOLD=6
@@ -148,7 +148,7 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
-constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
+constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 180;
 // Fixed per-map BASE: no encoder-position scheduler, no late BOOST, and
 // no per-section PWM caps. The independent wheel PI remains active.
 // Map 1 only: arm the late BASE boost after 10,500 forward-progress ticks.
@@ -1513,7 +1513,7 @@ void pid_line_follow_step(void) {
             float correctionLimit = CENTER_CORRECTION_LIMIT +
                 (OUTER_CORRECTION_LIMIT - CENTER_CORRECTION_LIMIT) * weight;
             // Leave PWM headroom without changing the configured base/HS peak.
-            // At HS peak=240, the correction limit is 15 while centered.
+            // At HS peak=180, the correction limit is bounded by available PWM headroom.
             correctionLimit = fminf(correctionLimit,
                 fmaxf(0.0f, fminf(base, 255.0f - base)));
             correction = fmaxf(-correctionLimit,
