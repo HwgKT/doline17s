@@ -168,6 +168,10 @@ class App(tk.Tk):
         self.selected_map = None  # Require explicit choice to avoid mislabeled experiments.
         self.map_status = tk.StringVar(value="Chưa chọn")
         self.map_buttons = {}
+        self.map1_side = None
+        self.map1_side_confirmed = False
+        self.map1_side_status = tk.StringVar(value="MAP 1: chưa xác nhận bên")
+        self.map1_eye_mode = tk.StringVar(value="TICK")
         self.run_txt_file = None
         self.run_txt_path = None
         self.session_log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
@@ -195,25 +199,25 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 220  # Expected startup default; read back from firmware.
+        self.high_speed_peak = 200  # Startup default; firmware reply is authoritative.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
-        self.hs_late_start = 10500
+        self.hs_late_start = 8000
         self.hs_late_mode = False
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
-        self.hs_peak_var = tk.DoubleVar(value=220)
-        self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
+        self.hs_peak_var = tk.DoubleVar(value=200)
+        self.hs_peak_value_text = tk.StringVar(value="200 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: MAP 1 từ 10500 tick | chờ ESP32 xác nhận")
+            value="HS: MAP 1 từ 8000 tick | chờ ESP32 xác nhận")
         self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
         self.sensor_profile = (650, 1500, 0x03FF, 0xFF80, 0xFFFF)
         self.sensor_profile_confirmed = False
         self.sensor_profile_status = tk.StringVar(
-            value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
+            value="PID mắt: chờ ESP32 (mặc định 650 / 1500 ticks)")
         self.sensor_profile_window = None
         self.map2_sensor_profile = (1000, 2000, 3000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF)
         self.map2_sensor_confirmed = False
@@ -300,6 +304,24 @@ class App(tk.Tk):
                    font=("Consolas", 8, "bold")).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
+
+        side_bar = tk.Frame(self, bg=PANEL, padx=8, pady=2)
+        side_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.label(side_bar, "MAP 1 — Chọn bên:", bg=PANEL, fg=CYAN).pack(side="left", padx=(0, 6))
+        self.map1_left_btn = ttk.Button(side_bar, text="TRÁI",
+                                        command=lambda: self.choose_map1_side("LEFT"))
+        self.map1_left_btn.pack(side="left", padx=2)
+        self.map1_right_btn = ttk.Button(side_bar, text="PHẢI",
+                                         command=lambda: self.choose_map1_side("RIGHT"))
+        self.map1_right_btn.pack(side="left", padx=2)
+        self.map1_clear_btn = ttk.Button(side_bar, text="Hủy bên", command=self.clear_map1_side)
+        self.map1_clear_btn.pack(side="left", padx=2)
+        self.map1_eye_combo = ttk.Combobox(side_bar, textvariable=self.map1_eye_mode,
+                                           values=("TICK", "FULL16"),
+                                           state="readonly", width=8)
+        self.map1_eye_combo.pack(side="left", padx=5)
+        self.label(side_bar, textvariable=self.map1_side_status,
+                   bg=PANEL, fg=AMBER).pack(side="left", padx=6)
 
         sensor_profile_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
         sensor_profile_bar.pack(fill="x", padx=8, pady=(0, 2))
@@ -468,7 +490,7 @@ class App(tk.Tk):
         pwm_row.pack(fill="x", pady=(1, 0))
         self.label(pwm_row, "PWM", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
-        self.pwm_var = tk.DoubleVar(value=120)
+        self.pwm_var = tk.DoubleVar(value=130)
         self.pwm_text = tk.StringVar(value="120 / 255")
         self.label(pwm_row, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
                    font=("Consolas", 9), width=9, anchor="e").pack(side="right")
@@ -498,7 +520,7 @@ class App(tk.Tk):
         ttk.Button(pid_row, text="Áp dụng", width=7,
                    command=self.apply_pid).pack(side="right", padx=(2, 0))
         for key, initial in (("Kp", "1.6"), ("Ki", "0"),
-                             ("Kd", "0.8"), ("Base", "120")):
+                             ("Kd", "0.8"), ("Base", "130")):
             field = tk.Frame(pid_row, bg=PANEL)
             field.pack(side="left", padx=(0, 4))
             self.label(field, key, bg=PANEL, fg=MUTED,
@@ -507,10 +529,10 @@ class App(tk.Tk):
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # MAP 1: HS_PEAK becomes straight-line BASE from 10500 ticks; other maps unchanged.
+        # MAP 1: HS_PEAK late boost starts at 8000 ticks.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK (10500+)", bg=PANEL,
+        self.label(hs_row, "HS_PEAK (8000+)", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.label(hs_row, textvariable=self.hs_peak_value_text,
                    bg=PANEL, fg=CYAN, font=("Consolas", 9),
