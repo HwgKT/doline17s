@@ -48,7 +48,7 @@ PhysicalSide physicalSide = SIDE_NONE;
 bool physicalSideConfirmed = false;
 bool physicalRunInProgress = false;
 bool map1StartModePreconfigured = false;
-constexpr uint32_t BUTTON_DEBOUNCE_MS = 50;
+constexpr uint32_t PHYSICAL_SIDE_BUTTON_DEBOUNCE_MS = 50;
 constexpr uint32_t BUTTON_HOLD_MS = 1000;
 struct PhysicalButton {
   explicit PhysicalButton(uint8_t gpio) : pin(gpio) {}
@@ -62,7 +62,7 @@ PhysicalButtonEvent pollPhysicalButton(PhysicalButton &b, uint32_t now) {
   PhysicalButtonEvent e{};
   const uint8_t current=(uint8_t)digitalRead(b.pin);
   if(current!=b.sample){b.sample=current;b.changeMs=now;}
-  if((uint32_t)(now-b.changeMs)>=BUTTON_DEBOUNCE_MS && current!=b.stable){
+  if((uint32_t)(now-b.changeMs)>=PHYSICAL_SIDE_BUTTON_DEBOUNCE_MS && current!=b.stable){
     b.stable=current;
     if(current==LOW){b.pressedMs=now;b.holdSent=false;}
     else if(!b.holdSent && (uint32_t)(now-b.pressedMs)<BUTTON_HOLD_MS) e.shortPress=true;
