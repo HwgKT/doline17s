@@ -200,7 +200,7 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 180  # Map 1 startup default; firmware reply is authoritative.
+        self.high_speed_peak = 200  # Map 1 startup default; firmware reply is authoritative.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
         self.hs_late_start = 8000
         self.hs_late_mode = False
@@ -208,8 +208,8 @@ class App(tk.Tk):
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
-        self.hs_peak_var = tk.DoubleVar(value=180)
-        self.hs_peak_value_text = tk.StringVar(value="180 (chưa xác nhận)")
+        self.hs_peak_var = tk.DoubleVar(value=200)
+        self.hs_peak_value_text = tk.StringVar(value="200 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
             value="HS: MAP 1 từ 8000 tick | chờ ESP32 xác nhận")
@@ -491,8 +491,8 @@ class App(tk.Tk):
         pwm_row.pack(fill="x", pady=(1, 0))
         self.label(pwm_row, "PWM", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
-        self.pwm_var = tk.DoubleVar(value=130)
-        self.pwm_text = tk.StringVar(value="130 / 255")
+        self.pwm_var = tk.DoubleVar(value=140)
+        self.pwm_text = tk.StringVar(value="140 / 255")
         self.label(pwm_row, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
                    font=("Consolas", 9), width=9, anchor="e").pack(side="right")
         self.pwm_slider = ttk.Scale(
@@ -521,7 +521,7 @@ class App(tk.Tk):
         ttk.Button(pid_row, text="Áp dụng", width=7,
                    command=self.apply_pid).pack(side="right", padx=(2, 0))
         for key, initial in (("Kp", "1.6"), ("Ki", "0"),
-                             ("Kd", "0.8"), ("Base", "130")):
+                             ("Kd", "0.8"), ("Base", "140")):
             field = tk.Frame(pid_row, bg=PANEL)
             field.pack(side="left", padx=(0, 4))
             self.label(field, key, bg=PANEL, fg=MUTED,
