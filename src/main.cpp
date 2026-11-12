@@ -526,6 +526,31 @@ void updateLedIndicator(uint32_t now) {
     ledWrite(!ledOn);
   }
 }
+// Drain Map-1 PID events only after PID computation; text SPP stays out of
+// the controller. Limit each iteration to avoid large transmit bursts.
+void flushMap1Logs(uint8_t limit){
+  if(pid_get_selected_map()!=1)return;
+  static const char *const kinds[]={
+    "INVALID","TURN_ENTER","TURN_EXIT","SEARCH_ENTER","SEARCH_EXIT",
+    "PWM_REVERSAL","BOOST_ON","BOOST_OFF","FINISH_CANDIDATE",
+    "FINISH_CANCEL","FINISH_CONFIRMED"
+  };
+  static const char *const sources[]={
+    "NONE","SHARP","CENTROID","DIRECT_EDGE","IMMEDIATE_SEARCH","NORMAL_SEARCH"
+  };
+  Map1LogEvent e{};
+  while(limit-- && pid_pop_map1_log(&e)){
+    if(e.type>10||e.source>5)continue;
+    char b[235];
+    snprintf(b,sizeof(b),
+      "MAP1_EVT type=%s src=%s dir=%d runEnc=%ld t_ms=%lu dur_ms=%u mask=%04X bits=%04X pwmL=%d pwmR=%d err10=%d extra=%u",
+      kinds[e.type],sources[e.source],(int)e.direction,
+      (long)e.run_enc,(unsigned long)e.t_ms,(unsigned)e.duration_ms,
+      (unsigned)e.active_mask,(unsigned)e.sensor_bits,
+      (int)e.pwm_l,(int)e.pwm_r,(int)e.err_x10,(unsigned)e.extra);
+    reply(b);
+  }
+}
 void sendFrame(){
   if(!sppStarted||!btConnected())return;
   Telemetry t{};
@@ -666,6 +691,8 @@ void loop() {
       const bool fullBlackFinish=pid_finish_line_latched();
       const uint8_t stopMap=pid_get_selected_map();
       const int32_t stopEnc=pid_get_run_encoder_progress();
+      // Keep FINISH_CANDIDATE/CONFIRMED before STOP clears PID state.
+      if(stopMap==1)flushMap1Logs(64);
       safeStop();
       // Drop queued pre-stop telemetry before announcing terminal state.
       btDropPendingTelemetry();
@@ -741,6 +768,8 @@ void loop() {
         (unsigned long)millis());
       reply(b);
     }
+    // Event formatting / SPP replies happen outside pid_line_follow_step().
+    if(pid_get_selected_map()==1)flushMap1Logs(2);
   }
   if(manualActive&&now-lastManual>=MANUAL_TIMEOUT_MS){
     motor_stop();manualActive=false;reply("[SAFE] MANUAL DEADMAN: MOTOR STOP");
