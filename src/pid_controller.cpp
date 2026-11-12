@@ -61,6 +61,12 @@ constexpr int16_t MAP1_LEFT_SEARCH_TEST_PWM = 90;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_START_ENC = 1200;
 constexpr int32_t MAP1_LEFT_SEARCH_TEST_END_ENC = 1700;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
+// Map 1 only: stop EARLY pivot when a reliable centered line returns.
+constexpr uint8_t MAP1_EARLY_FAST_REACQUIRE_FRAMES = 2;
+constexpr uint8_t MAP1_EARLY_TREND_REACQUIRE_FRAMES = 3;
+constexpr float MAP1_EARLY_TREND_EXIT_POSITION = 35.0f;
+constexpr float MAP1_EARLY_TREND_MIN_IMPROVEMENT = 2.0f;
+constexpr uint32_t MAP1_EARLY_TREND_SAMPLE_MS = 10;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
 constexpr uint8_t REACQUIRE_SPEED_RAMP_FRAMES = 4;
 // Named-track dashed-line coast. Encoder positions are relative to AUTO start.
@@ -295,6 +301,11 @@ TurnState lastTurnDirection = TURN_RIGHT;
 uint32_t turnStartedMs = 0;
 uint32_t searchStartedMs = 0;
 bool earlyTurnActive = false;
+uint8_t map1EarlyFastFrames = 0;
+uint8_t map1EarlyTrendFrames = 0;
+uint32_t map1EarlyTrendReferenceMs = 0;
+float map1EarlyTrendReferenceAbs = 0.0f;
+bool map1EarlyTrendReferenceValid = false;
 bool edgeLeftSeeded = false, edgeRightSeeded = false;
 uint32_t edgeLeftSeedMs = 0, edgeRightSeedMs = 0;
 float edgeLeftSeedCentroid = 0.0f, edgeRightSeedCentroid = 0.0f;
@@ -473,6 +484,10 @@ static void resetLineTracking() {
     turnStartedMs = 0;
     searchStartedMs = 0;
     earlyTurnActive = false;
+    map1EarlyFastFrames = map1EarlyTrendFrames = 0;
+    map1EarlyTrendReferenceMs = 0;
+    map1EarlyTrendReferenceAbs = 0.0f;
+    map1EarlyTrendReferenceValid = false;
     edgeLeftSeeded = edgeRightSeeded = false;
     edgeLeftFrames = edgeRightFrames = 0;
     edgeTrackSensorMask = 0;
@@ -1028,6 +1043,10 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             turnState = edgeDirection < 0 ? SEARCH_LEFT : SEARCH_RIGHT;
             lastTurnDirection = edgeDirection < 0 ? TURN_LEFT : TURN_RIGHT;
             earlyTurnActive = true;
+            if (selectedMap == 1) {
+                map1EarlyFastFrames = map1EarlyTrendFrames = 0;
+                map1EarlyTrendReferenceValid = false;
+            }
             searchStartedMs = now;
             centeredTurnFrames = 0;
             turnMissing = false;
@@ -1052,8 +1071,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
             float reacquirePosition = position;
             const bool reacquirePositionValid = !earlyTurnActive ||
                 calculateMaskedPidPosition(activePidSensorMask(), &reacquirePosition);
+            const bool map1EarlyReacquire = selectedMap == 1 && earlyTurnActive;
             const bool reliableReacquisition = earlyTurnActive
-                // In EARLY_TURN, disabled eyes must not cause PID reacquisition.
+                // Existing EARLY condition remains unchanged on Map 2.
                 ? (reacquireCount >= 2 && reacquireCount <= 6 &&
                    (reacquireMask & TURN_CENTER_SENSOR_MASK) != 0U &&
                    reacquirePositionValid &&
@@ -1061,14 +1081,64 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
                    hasAdjacentLineSensors(reacquireMask))
                 : ((blackCount >= 2 && hasAdjacentLineSensors(mask)) ||
                    (blackCount > 0 && fabsf(position) <= TURN_CENTERED_POSITION));
-            if (reliableReacquisition) {
-                if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
-                    ++centeredTurnFrames;
+            bool earlyExitReady = false;
+            if (map1EarlyReacquire) {
+                const bool narrowValid = reacquirePositionValid &&
+                    reacquireCount >= 1 && reacquireCount <= 6;
+                const bool centerSeen =
+                    (reacquireMask & TURN_CENTER_SENSOR_MASK) != 0U;
+                const float absPosition = fabsf(reacquirePosition);
+                const bool fastCenter = narrowValid && centerSeen &&
+                    absPosition <= TURN_CENTERED_POSITION;
+                map1EarlyFastFrames = fastCenter
+                    ? (uint8_t)(map1EarlyFastFrames < MAP1_EARLY_FAST_REACQUIRE_FRAMES
+                        ? map1EarlyFastFrames + 1 : MAP1_EARLY_FAST_REACQUIRE_FRAMES)
+                    : 0;
+
+                // Compare with a valid measurement from roughly 10 ms earlier.
+                // Never treat an all-white frame as zero position error.
+                const bool trendCandidate = narrowValid && centerSeen &&
+                    reacquireCount >= 2 && hasAdjacentLineSensors(reacquireMask) &&
+                    absPosition <= MAP1_EARLY_TREND_EXIT_POSITION;
+                bool inwardTrend = false;
+                if (!trendCandidate) {
+                    map1EarlyTrendReferenceValid = false;
+                    map1EarlyTrendFrames = 0;
+                } else if (!map1EarlyTrendReferenceValid) {
+                    map1EarlyTrendReferenceValid = true;
+                    map1EarlyTrendReferenceMs = now;
+                    map1EarlyTrendReferenceAbs = absPosition;
+                    map1EarlyTrendFrames = 0;
+                } else if ((uint32_t)(now - map1EarlyTrendReferenceMs) >=
+                           MAP1_EARLY_TREND_SAMPLE_MS) {
+                    inwardTrend = map1EarlyTrendReferenceAbs - absPosition >=
+                                  MAP1_EARLY_TREND_MIN_IMPROVEMENT;
+                    if (!inwardTrend) {
+                        map1EarlyTrendReferenceMs = now;
+                        map1EarlyTrendReferenceAbs = absPosition;
+                        map1EarlyTrendFrames = 0;
+                    }
+                }
+                if (inwardTrend &&
+                    map1EarlyTrendFrames < MAP1_EARLY_TREND_REACQUIRE_FRAMES)
+                    ++map1EarlyTrendFrames;
+                earlyExitReady =
+                    map1EarlyFastFrames >= MAP1_EARLY_FAST_REACQUIRE_FRAMES ||
+                    map1EarlyTrendFrames >= MAP1_EARLY_TREND_REACQUIRE_FRAMES;
             } else {
-                centeredTurnFrames = 0;
+                if (reliableReacquisition) {
+                    if (centeredTurnFrames < SEARCH_REACQUIRE_FRAMES)
+                        ++centeredTurnFrames;
+                } else {
+                    centeredTurnFrames = 0;
+                }
             }
-            if (centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES) {
+            if (earlyExitReady ||
+                (!map1EarlyReacquire &&
+                 centeredTurnFrames >= SEARCH_REACQUIRE_FRAMES)) {
                 earlyTurnActive = false;
+                map1EarlyFastFrames = map1EarlyTrendFrames = 0;
+                map1EarlyTrendReferenceValid = false;
                 turnState = TURN_NONE;
                 centeredTurnFrames = 0;
                 missing = false;
@@ -1146,6 +1216,8 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
         if (isSearchTurn() &&
             uint32_t(now - searchStartedMs) >= LINE_SEARCH_TIMEOUT_MS) {
             earlyTurnActive = false;
+            map1EarlyFastFrames = map1EarlyTrendFrames = 0;
+            map1EarlyTrendReferenceValid = false;
             turnState = TURN_NONE;
             centeredTurnFrames = 0;
             lineLocked = false;
