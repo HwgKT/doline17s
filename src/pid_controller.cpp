@@ -48,6 +48,9 @@ constexpr int16_t LINE_SEARCH_PWM = 90;
 // Map 1 early corner: fixed SEARCH-style pivot, stronger reverse inner wheel.
 // No change to ordinary SEARCH or line PID. Active from AUTO start
 // (once the START pad has been exited) until 12000 progress ticks.
+// Temporary Map 1 experiment: disable EARLY and let line PID govern visible-line steering.
+// Ordinary SHARP and loss-of-line SEARCH remain unchanged. Map 2 is unaffected.
+constexpr bool MAP1_EARLY_ENABLED = false;
 constexpr int32_t EARLY_TURN_MIN_TICKS = 0;
 constexpr int32_t EARLY_TURN_MAX_TICKS = 12000; // exclusive: no new early turns at >=12000
 constexpr int16_t EARLY_TURN_INNER_REVERSE_PWM = 100;
@@ -1038,7 +1041,9 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     // sensors participate in the EARLY_TURN detection.
     // Do not interrupt an already active ordinary SEARCH pivot.
     if (!isSearchTurn() && blackCount > 0) {
-        const int8_t edgeDirection = detectEarlyEdgeTurn(mask, now);
+        const int8_t edgeDirection =
+            (selectedMap == 1 && !MAP1_EARLY_ENABLED)
+                ? 0 : detectEarlyEdgeTurn(mask, now);
         if (edgeDirection != 0) {
             turnState = edgeDirection < 0 ? SEARCH_LEFT : SEARCH_RIGHT;
             lastTurnDirection = edgeDirection < 0 ? TURN_LEFT : TURN_RIGHT;
