@@ -1,0 +1,493 @@
+[2026-11-12T10:13:32.459+07:00] CSV BẮT ĐẦU: D:\EC\doline17s\logs\map_01\linerobot_map01_20261112_101332_458421.csv
+[2026-11-12T10:13:32.459+07:00] TX > AUTO:1
+[2026-11-12T10:13:32.491+07:00] TX > DIAG
+[2026-11-12T10:13:32.534+07:00] RX < MODE: AUTO PID
+[2026-11-12T10:13:32.536+07:00] RX < ADC_RUN_MODE: 0 method=IDF_GPIO_1
+[2026-11-12T10:13:32.536+07:00] RX < RUN_ORIGIN map=1 encL0=1138 encR0=1036 base=130 peak=240 kp=1.60 ki=0.00 kd=0.80 t_ms=63704
+[2026-11-12T10:13:32.537+07:00] RX < HS_STAGE OFF map=1 runEnc=0 base=130 peak=240 start=10500 t_ms=63705
+[2026-11-12T10:13:32.538+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=648.5Hz pid=5.9Hz queued=100.0Hz sent=100.5Hz drop=0 failed=0 missed=0 pending=0 encL=1140 encR=1040 case=5 line=0 lost=0 reacq=7 map=1 runEnc=3 hs=0 peak=240 route=0 rf=0 clu=FFFF
+[2026-11-12T10:13:32.565+07:00] PID t=63711ms adc=2029,3030,2128,2955,2179,1894,1604,1702,1534,1396,2637,1433,2589,2603,2094,2880 cal=795,663,852,738,814,844,821,851,742,786,792,771,783,841,846,892 logic=1111111111111111 pwm=(130,130) enc=(1139,1036) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:32.612+07:00] RX < FINISH_ARMED: LINE_CONFIRMED
+[2026-11-12T10:13:32.658+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=38 t_ms=63833 dur_ms=0 mask=FFE0 bits=8181 pwmL=-8 pwmR=255 err10=260 extra=0
+[2026-11-12T10:13:32.659+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=58 t_ms=63867 dur_ms=0 mask=FFE0 bits=0180 pwmL=255 pwmR=-24 err10=13 extra=0
+[2026-11-12T10:13:32.706+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=84 t_ms=63903 dur_ms=0 mask=FFE0 bits=0180 pwmL=-67 pwmR=255 err10=14 extra=0
+[2026-11-12T10:13:32.706+07:00] PID t=63911ms adc=774,1879,770,2001,997,772,591,1394,1565,698,1531,464,1465,1328,870,1522 cal=0,0,0,0,0,0,0,535,783,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(82,177) enc=(1225,1128) err=0.941 p=1.531 i=0.000 d=-48.969 out=-47.439
+[2026-11-12T10:13:32.751+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=105 t_ms=63930 dur_ms=0 mask=FFE0 bits=0100 pwmL=255 pwmR=-78 err10=50 extra=0
+[2026-11-12T10:13:32.798+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=126 t_ms=63954 dur_ms=0 mask=FFE0 bits=0180 pwmL=-67 pwmR=255 err10=14 extra=0
+[2026-11-12T10:13:32.844+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=156 t_ms=63985 dur_ms=0 mask=FFE0 bits=0100 pwmL=255 pwmR=-78 err10=50 extra=0
+[2026-11-12T10:13:32.891+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=178 t_ms=64007 dur_ms=0 mask=FFE0 bits=0180 pwmL=-67 pwmR=255 err10=13 extra=0
+[2026-11-12T10:13:32.938+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=264 t_ms=64084 dur_ms=0 mask=FFE0 bits=0100 pwmL=255 pwmR=-78 err10=50 extra=0
+[2026-11-12T10:13:32.984+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=273 t_ms=64093 dur_ms=0 mask=FFE0 bits=0180 pwmL=-67 pwmR=255 err10=12 extra=0
+[2026-11-12T10:13:32.985+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=315 t_ms=64127 dur_ms=0 mask=FFE0 bits=0106 pwmL=139 pwmR=120 err10=0 extra=0
+[2026-11-12T10:13:32.985+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=318 t_ms=64131 dur_ms=0 mask=FFE0 bits=0302 pwmL=255 pwmR=-85 err10=84 extra=0
+[2026-11-12T10:13:32.986+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=320 t_ms=64132 dur_ms=5 mask=FFE0 bits=0303 pwmL=255 pwmR=-85 err10=84 extra=0
+[2026-11-12T10:13:32.986+07:00] PID t=64112ms adc=815,1941,1410,2541,1830,1624,1283,1471,1499,650,1501,445,1362,1197,758,1405 cal=0,0,294,321,517,605,480,614,696,0,0,0,0,0,0,0 logic=0000111110000000 pwm=(92,167) enc=(1428,1338) err=-9.150 p=-17.052 i=-0.000 d=-20.407 out=-37.459
+[2026-11-12T10:13:33.030+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=406 t_ms=64200 dur_ms=0 mask=FFE0 bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:33.078+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=443 t_ms=64229 dur_ms=0 mask=FFE0 bits=0300 pwmL=255 pwmR=-85 err10=85 extra=0
+[2026-11-12T10:13:33.079+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=463 t_ms=64245 dur_ms=0 mask=FFE0 bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:33.126+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=553 t_ms=64310 dur_ms=0 mask=FFE0 bits=0180 pwmL=-67 pwmR=255 err10=14 extra=0
+[2026-11-12T10:13:33.127+07:00] PID t=64320ms adc=845,1983,847,2367,1740,1693,1387,1600,1584,1215,2267,1195,2103,1392,827,1462 cal=0,0,0,146,441,666,590,746,808,557,456,514,391,0,0,0 logic=0000111111110000 pwm=(247,12) enc=(1701,1606) err=2.895 p=4.873 i=0.000 d=112.463 out=117.336
+[2026-11-12T10:13:33.172+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=558 t_ms=64314 dur_ms=0 mask=FFE0 bits=0380 pwmL=255 pwmR=-76 err10=39 extra=0
+[2026-11-12T10:13:33.218+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=577 t_ms=64328 dur_ms=0 mask=FFE0 bits=3000 pwmL=255 pwmR=-93 err10=0 extra=0
+[2026-11-12T10:13:33.264+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=580 t_ms=64330 dur_ms=0 mask=FFE0 bits=300C pwmL=255 pwmR=-19 err10=0 extra=0
+[2026-11-12T10:13:33.310+07:00] PID t=64521ms adc=770,1872,761,1969,959,720,576,551,788,1003,2032,501,1530,1291,815,1447 cal=0,0,0,0,0,0,0,0,0,288,243,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(1972,1656) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:33.358+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=735 t_ms=64536 dur_ms=206 mask=01FF bits=0100 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:33.359+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=735 t_ms=64536 dur_ms=208 mask=01FF bits=0100 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:33.405+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=735 t_ms=64536 dur_ms=0 mask=01FF bits=0100 pwmL=138 pwmR=121 err10=50 extra=0
+[2026-11-12T10:13:33.452+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=742 t_ms=64547 dur_ms=0 mask=01FF bits=0040 pwmL=-100 pwmR=255 err10=-150 extra=0
+[2026-11-12T10:13:33.452+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=760 t_ms=64577 dur_ms=0 mask=01FF bits=0008 pwmL=37 pwmR=222 err10=0 extra=0
+[2026-11-12T10:13:33.453+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=764 t_ms=64584 dur_ms=0 mask=01FF bits=000C pwmL=-220 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:33.545+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=818 t_ms=64720 dur_ms=136 mask=01FF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:33.546+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=818 t_ms=64720 dur_ms=143 mask=01FF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:33.546+07:00] PID t=64722ms adc=828,1985,848,2122,1149,1923,1360,614,656,480,1509,464,1476,1296,869,1506 cal=0,0,0,0,0,870,562,0,0,0,0,0,0,0,0,0 logic=0000011000000000 pwm=(83,176) enc=(2042,1770) err=-21.075 p=-46.513 i=-0.000 d=0.000 out=-46.513
+[2026-11-12T10:13:33.591+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=818 t_ms=64720 dur_ms=0 mask=01FF bits=0060 pwmL=82 pwmR=177 err10=-213 extra=0
+[2026-11-12T10:13:33.591+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=821 t_ms=64727 dur_ms=0 mask=01FF bits=0040 pwmL=255 pwmR=-39 err10=-150 extra=0
+[2026-11-12T10:13:33.670+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=891 t_ms=64849 dur_ms=0 mask=01FF bits=0180 pwmL=-68 pwmR=255 err10=11 extra=0
+[2026-11-12T10:13:33.716+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=941 t_ms=64906 dur_ms=0 mask=01FF bits=01C0 pwmL=-76 pwmR=255 err10=-37 extra=0
+[2026-11-12T10:13:33.717+07:00] PID t=64931ms adc=827,1947,828,2033,1006,874,1577,1641,714,558,2041,1251,2100,1314,779,1441 cal=0,0,0,0,0,0,792,788,0,0,252,574,389,0,0,0 logic=0000001100010000 pwm=(57,202) enc=(2150,1953) err=-10.013 p=-18.908 i=-0.000 d=-53.415 out=-72.323
+[2026-11-12T10:13:33.810+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=989 t_ms=64956 dur_ms=0 mask=01FF bits=C0E0 pwmL=-98 pwmR=255 err10=-141 extra=0
+[2026-11-12T10:13:33.904+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1113 t_ms=65068 dur_ms=0 mask=01FF bits=0070 pwmL=-124 pwmR=255 err10=-236 extra=0
+[2026-11-12T10:13:33.919+07:00] PID t=65131ms adc=776,1902,810,2038,2147,2000,657,565,644,464,1499,455,1409,1251,834,1471 cal=0,0,0,0,787,938,0,0,0,0,0,0,0,0,0,0 logic=0000110000000000 pwm=(42,217) enc=(2290,2262) err=-29.562 p=-72.469 i=-0.000 d=-14.799 out=-87.268
+[2026-11-12T10:13:34.015+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1281 t_ms=65203 dur_ms=0 mask=01FF bits=0030 pwmL=-2 pwmR=255 err10=-305 extra=0
+[2026-11-12T10:13:34.063+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1324 t_ms=65235 dur_ms=0 mask=01FF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:34.110+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=1361 t_ms=65264 dur_ms=0 mask=01FF bits=1000 pwmL=0 pwmR=0 err10=0 extra=0
+[2026-11-12T10:13:34.110+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=IMMEDIATE_SEARCH dir=1 runEnc=1378 t_ms=65279 dur_ms=0 mask=01FF bits=0000 pwmL=0 pwmR=0 err10=0 extra=0
+[2026-11-12T10:13:34.156+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1378 t_ms=65279 dur_ms=0 mask=01FF bits=0000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:34.157+07:00] PID t=65331ms adc=848,1986,831,2035,1006,752,583,563,659,483,1511,466,1488,1310,895,1565 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-90) enc=(2464,2564) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:34.296+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=IMMEDIATE_SEARCH dir=0 runEnc=1506 t_ms=65474 dur_ms=195 mask=FFFF bits=C000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:34.297+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=1506 t_ms=65474 dur_ms=210 mask=FFFF bits=C000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:34.343+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=1507 t_ms=65476 dur_ms=0 mask=FFFF bits=4000 pwmL=255 pwmR=-124 err10=0 extra=0
+[2026-11-12T10:13:34.344+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1510 t_ms=65483 dur_ms=0 mask=FFFF bits=6000 pwmL=134 pwmR=125 err10=608 extra=0
+[2026-11-12T10:13:34.344+07:00] PID t=65531ms adc=859,1979,828,2016,984,710,554,543,647,923,2384,527,1486,1284,870,1509 cal=0,0,0,0,0,0,0,0,0,186,563,0,0,0,0,0 logic=0000000000100000 pwm=(182,77) enc=(2672,2583) err=25.000 p=58.000 i=0.000 d=-5.120 out=52.880
+[2026-11-12T10:13:34.437+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1536 t_ms=65524 dur_ms=0 mask=FFFF bits=0400 pwmL=-12 pwmR=255 err10=250 extra=0
+[2026-11-12T10:13:34.504+07:00] TX > DIAG
+[2026-11-12T10:13:34.546+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=1547 t_ms=65541 dur_ms=65 mask=FFFF bits=0200 pwmL=160 pwmR=99 err10=150 extra=0
+[2026-11-12T10:13:34.547+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1558 t_ms=65555 dur_ms=0 mask=FFFF bits=0B00 pwmL=255 pwmR=-106 err10=172 extra=0
+[2026-11-12T10:13:34.594+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1572 t_ms=65574 dur_ms=0 mask=FFFF bits=3FC0 pwmL=-25 pwmR=255 err10=203 extra=0
+[2026-11-12T10:13:34.594+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=1581 t_ms=65584 dur_ms=0 mask=FFFF bits=F460 pwmL=255 pwmR=-127 err10=0 extra=0
+[2026-11-12T10:13:34.594+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1592 t_ms=65596 dur_ms=0 mask=FFFF bits=E020 pwmL=255 pwmR=-30 err10=408 extra=0
+[2026-11-12T10:13:34.595+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1613 t_ms=65618 dur_ms=0 mask=FFFF bits=800C pwmL=-58 pwmR=255 err10=66 extra=0
+[2026-11-12T10:13:34.641+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=1619 t_ms=65626 dur_ms=0 mask=FFFF bits=000C pwmL=-224 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:34.642+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=592.4Hz pid=592.4Hz queued=100.2Hz sent=99.7Hz drop=0 failed=0 missed=0 pending=1 encL=2825 encR=2716 case=2 line=1 lost=0 reacq=12 map=1 runEnc=1683 hs=0 peak=240 route=0 rf=0 clu=0008
+[2026-11-12T10:13:34.643+07:00] PID t=65731ms adc=802,2016,999,2714,1678,723,555,546,649,463,1493,448,1426,1260,822,1478 cal=0,0,0,495,388,0,0,0,0,0,0,0,0,0,0,0 logic=0001000000000000 pwm=(-100,90) enc=(2825,2716) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:34.734+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=1695 t_ms=65759 dur_ms=133 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:34.735+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=1695 t_ms=65759 dur_ms=175 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:34.736+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1695 t_ms=65759 dur_ms=0 mask=FFFF bits=0060 pwmL=83 pwmR=176 err10=-209 extra=0
+[2026-11-12T10:13:34.781+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1700 t_ms=65768 dur_ms=0 mask=FFFF bits=00C0 pwmL=255 pwmR=-48 err10=-111 extra=0
+[2026-11-12T10:13:34.782+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=1721 t_ms=65809 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=-111 err10=192 extra=0
+[2026-11-12T10:13:34.827+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1777 t_ms=65885 dur_ms=0 mask=FFFF bits=0400 pwmL=-12 pwmR=255 err10=250 extra=0
+[2026-11-12T10:13:34.873+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1831 t_ms=65943 dur_ms=0 mask=FFFF bits=0200 pwmL=-39 pwmR=255 err10=150 extra=0
+[2026-11-12T10:13:34.874+07:00] PID t=65931ms adc=784,1882,771,1959,939,653,529,527,655,1233,2533,447,1349,1177,752,1397 cal=0,0,0,0,0,0,0,0,0,579,698,0,0,0,0,0 logic=0000000001100000 pwm=(135,124) enc=(2945,2868) err=20.466 p=44.809 i=0.000 d=-39.114 out=5.695
+[2026-11-12T10:13:34.920+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1871 t_ms=65983 dur_ms=0 mask=FFFF bits=0300 pwmL=-48 pwmR=255 err10=113 extra=0
+[2026-11-12T10:13:34.968+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=1997 t_ms=66093 dur_ms=0 mask=FFFF bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:35.014+07:00] PID t=66140ms adc=849,1986,848,2029,982,736,584,784,1535,849,1490,454,1435,1253,838,1485 cal=0,0,0,0,0,0,0,0,743,92,0,0,0,0,0,0 logic=0000000010000000 pwm=(138,121) enc=(3192,3096) err=5.000 p=8.720 i=0.000 d=-0.000 out=8.720
+[2026-11-12T10:13:35.108+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2131 t_ms=66197 dur_ms=0 mask=FFFF bits=0180 pwmL=-68 pwmR=255 err10=12 extra=0
+[2026-11-12T10:13:35.154+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2174 t_ms=66229 dur_ms=0 mask=FFFF bits=0980 pwmL=255 pwmR=-84 err10=80 extra=0
+[2026-11-12T10:13:35.155+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=2185 t_ms=66238 dur_ms=0 mask=FFFF bits=3500 pwmL=236 pwmR=23 err10=0 extra=0
+[2026-11-12T10:13:35.247+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=2189 t_ms=66241 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-220 err10=0 extra=0
+[2026-11-12T10:13:35.248+07:00] PID t=66341ms adc=772,1807,737,1914,928,635,511,522,626,461,1489,448,1344,1184,752,1405 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(3462,3261) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:35.605+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=2375 t_ms=66542 dur_ms=301 mask=FFFF bits=0080 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:35.605+07:00] PID t=66542ms adc=762,1794,729,1901,932,651,869,1335,784,479,1535,470,1450,1210,757,1409 cal=0,0,0,0,0,0,40,474,0,0,0,0,0,0,0,0 logic=0000000100000000 pwm=(121,138) enc=(3686,3239) err=-5.000 p=-8.720 i=-0.000 d=0.000 out=-8.720
+[2026-11-12T10:13:35.651+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=2375 t_ms=66542 dur_ms=304 mask=FFFF bits=0080 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:35.652+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2375 t_ms=66542 dur_ms=0 mask=FFFF bits=0080 pwmL=121 pwmR=138 err10=-50 extra=0
+[2026-11-12T10:13:35.652+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2383 t_ms=66555 dur_ms=0 mask=FFFF bits=0020 pwmL=-128 pwmR=255 err10=-250 extra=0
+[2026-11-12T10:13:35.653+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=2397 t_ms=66584 dur_ms=0 mask=FFFF bits=000C pwmL=67 pwmR=122 err10=0 extra=0
+[2026-11-12T10:13:35.698+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=2398 t_ms=66585 dur_ms=0 mask=FFFF bits=000C pwmL=-22 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:35.700+07:00] PID t=66751ms adc=1971,2864,848,2003,978,725,580,531,628,464,1490,467,1434,1200,769,1399 cal=747,536,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=1100000000000000 pwm=(-100,90) enc=(3742,3335) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:35.746+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=2471 t_ms=66850 dur_ms=265 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:35.792+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=2471 t_ms=66850 dur_ms=266 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:35.839+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2471 t_ms=66850 dur_ms=0 mask=FFFF bits=0060 pwmL=84 pwmR=175 err10=-206 extra=0
+[2026-11-12T10:13:35.915+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2474 t_ms=66857 dur_ms=0 mask=FFFF bits=00E0 pwmL=255 pwmR=-37 err10=-158 extra=0
+[2026-11-12T10:13:35.916+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2511 t_ms=66936 dur_ms=0 mask=FFFF bits=0380 pwmL=-58 pwmR=255 err10=62 extra=0
+[2026-11-12T10:13:36.008+07:00] PID t=66960ms adc=803,1936,810,2019,1005,752,595,1611,1511,750,1497,465,1457,1275,865,1522 cal=0,0,0,0,0,0,0,757,712,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(135,124) enc=(3732,3497) err=-0.153 p=-0.246 i=0.000 d=5.535 out=5.289
+[2026-11-12T10:13:36.102+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2591 t_ms=67039 dur_ms=0 mask=FFFF bits=0080 pwmL=-78 pwmR=255 err10=-50 extra=0
+[2026-11-12T10:13:36.150+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2647 t_ms=67097 dur_ms=0 mask=FFFF bits=0080 pwmL=255 pwmR=-61 err10=-50 extra=0
+[2026-11-12T10:13:36.197+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2665 t_ms=67114 dur_ms=0 mask=FFFF bits=00C0 pwmL=-85 pwmR=255 err10=-83 extra=0
+[2026-11-12T10:13:36.198+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2693 t_ms=67140 dur_ms=0 mask=FFFF bits=0080 pwmL=255 pwmR=-61 err10=-50 extra=0
+[2026-11-12T10:13:36.275+07:00] PID t=67161ms adc=842,1970,819,2005,983,717,1043,1665,819,455,1488,451,1466,1280,873,1523 cal=0,0,0,0,0,0,225,813,0,0,0,0,0,0,0,0 logic=0000000100000000 pwm=(121,138) enc=(3888,3723) err=-5.000 p=-8.720 i=-0.000 d=0.001 out=-8.719
+[2026-11-12T10:13:36.446+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=2734 t_ms=67175 dur_ms=0 mask=FFFF bits=00C0 pwmL=-85 pwmR=255 err10=-82 extra=0
+[2026-11-12T10:13:36.525+07:00] TX > DIAG
+[2026-11-12T10:13:36.556+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2761 t_ms=67198 dur_ms=0 mask=FFFF bits=0080 pwmL=255 pwmR=-61 err10=-50 extra=0
+[2026-11-12T10:13:36.852+07:00] PID t=67361ms adc=805,1936,798,1982,955,689,655,1635,1107,448,1478,453,1441,1274,858,1498 cal=0,0,0,0,0,0,0,782,178,0,0,0,0,0,0,0 logic=0000000100000000 pwm=(121,138) enc=(4125,3997) err=-5.000 p=-8.720 i=-0.000 d=0.000 out=-8.720
+[2026-11-12T10:13:36.898+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=2994 t_ms=67376 dur_ms=0 mask=FFFF bits=0180 pwmL=255 pwmR=-67 err10=-15 extra=0
+[2026-11-12T10:13:37.101+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3059 t_ms=67422 dur_ms=0 mask=FFFF bits=0080 pwmL=-78 pwmR=255 err10=-50 extra=0
+[2026-11-12T10:13:37.212+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3079 t_ms=67436 dur_ms=0 mask=FFFF bits=0180 pwmL=255 pwmR=-67 err10=-18 extra=0
+[2026-11-12T10:13:37.398+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3154 t_ms=67488 dur_ms=0 mask=FFFF bits=0080 pwmL=-78 pwmR=255 err10=-50 extra=0
+[2026-11-12T10:13:37.445+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3157 t_ms=67490 dur_ms=0 mask=FFFF bits=0180 pwmL=255 pwmR=-67 err10=-16 extra=0
+[2026-11-12T10:13:37.491+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=3174 t_ms=67503 dur_ms=0 mask=FFFF bits=0004 pwmL=-111 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:37.492+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=CENTROID dir=-1 runEnc=3179 t_ms=67507 dur_ms=0 mask=FFFF bits=0004 pwmL=-45 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:37.492+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=599.6Hz pid=599.6Hz queued=99.9Hz sent=100.4Hz drop=0 failed=0 missed=0 pending=0 encL=4356 encR=4541 case=2 line=1 lost=0 reacq=15 map=1 runEnc=3362 hs=0 peak=240 route=0 rf=0 clu=0002
+[2026-11-12T10:13:37.493+07:00] PID t=67570ms adc=875,1979,813,2017,992,751,582,573,656,469,1484,451,1438,1250,845,1477 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(-100,90) enc=(4356,4306) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:37.539+07:00] PID t=67795ms adc=816,1935,786,2010,1051,1431,1207,609,624,459,1494,470,1453,1232,799,1430 cal=0,0,0,0,0,435,399,0,0,0,0,0,0,0,0,0 logic=0000010000000000 pwm=(-100,90) enc=(4350,4590) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:37.711+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=CENTROID dir=0 runEnc=3384 t_ms=67799 dur_ms=292 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:37.786+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=3384 t_ms=67799 dur_ms=296 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:37.787+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3384 t_ms=67799 dur_ms=0 mask=FFFF bits=0040 pwmL=99 pwmR=160 err10=-150 extra=0
+[2026-11-12T10:13:37.833+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3409 t_ms=67841 dur_ms=0 mask=FFFF bits=0800 pwmL=255 pwmR=-161 err10=350 extra=0
+[2026-11-12T10:13:37.834+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=3414 t_ms=67851 dur_ms=0 mask=FFFF bits=1000 pwmL=223 pwmR=36 err10=0 extra=0
+[2026-11-12T10:13:37.881+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=3423 t_ms=67865 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-218 err10=0 extra=0
+[2026-11-12T10:13:38.068+07:00] PID t=68001ms adc=796,1874,751,1918,929,638,506,503,622,832,2367,1303,1482,1221,751,1379 cal=0,0,0,0,0,0,0,0,0,71,547,631,0,0,0,0 logic=0000000000110000 pwm=(90,-100) enc=(4453,4681) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:38.114+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=3485 t_ms=68017 dur_ms=152 mask=FFFF bits=0600 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:38.114+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=3485 t_ms=68017 dur_ms=166 mask=FFFF bits=0600 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:38.115+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=3563 t_ms=68163 dur_ms=0 mask=FFFF bits=8000 pwmL=-86 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:38.116+07:00] PID t=68263ms adc=771,1747,717,1921,958,674,537,525,629,455,1494,448,1424,1286,997,2277 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,443 logic=0000000000000001 pwm=(255,-152) enc=(4599,4815) err=75.000 p=282.000 i=0.000 d=0.000 out=282.000
+[2026-11-12T10:13:38.161+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3563 t_ms=68163 dur_ms=0 mask=FFFF bits=8000 pwmL=255 pwmR=-152 err10=750 extra=0
+[2026-11-12T10:13:38.162+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3563 t_ms=68163 dur_ms=0 mask=FFFF bits=8000 pwmL=255 pwmR=-152 err10=750 extra=0
+[2026-11-12T10:13:38.208+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=IMMEDIATE_SEARCH dir=1 runEnc=3621 t_ms=68265 dur_ms=0 mask=FFFF bits=0000 pwmL=255 pwmR=-152 err10=0 extra=0
+[2026-11-12T10:13:38.209+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=IMMEDIATE_SEARCH dir=0 runEnc=3665 t_ms=68344 dur_ms=79 mask=FFFF bits=6000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:38.209+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=3665 t_ms=68344 dur_ms=181 mask=FFFF bits=6000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:38.210+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=3666 t_ms=68346 dur_ms=0 mask=FFFF bits=2000 pwmL=255 pwmR=-67 err10=0 extra=0
+[2026-11-12T10:13:38.347+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3671 t_ms=68352 dur_ms=0 mask=FFFF bits=3000 pwmL=86 pwmR=173 err10=509 extra=0
+[2026-11-12T10:13:38.348+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3686 t_ms=68374 dur_ms=0 mask=FFFF bits=0400 pwmL=-12 pwmR=255 err10=250 extra=0
+[2026-11-12T10:13:38.349+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=3695 t_ms=68387 dur_ms=41 mask=FFFF bits=0200 pwmL=-39 pwmR=255 err10=150 extra=0
+[2026-11-12T10:13:38.351+07:00] PID t=68472ms adc=774,1666,720,2357,1854,656,528,496,642,475,1535,459,1420,1314,866,1507 cal=0,0,0,135,538,0,0,0,0,0,0,0,0,0,0,0 logic=0000100000000000 pwm=(38,221) enc=(4846,4862) err=-35.000 p=-91.280 i=-0.000 d=0.000 out=-91.280
+[2026-11-12T10:13:38.394+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=3784 t_ms=68489 dur_ms=0 mask=FFFF bits=0008 pwmL=67 pwmR=122 err10=0 extra=0
+[2026-11-12T10:13:38.395+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3789 t_ms=68494 dur_ms=0 mask=FFFF bits=000C pwmL=-221 pwmR=255 err10=-499 extra=0
+[2026-11-12T10:13:38.566+07:00] PID t=68672ms adc=1854,2350,771,1939,944,640,511,509,624,445,1470,434,1359,1188,782,1431 cal=649,144,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=1000000000000000 pwm=(-100,90) enc=(4894,5068) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:38.572+07:00] TX > DIAG
+[2026-11-12T10:13:38.613+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=3928 t_ms=68761 dur_ms=266 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:38.613+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=3928 t_ms=68761 dur_ms=272 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:38.614+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=3928 t_ms=68761 dur_ms=0 mask=FFFF bits=0040 pwmL=99 pwmR=160 err10=-150 extra=0
+[2026-11-12T10:13:38.615+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3934 t_ms=68770 dur_ms=0 mask=FFFF bits=00C0 pwmL=255 pwmR=-50 err10=-101 extra=0
+[2026-11-12T10:13:38.615+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=3956 t_ms=68812 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=-112 err10=196 extra=0
+[2026-11-12T10:13:38.659+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4004 t_ms=68878 dur_ms=0 mask=FFFF bits=0400 pwmL=-12 pwmR=255 err10=250 extra=0
+[2026-11-12T10:13:38.660+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4039 t_ms=68918 dur_ms=0 mask=FFFF bits=0600 pwmL=-9 pwmR=255 err10=196 extra=0
+[2026-11-12T10:13:38.660+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4086 t_ms=68966 dur_ms=0 mask=FFFF bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:38.661+07:00] PID t=68881ms adc=853,1993,831,2009,983,706,548,530,621,544,2559,915,1360,1181,770,1438 cal=0,0,0,0,0,0,0,0,0,0,721,212,0,0,0,0 logic=0000000000100000 pwm=(156,104) enc=(4925,5263) err=25.000 p=58.000 i=0.000 d=-32.000 out=26.000
+[2026-11-12T10:13:38.752+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=4416 t_ms=69233 dur_ms=0 mask=FFFF bits=0980 pwmL=255 pwmR=-85 err10=84 extra=0
+[2026-11-12T10:13:38.799+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=4424 t_ms=69240 dur_ms=0 mask=FFFF bits=1000 pwmL=255 pwmR=-109 err10=0 extra=0
+[2026-11-12T10:13:38.800+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=CENTROID dir=1 runEnc=4428 t_ms=69243 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=0 err10=0 extra=0
+[2026-11-12T10:13:38.801+07:00] PID t=69081ms adc=805,1887,764,1949,944,685,545,1514,1495,487,1469,431,1363,1206,803,1443 cal=0,0,0,0,0,0,0,658,690,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(110,149) enc=(5128,5481) err=0.119 p=0.190 i=0.000 d=-19.884 out=-19.694
+[2026-11-12T10:13:38.802+07:00] PID t=69332ms adc=801,1918,803,1996,976,715,560,607,714,508,1607,487,1645,1980,1517,2310 cal=0,0,0,0,0,0,0,0,0,0,0,0,21,389,392,468 logic=0000000000000001 pwm=(90,-100) enc=(5456,5732) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:38.971+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=4622 t_ms=69549 dur_ms=309 mask=FFFF bits=0080 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:39.049+07:00] PID t=69541ms adc=832,1949,784,1957,950,674,523,1006,1232,550,1535,436,1364,1203,771,1424 cal=0,0,0,0,0,0,0,137,343,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(5696,5716) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:39.094+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=4622 t_ms=69549 dur_ms=0 mask=FFFF bits=0080 pwmL=121 pwmR=138 err10=-50 extra=0
+[2026-11-12T10:13:39.142+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=NORMAL_SEARCH dir=-1 runEnc=4721 t_ms=69692 dur_ms=0 mask=FFFF bits=0000 pwmL=85 pwmR=104 err10=0 extra=0
+[2026-11-12T10:13:39.143+07:00] RX < MAP1_EVT type=TURN_ENTER src=NORMAL_SEARCH dir=-1 runEnc=4721 t_ms=69692 dur_ms=0 mask=FFFF bits=0000 pwmL=85 pwmR=104 err10=0 extra=0
+[2026-11-12T10:13:39.144+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4721 t_ms=69692 dur_ms=0 mask=FFFF bits=0000 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.144+07:00] PID t=69750ms adc=822,1950,793,1989,970,704,542,528,624,438,1462,439,1349,1178,763,1411 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(-90,90) enc=(5866,5826) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:39.189+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=432.5Hz pid=432.5Hz queued=68.3Hz sent=68.3Hz drop=12 failed=0 missed=53 pending=0 encL=5872 encR=5873 case=2 line=0 lost=1 reacq=214map=1 runEnc=1785 hs=0 peak=240 route=0 rf=0 clu=0000
+[2026-11-12T10:13:39.190+07:00] RX < U�=��з&p���<~�a����Z`ݪ5�v�%���걫�K��e��Z@�Uƀ��%���$p�1�a��j�
+[2026-11-12T10:13:39.249+07:00] RX < ��ZMAP1_EVT type=SEARCH_EXIT src=NORMAL_SEARCH dir=0 runEnc=4806 t_ms=69855 dur_ms=163 mask=FFFF bits=0006 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.283+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=4806 t_ms=69855 dur_ms=163 mask=FFFF bits=0006 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.284+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=4807 t_ms=69857 dur_ms=0 mask=FFFF bits=0006 pwmL=-69 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:39.330+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4808 t_ms=69859 dur_ms=0 mask=FFFF bits=0004 pwmL=154 pwmR=105 err10=-550 extra=0
+[2026-11-12T10:13:39.376+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=IMMEDIATE_SEARCH dir=-1 runEnc=4814 t_ms=69869 dur_ms=0 mask=FFFF bits=0000 pwmL=-43 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:39.377+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=IMMEDIATE_SEARCH dir=0 runEnc=4825 t_ms=69898 dur_ms=29 mask=FFFF bits=0040 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.378+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=4825 t_ms=69898 dur_ms=41 mask=FFFF bits=0040 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.379+07:00] PID t=69950ms adc=782,1834,759,1973,974,695,542,530,626,463,1567,598,2241,1693,810,1481 cal=0,0,0,0,0,0,0,0,0,0,0,0,502,180,0,0 logic=0000000000001000 pwm=(255,0) enc=(5868,6015) err=45.000 p=130.320 i=0.000 d=0.000 out=130.320
+[2026-11-12T10:13:39.423+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=4847 t_ms=69937 dur_ms=0 mask=FFFF bits=0C00 pwmL=255 pwmR=-144 err10=301 extra=0
+[2026-11-12T10:13:39.469+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=4852 t_ms=69947 dur_ms=0 mask=FFFF bits=1000 pwmL=255 pwmR=-179 err10=0 extra=0
+[2026-11-12T10:13:39.471+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=4860 t_ms=69958 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-218 err10=0 extra=0
+[2026-11-12T10:13:39.472+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=4914 t_ms=70101 dur_ms=143 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:39.517+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=4914 t_ms=70101 dur_ms=154 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:39.517+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=4914 t_ms=70101 dur_ms=0 mask=FFFF bits=0200 pwmL=160 pwmR=99 err10=150 extra=0
+[2026-11-12T10:13:39.518+07:00] PID t=70151ms adc=848,2003,810,1984,970,1669,1447,547,637,454,1472,437,1353,1218,786,1449 cal=0,0,0,0,0,645,654,0,0,0,0,0,0,0,0,0 logic=0000011000000000 pwm=(10,249) enc=(6001,6042) err=-19.965 p=-43.425 i=-0.000 d=-76.471 out=-119.896
+[2026-11-12T10:13:39.563+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4920 t_ms=70117 dur_ms=0 mask=FFFF bits=0180 pwmL=-70 pwmR=255 err10=-1 extra=0
+[2026-11-12T10:13:39.564+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=4940 t_ms=70163 dur_ms=0 mask=FFFF bits=0020 pwmL=40 pwmR=220 err10=-250 extra=0
+[2026-11-12T10:13:39.640+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=4957 t_ms=70190 dur_ms=0 mask=FFFF bits=0060 pwmL=255 pwmR=-22 err10=-215 extra=0
+[2026-11-12T10:13:39.687+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=4998 t_ms=70246 dur_ms=0 mask=FFFF bits=0060 pwmL=255 pwmR=-10 err10=-181 extra=0
+[2026-11-12T10:13:39.733+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5059 t_ms=70314 dur_ms=0 mask=FFFF bits=00E0 pwmL=-97 pwmR=255 err10=-138 extra=0
+[2026-11-12T10:13:39.734+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=5076 t_ms=70332 dur_ms=0 mask=FFFF bits=007C pwmL=-137 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:39.734+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=5080 t_ms=70337 dur_ms=0 mask=FFFF bits=000C pwmL=-224 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:39.735+07:00] PID t=70351ms adc=1527,2833,1746,2201,1037,743,581,560,624,437,1460,432,1357,1191,771,1405 cal=376,512,555,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0110000000000000 pwm=(-100,90) enc=(6144,6216) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:39.858+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=5193 t_ms=70529 dur_ms=192 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.859+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=5193 t_ms=70529 dur_ms=197 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:39.860+07:00] PID t=70551ms adc=863,2000,833,2027,989,703,580,1453,1167,478,1472,439,1360,1189,762,1415 cal=0,0,0,0,0,0,0,595,257,0,0,0,0,0,0,0 logic=0000000100000000 pwm=(123,136) enc=(6144,6443) err=-5.000 p=-8.720 i=-0.000 d=2.048 out=-6.672
+[2026-11-12T10:13:39.905+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5193 t_ms=70529 dur_ms=0 mask=FFFF bits=0060 pwmL=84 pwmR=175 err10=-208 extra=0
+[2026-11-12T10:13:39.952+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=5200 t_ms=70540 dur_ms=0 mask=FFFF bits=00C0 pwmL=255 pwmR=-49 err10=-107 extra=0
+[2026-11-12T10:13:39.952+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=5228 t_ms=70585 dur_ms=0 mask=FFFF bits=0400 pwmL=255 pwmR=-128 err10=250 extra=0
+[2026-11-12T10:13:39.998+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5289 t_ms=70660 dur_ms=0 mask=FFFF bits=0400 pwmL=-12 pwmR=255 err10=250 extra=0
+[2026-11-12T10:13:40.044+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5329 t_ms=70700 dur_ms=0 mask=FFFF bits=0200 pwmL=80 pwmR=179 err10=150 extra=0
+[2026-11-12T10:13:40.045+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5380 t_ms=70748 dur_ms=0 mask=FFFF bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:40.045+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5426 t_ms=70790 dur_ms=0 mask=FFFF bits=0180 pwmL=-68 pwmR=255 err10=11 extra=0
+[2026-11-12T10:13:40.046+07:00] PID t=70752ms adc=803,1939,829,2031,1008,737,551,649,1424,1037,1505,446,1413,1252,818,1469 cal=0,0,0,0,0,0,0,0,597,331,0,0,0,0,0,0 logic=0000000010000000 pwm=(106,153) enc=(6306,6634) err=5.000 p=8.720 i=0.000 d=-32.000 out=-23.280
+[2026-11-12T10:13:40.092+07:00] PID t=70960ms adc=779,1775,722,1936,976,724,529,1520,1474,469,1494,459,1390,1210,800,1450 cal=0,0,0,0,0,0,0,664,663,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(112,147) enc=(6555,6909) err=-0.004 p=-0.006 i=0.000 d=-17.009 out=-17.015
+[2026-11-12T10:13:40.138+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=5660 t_ms=70972 dur_ms=0 mask=FFFF bits=0980 pwmL=255 pwmR=-83 err10=76 extra=0
+[2026-11-12T10:13:40.138+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=5671 t_ms=70981 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-134 err10=0 extra=0
+[2026-11-12T10:13:40.139+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=5673 t_ms=70982 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-19 err10=0 extra=0
+[2026-11-12T10:13:40.231+07:00] PID t=71161ms adc=814,1815,706,1874,926,625,496,496,614,443,1471,435,1397,1201,805,1474 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(6822,6969) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:40.371+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=5868 t_ms=71286 dur_ms=304 mask=FFFF bits=0080 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:40.371+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=5868 t_ms=71286 dur_ms=305 mask=FFFF bits=0080 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:40.419+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=5868 t_ms=71286 dur_ms=0 mask=FFFF bits=0080 pwmL=121 pwmR=138 err10=-50 extra=0
+[2026-11-12T10:13:40.419+07:00] PID t=71361ms adc=832,2672,1997,2145,991,706,550,534,625,447,1477,441,1418,1247,833,1489 cal=0,390,750,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0010000000000000 pwm=(-100,90) enc=(7010,6976) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:40.466+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5876 t_ms=71299 dur_ms=0 mask=FFFF bits=0060 pwmL=-113 pwmR=255 err10=-198 extra=0
+[2026-11-12T10:13:40.467+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=5891 t_ms=71329 dur_ms=0 mask=FFFF bits=0008 pwmL=67 pwmR=122 err10=0 extra=0
+[2026-11-12T10:13:40.467+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=5894 t_ms=71334 dur_ms=0 mask=FFFF bits=000C pwmL=-222 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:40.468+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=5938 t_ms=71454 dur_ms=120 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:40.468+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=5938 t_ms=71454 dur_ms=125 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:40.513+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=5938 t_ms=71454 dur_ms=0 mask=FFFF bits=0060 pwmL=83 pwmR=176 err10=-211 extra=0
+[2026-11-12T10:13:40.514+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=5944 t_ms=71466 dur_ms=0 mask=FFFF bits=00C0 pwmL=255 pwmR=-48 err10=-111 extra=0
+[2026-11-12T10:13:40.514+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=5962 t_ms=71507 dur_ms=0 mask=FFFF bits=0200 pwmL=240 pwmR=19 err10=150 extra=0
+[2026-11-12T10:13:40.560+07:00] PID t=71561ms adc=803,1916,779,1954,965,688,542,523,634,640,2523,786,1394,1238,842,1462 cal=0,0,0,0,0,0,0,0,0,0,689,73,0,0,0,0 logic=0000000000100000 pwm=(188,72) enc=(7055,7110) err=25.000 p=58.000 i=0.000 d=0.000 out=58.000
+[2026-11-12T10:13:40.607+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6017 t_ms=71590 dur_ms=0 mask=FFFF bits=0600 pwmL=-22 pwmR=255 err10=213 extra=0
+[2026-11-12T10:13:40.612+07:00] TX > DIAG
+[2026-11-12T10:13:40.701+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6087 t_ms=71669 dur_ms=0 mask=FFFF bits=0300 pwmL=-48 pwmR=255 err10=111 extra=0
+[2026-11-12T10:13:40.779+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6174 t_ms=71749 dur_ms=0 mask=FFFF bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:40.780+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=6207 t_ms=71778 dur_ms=0 mask=FFFF bits=0300 pwmL=255 pwmR=-85 err10=86 extra=0
+[2026-11-12T10:13:40.781+07:00] PID t=71771ms adc=846,1968,804,2021,1008,765,605,667,1524,1061,1491,440,1386,1217,787,1435 cal=0,0,0,0,0,0,0,0,729,361,0,0,0,0,0,0 logic=0000000010000000 pwm=(138,121) enc=(7274,7298) err=5.000 p=8.720 i=0.000 d=-0.001 out=8.719
+[2026-11-12T10:13:40.827+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6227 t_ms=71795 dur_ms=0 mask=FFFF bits=0100 pwmL=-61 pwmR=255 err10=50 extra=0
+[2026-11-12T10:13:40.874+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6279 t_ms=71836 dur_ms=0 mask=FFFF bits=0180 pwmL=-68 pwmR=255 err10=10 extra=0
+[2026-11-12T10:13:40.874+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=599.3Hz pid=599.3Hz queued=99.8Hz sent=99.8Hz drop=0 failed=0 missed=0 pending=0 encL=7365 encR=7391 case=1 line=1 lost=1 reacq=27 map=1 runEnc=6291 hs=0 peak=240 route=0 rf=0 clu=01F0
+[2026-11-12T10:13:40.920+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=6297 t_ms=71852 dur_ms=0 mask=FFFF bits=0004 pwmL=-173 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:40.921+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=CENTROID dir=-1 runEnc=6300 t_ms=71855 dur_ms=0 mask=FFFF bits=0004 pwmL=-45 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:41.013+07:00] PID t=71972ms adc=886,2038,880,2061,1008,743,564,558,638,455,1467,442,1344,1159,736,1366 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(-100,90) enc=(7400,7557) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:41.153+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=CENTROID dir=0 runEnc=6471 t_ms=72128 dur_ms=273 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:41.154+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=6471 t_ms=72128 dur_ms=276 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:41.200+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6471 t_ms=72128 dur_ms=0 mask=FFFF bits=0040 pwmL=99 pwmR=160 err10=-150 extra=0
+[2026-11-12T10:13:41.201+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=6498 t_ms=72176 dur_ms=0 mask=FFFF bits=0C00 pwmL=255 pwmR=-144 err10=301 extra=0
+[2026-11-12T10:13:41.202+07:00] PID t=72181ms adc=791,1872,752,1937,940,660,535,547,640,475,1814,1184,1918,1193,757,1403 cal=0,0,0,0,0,0,0,0,0,0,46,502,242,0,0,0 logic=0000000000010000 pwm=(253,6) enc=(7392,7784) err=35.000 p=91.280 i=0.000 d=32.000 out=123.280
+[2026-11-12T10:13:41.295+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=6505 t_ms=72189 dur_ms=0 mask=FFFF bits=1000 pwmL=255 pwmR=-177 err10=0 extra=0
+[2026-11-12T10:13:41.419+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=6515 t_ms=72203 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-217 err10=0 extra=0
+[2026-11-12T10:13:41.621+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=6567 t_ms=72331 dur_ms=128 mask=FFFF bits=0600 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:41.668+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=6567 t_ms=72331 dur_ms=142 mask=FFFF bits=0600 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:41.714+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=6567 t_ms=72331 dur_ms=0 mask=FFFF bits=0600 pwmL=176 pwmR=83 err10=209 extra=0
+[2026-11-12T10:13:41.746+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6573 t_ms=72343 dur_ms=0 mask=FFFF bits=0300 pwmL=-49 pwmR=255 err10=106 extra=0
+[2026-11-12T10:13:41.746+07:00] PID t=72381ms adc=819,1936,800,1988,967,731,1326,1641,963,476,1483,439,1389,1201,758,1400 cal=0,0,0,0,0,0,526,788,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(53,206) enc=(7531,7824) err=-9.003 p=-16.739 i=-0.000 d=-60.123 out=-76.862
+[2026-11-12T10:13:41.792+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=6595 t_ms=72390 dur_ms=0 mask=FFFF bits=0080 pwmL=255 pwmR=-61 err10=-50 extra=0
+[2026-11-12T10:13:41.793+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=6693 t_ms=72515 dur_ms=0 mask=FFFF bits=0100 pwmL=255 pwmR=-78 err10=50 extra=0
+[2026-11-12T10:13:41.793+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6725 t_ms=72548 dur_ms=0 mask=FFFF bits=0180 pwmL=-67 pwmR=255 err10=14 extra=0
+[2026-11-12T10:13:41.794+07:00] PID t=72582ms adc=815,1909,782,1969,958,687,544,1318,1473,554,1476,445,1419,1197,752,1381 cal=0,0,0,0,0,0,0,457,661,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(91,168) enc=(7725,7968) err=0.912 p=1.484 i=0.000 d=-39.567 out=-38.084
+[2026-11-12T10:13:41.840+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=6772 t_ms=72593 dur_ms=0 mask=FFFF bits=0100 pwmL=255 pwmR=-78 err10=50 extra=0
+[2026-11-12T10:13:41.840+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=6880 t_ms=72686 dur_ms=0 mask=FFFF bits=0180 pwmL=-68 pwmR=255 err10=8 extra=0
+[2026-11-12T10:13:41.841+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=6904 t_ms=72706 dur_ms=0 mask=FFFF bits=0014 pwmL=-142 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:41.841+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=CENTROID dir=-1 runEnc=6908 t_ms=72710 dur_ms=0 mask=FFFF bits=000C pwmL=-245 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:41.887+07:00] PID t=72791ms adc=801,1921,785,1968,957,666,532,535,647,464,1466,432,1354,1178,752,1405 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(-100,90) enc=(7898,8219) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:41.980+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=CENTROID dir=0 runEnc=7059 t_ms=72955 dur_ms=245 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:41.981+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=7059 t_ms=72955 dur_ms=249 mask=FFFF bits=0040 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:41.982+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7059 t_ms=72955 dur_ms=0 mask=FFFF bits=0040 pwmL=99 pwmR=160 err10=-150 extra=0
+[2026-11-12T10:13:41.983+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7089 t_ms=73008 dur_ms=0 mask=FFFF bits=0C00 pwmL=255 pwmR=-143 err10=297 extra=0
+[2026-11-12T10:13:41.984+07:00] PID t=72991ms adc=820,1961,831,2020,989,693,539,529,705,1063,2003,432,1325,1146,732,1369 cal=0,0,0,0,0,0,0,0,0,364,217,0,0,0,0,0 logic=0000000000000000 pwm=(92,97) enc=(7888,8444) err=-5.000 p=0.000 i=0.000 d=0.000 out=-8.720
+[2026-11-12T10:13:42.027+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=7098 t_ms=73023 dur_ms=0 mask=FFFF bits=1800 pwmL=255 pwmR=-169 err10=0 extra=0
+[2026-11-12T10:13:42.073+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=7109 t_ms=73040 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-217 err10=0 extra=0
+[2026-11-12T10:13:42.168+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=7151 t_ms=73132 dur_ms=92 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:42.246+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=7151 t_ms=73132 dur_ms=109 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:42.277+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7151 t_ms=73132 dur_ms=0 mask=FFFF bits=0200 pwmL=160 pwmR=99 err10=150 extra=0
+[2026-11-12T10:13:42.278+07:00] PID t=73191ms adc=829,1968,816,2016,1569,1755,712,563,659,476,1520,442,1363,1197,754,1408 cal=0,0,0,0,295,721,0,0,0,0,0,0,0,0,0,0 logic=0000010000000000 pwm=(69,190) enc=(8023,8510) err=-25.000 p=-58.000 i=-0.000 d=-2.048 out=-60.048
+[2026-11-12T10:13:42.324+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7159 t_ms=73149 dur_ms=0 mask=FFFF bits=0080 pwmL=-78 pwmR=255 err10=-50 extra=0
+[2026-11-12T10:13:42.324+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7182 t_ms=73196 dur_ms=0 mask=FFFF bits=0030 pwmL=-139 pwmR=255 err10=-286 extra=0
+[2026-11-12T10:13:42.325+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7207 t_ms=73234 dur_ms=0 mask=FFFF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:42.593+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7275 t_ms=73313 dur_ms=0 mask=FFFF bits=0040 pwmL=255 pwmR=-39 err10=-150 extra=0
+[2026-11-12T10:13:42.640+07:00] TX > DIAG
+[2026-11-12T10:13:42.832+07:00] PID t=73391ms adc=813,1945,819,2009,1003,770,1578,1661,646,451,1473,440,1408,1225,788,1439 cal=0,0,0,0,0,0,793,809,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(132,127) enc=(8178,8708) err=-9.950 p=-18.771 i=-0.000 d=21.005 out=2.234
+[2026-11-12T10:13:43.098+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7408 t_ms=73437 dur_ms=0 mask=FFFF bits=00E0 pwmL=-97 pwmR=255 err10=-138 extra=0
+[2026-11-12T10:13:43.176+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=7422 t_ms=73451 dur_ms=0 mask=FFFF bits=000C pwmL=-132 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:43.285+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=7424 t_ms=73453 dur_ms=0 mask=FFFF bits=000C pwmL=-24 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:43.332+07:00] PID t=73602ms adc=863,1954,790,1963,954,681,537,528,624,454,1475,451,1441,1227,784,1427 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(-100,90) enc=(8259,8978) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:43.457+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=7583 t_ms=73711 dur_ms=258 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:43.505+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=7583 t_ms=73711 dur_ms=260 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:43.553+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7583 t_ms=73711 dur_ms=0 mask=FFFF bits=0060 pwmL=84 pwmR=175 err10=-207 extra=0
+[2026-11-12T10:13:43.554+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7588 t_ms=73720 dur_ms=0 mask=FFFF bits=00C0 pwmL=255 pwmR=-48 err10=-110 extra=0
+[2026-11-12T10:13:43.600+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7619 t_ms=73770 dur_ms=0 mask=FFFF bits=0C00 pwmL=255 pwmR=-141 err10=294 extra=0
+[2026-11-12T10:13:43.602+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7640 t_ms=73801 dur_ms=0 mask=FFFF bits=1F80 pwmL=-17 pwmR=255 err10=232 extra=0
+[2026-11-12T10:13:43.602+07:00] PID t=73811ms adc=845,1969,819,2019,989,1232,1273,1489,1371,1184,2295,621,2417,1477,851,1458 cal=0,0,0,0,0,259,469,632,527,517,482,0,644,23,0,0 logic=0000001111101000 pwm=(-45,255) enc=(8281,9190) err=12.603 p=24.740 i=0.000 d=-200.000 out=-175.260
+[2026-11-12T10:13:43.648+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7675 t_ms=73844 dur_ms=0 mask=FFFF bits=0070 pwmL=-42 pwmR=255 err10=-250 extra=0
+[2026-11-12T10:13:43.649+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=599.3Hz pid=599.3Hz queued=100.0Hz sent=100.0Hz drop=0 failed=0 missed=0 pending=0 encL=8305 encR=9260 case=1 line=1 lost=1 reacq=32 map=1 runEnc=7695 hs=0 peak=240 route=0 rf=0 clu=0070
+[2026-11-12T10:13:43.650+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7691 t_ms=73864 dur_ms=0 mask=FFFF bits=0070 pwmL=255 pwmR=-7 err10=-265 extra=0
+[2026-11-12T10:13:43.696+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=7865 t_ms=74039 dur_ms=0 mask=FFFF bits=0004 pwmL=255 pwmR=-47 err10=0 extra=0
+[2026-11-12T10:13:43.728+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7865 t_ms=74039 dur_ms=0 mask=FFFF bits=0004 pwmL=-45 pwmR=255 err10=-550 extra=0
+[2026-11-12T10:13:43.729+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=7865 t_ms=74039 dur_ms=0 mask=FFFF bits=0004 pwmL=-45 pwmR=255 err10=-550 extra=0
+[2026-11-12T10:13:43.730+07:00] PID t=74037ms adc=821,1952,821,2035,1008,914,1566,1277,668,469,1508,458,1439,1244,817,1450 cal=0,0,0,0,0,0,781,415,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(255,-47) enc=(8494,9408) err=-11.530 p=-22.277 i=-0.000 d=200.000 out=177.723
+[2026-11-12T10:13:43.776+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=IMMEDIATE_SEARCH dir=-1 runEnc=7958 t_ms=74122 dur_ms=0 mask=FFFF bits=0000 pwmL=-45 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:43.839+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=IMMEDIATE_SEARCH dir=0 runEnc=7984 t_ms=74156 dur_ms=34 mask=FFFF bits=0003 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:43.918+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=7984 t_ms=74156 dur_ms=117 mask=FFFF bits=0003 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:43.966+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=7986 t_ms=74158 dur_ms=0 mask=FFFF bits=0007 pwmL=-127 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:43.966+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=7987 t_ms=74159 dur_ms=0 mask=FFFF bits=0007 pwmL=103 pwmR=156 err10=-651 extra=0
+[2026-11-12T10:13:43.967+07:00] PID t=74240ms adc=802,1873,728,1919,930,671,553,550,641,478,1535,461,2015,2081,1213,1424 cal=0,0,0,0,0,0,0,0,0,0,0,0,320,462,152,0 logic=0000000000000100 pwm=(90,-100) enc=(8651,9652) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:44.045+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=8011 t_ms=74183 dur_ms=0 mask=FFFF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:44.126+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=8018 t_ms=74192 dur_ms=34 mask=FFFF bits=0040 pwmL=255 pwmR=-25 err10=-203 extra=0
+[2026-11-12T10:13:44.314+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=8063 t_ms=74239 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-219 err10=0 extra=0
+[2026-11-12T10:13:44.315+07:00] PID t=74501ms adc=877,2005,856,2064,998,721,565,537,630,448,1479,448,1413,1463,1728,2558 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,13,558,652 logic=0000000000000011 pwm=(90,-100) enc=(8906,9645) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:44.361+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=8190 t_ms=74504 dur_ms=265 mask=FFFF bits=0100 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:44.362+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=8190 t_ms=74504 dur_ms=275 mask=FFFF bits=0100 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:44.363+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=8190 t_ms=74505 dur_ms=0 mask=FFFF bits=0100 pwmL=138 pwmR=121 err10=50 extra=0
+[2026-11-12T10:13:44.409+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8193 t_ms=74511 dur_ms=0 mask=FFFF bits=0080 pwmL=-78 pwmR=255 err10=-50 extra=0
+[2026-11-12T10:13:44.410+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=8247 t_ms=74600 dur_ms=0 mask=FFFF bits=0060 pwmL=255 pwmR=-30 err10=-186 extra=0
+[2026-11-12T10:13:44.456+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=8304 t_ms=74668 dur_ms=0 mask=FFFF bits=0080 pwmL=255 pwmR=-61 err10=-50 extra=0
+[2026-11-12T10:13:44.457+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8323 t_ms=74688 dur_ms=0 mask=FFFF bits=00C0 pwmL=-86 pwmR=255 err10=-87 extra=0
+[2026-11-12T10:13:44.458+07:00] PID t=74701ms adc=810,1936,793,1979,966,681,1401,1521,641,432,1456,437,1371,1177,733,1379 cal=0,0,0,0,0,0,605,665,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(77,182) enc=(9079,9764) err=-9.764 p=-18.368 i=-0.000 d=-33.768 out=-52.135
+[2026-11-12T10:13:44.627+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8437 t_ms=74794 dur_ms=0 mask=FFFF bits=00C0 pwmL=-22 pwmR=255 err10=-110 extra=0
+[2026-11-12T10:13:44.674+07:00] TX > DIAG
+[2026-11-12T10:13:44.720+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8562 t_ms=74897 dur_ms=0 mask=FFFF bits=0060 pwmL=-1 pwmR=255 err10=-207 extra=0
+[2026-11-12T10:13:44.721+07:00] PID t=74901ms adc=790,1917,795,2006,1697,1933,1227,531,622,441,1469,434,1334,1164,734,1389 cal=0,0,0,0,404,878,420,0,0,0,0,0,0,0,0,0 logic=0000111000000000 pwm=(-127,255) enc=(9275,10037) err=-24.906 p=-57.714 i=-0.000 d=-200.000 out=-257.714
+[2026-11-12T10:13:44.766+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8667 t_ms=74976 dur_ms=0 mask=FFFF bits=0030 pwmL=-20 pwmR=255 err10=-302 extra=0
+[2026-11-12T10:13:44.814+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8764 t_ms=75047 dur_ms=0 mask=FFFF bits=0030 pwmL=-16 pwmR=255 err10=-306 extra=0
+[2026-11-12T10:13:44.907+07:00] PID t=75112ms adc=796,1895,782,2815,2183,1133,609,579,654,453,1465,444,1424,1250,838,1503 cal=0,0,0,597,818,171,0,0,0,0,0,0,0,0,0,0 logic=0001100000000000 pwm=(17,242) enc=(9425,10448) err=-39.219 p=-107.049 i=-0.000 d=-5.671 out=-112.720
+[2026-11-12T10:13:45.032+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=8912 t_ms=75157 dur_ms=0 mask=FFFF bits=0030 pwmL=-15 pwmR=255 err10=-312 extra=0
+[2026-11-12T10:13:45.033+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=8996 t_ms=75218 dur_ms=0 mask=FFFF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:45.079+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=9060 t_ms=75263 dur_ms=0 mask=FFFF bits=00C0 pwmL=255 pwmR=-52 err10=-94 extra=0
+[2026-11-12T10:13:45.079+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=9123 t_ms=75308 dur_ms=0 mask=FFFF bits=0300 pwmL=255 pwmR=-87 err10=93 extra=0
+[2026-11-12T10:13:45.080+07:00] PID t=75312ms adc=846,1989,833,2054,999,731,567,567,1219,1136,1787,444,1424,1260,860,1520 cal=0,0,0,0,0,0,0,0,326,456,21,0,0,0,0,0 logic=0000000001000000 pwm=(255,-100) enc=(9632,10800) err=15.000 p=30.480 i=0.000 d=200.000 out=230.480
+[2026-11-12T10:13:45.125+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=9203 t_ms=75364 dur_ms=0 mask=FFFF bits=0C00 pwmL=255 pwmR=-12 err10=304 extra=0
+[2026-11-12T10:13:45.172+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=9558 t_ms=75633 dur_ms=0 mask=FFFF bits=8000 pwmL=-48 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:45.218+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=9558 t_ms=75633 dur_ms=0 mask=FFFF bits=8000 pwmL=255 pwmR=-152 err10=750 extra=0
+[2026-11-12T10:13:45.219+07:00] PID t=75521ms adc=797,1871,743,1941,943,634,511,749,1341,1133,1609,432,1361,1175,759,1409 cal=0,0,0,0,0,0,0,0,487,453,0,0,0,0,0,0 logic=0000000011000000 pwm=(-29,255) enc=(10063,10944) err=9.819 p=18.487 i=0.000 d=-178.088 out=-159.600
+[2026-11-12T10:13:45.265+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=9558 t_ms=75633 dur_ms=0 mask=FFFF bits=8000 pwmL=255 pwmR=-152 err10=750 extra=0
+[2026-11-12T10:13:45.266+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=IMMEDIATE_SEARCH dir=1 runEnc=9565 t_ms=75639 dur_ms=0 mask=FFFF bits=0000 pwmL=255 pwmR=-152 err10=0 extra=0
+[2026-11-12T10:13:45.267+07:00] PID t=75722ms adc=823,1931,791,1984,986,741,564,553,631,455,1476,449,1481,1302,877,1502 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-90) enc=(10248,11186) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:45.437+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=430.7Hz pid=430.7Hz queued=73.7Hz sent=73.2Hz drop=0 failed=0 missed=54 pending=0 encL=10418 encR=11179 case=3 line=1 lost=1 reacq=35 map=1 runEnc=9711 hs=0 peak=240 route=0 rf=0 clu=0000
+[2026-11-12T10:13:45.438+07:00] PID t=75952ms adc=822,1991,837,2026,994,742,591,560,648,466,1491,449,1927,2177,1158,1594 cal=0,0,0,0,0,0,0,0,0,0,0,0,249,532,109,0 logic=0000000000000100 pwm=(90,-90) enc=(10465,11168) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:45.484+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=IMMEDIATE_SEARCH dir=0 runEnc=9731 t_ms=75959 dur_ms=320 mask=FFFF bits=3000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:45.531+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=9731 t_ms=75959 dur_ms=326 mask=FFFF bits=3000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:45.532+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=9732 t_ms=75961 dur_ms=0 mask=FFFF bits=1000 pwmL=255 pwmR=-20 err10=0 extra=0
+[2026-11-12T10:13:45.533+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=9736 t_ms=75967 dur_ms=0 mask=FFFF bits=1800 pwmL=42 pwmR=217 err10=407 extra=0
+[2026-11-12T10:13:45.578+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=9757 t_ms=76004 dur_ms=43 mask=FFFF bits=0080 pwmL=138 pwmR=121 err10=50 extra=0
+[2026-11-12T10:13:45.625+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=9764 t_ms=76014 dur_ms=0 mask=FFFF bits=00C0 pwmL=-87 pwmR=255 err10=-91 extra=0
+[2026-11-12T10:13:45.626+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=9791 t_ms=76054 dur_ms=0 mask=FFFF bits=0018 pwmL=-177 pwmR=255 err10=-393 extra=0
+[2026-11-12T10:13:45.627+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=9792 t_ms=76057 dur_ms=0 mask=FFFF bits=0018 pwmL=-177 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:45.672+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=9801 t_ms=76070 dur_ms=0 mask=FFFF bits=000C pwmL=-220 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:45.672+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=9852 t_ms=76168 dur_ms=98 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:45.673+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=9852 t_ms=76168 dur_ms=111 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:45.673+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=9852 t_ms=76168 dur_ms=0 mask=FFFF bits=0060 pwmL=83 pwmR=176 err10=-211 extra=0
+[2026-11-12T10:13:45.674+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=9856 t_ms=76175 dur_ms=0 mask=FFFF bits=0060 pwmL=255 pwmR=-28 err10=-191 extra=0
+[2026-11-12T10:13:45.674+07:00] PID t=76152ms adc=817,1968,831,2310,2018,1600,565,528,626,439,1468,432,1392,1201,791,1441 cal=0,0,0,88,677,584,0,0,0,0,0,0,0,0,0,0 logic=0000110000000000 pwm=(-100,90) enc=(10588,11277) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:45.765+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=9974 t_ms=76329 dur_ms=0 mask=FFFF bits=0080 pwmL=-78 pwmR=255 err10=-50 extra=0
+[2026-11-12T10:13:45.767+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10020 t_ms=76376 dur_ms=0 mask=FFFF bits=0060 pwmL=1 pwmR=255 err10=-198 extra=0
+[2026-11-12T10:13:45.767+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10077 t_ms=76429 dur_ms=0 mask=FFFF bits=0030 pwmL=17 pwmR=242 err10=-295 extra=0
+[2026-11-12T10:13:45.768+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10150 t_ms=76491 dur_ms=0 mask=FFFF bits=0030 pwmL=-1 pwmR=255 err10=-305 extra=0
+[2026-11-12T10:13:45.768+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10199 t_ms=76531 dur_ms=0 mask=FFFF bits=0018 pwmL=6 pwmR=253 err10=-394 extra=0
+[2026-11-12T10:13:45.769+07:00] PID t=76361ms adc=830,1953,802,2004,977,1200,1500,1618,647,438,1456,435,1356,1182,778,1441 cal=0,0,0,0,0,230,710,765,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(102,157) enc=(10700,11488) err=-9.814 p=-18.475 i=-0.000 d=-8.559 out=-27.034
+[2026-11-12T10:13:45.770+07:00] PID t=76591ms adc=886,2058,890,2875,2213,1387,572,581,699,550,1628,555,1471,1251,813,1582 cal=0,0,0,657,843,396,0,0,0,0,0,0,0,0,0,0 logic=0001100000000000 pwm=(29,230) enc=(10835,11896) err=-39.380 p=-107.671 i=-0.000 d=7.043 out=-100.628
+[2026-11-12T10:13:45.812+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10362 t_ms=76651 dur_ms=0 mask=FFFF bits=0030 pwmL=-4 pwmR=255 err10=-301 extra=0
+[2026-11-12T10:13:45.813+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=10382 t_ms=76667 dur_ms=0 mask=FFFF bits=0030 pwmL=255 pwmR=-1 err10=-284 extra=0
+[2026-11-12T10:13:45.814+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=10430 t_ms=76702 dur_ms=0 mask=FFFF bits=1000 pwmL=131 pwmR=58 err10=0 extra=0
+[2026-11-12T10:13:45.814+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=10436 t_ms=76707 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-219 err10=494 extra=0
+[2026-11-12T10:13:45.815+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=1 runEnc=10438 t_ms=76709 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-219 err10=0 extra=0
+[2026-11-12T10:13:45.859+07:00] PID t=76802ms adc=865,1993,835,2032,981,719,554,553,645,449,1472,432,1342,1158,752,1403 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(11050,12154) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:46.122+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=10605 t_ms=76993 dur_ms=284 mask=FFFF bits=1E00 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:46.168+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=10605 t_ms=76993 dur_ms=291 mask=FFFF bits=1E00 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:46.183+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=10605 t_ms=76993 dur_ms=0 mask=FFFF bits=1E00 pwmL=206 pwmR=53 err10=306 extra=0
+[2026-11-12T10:13:46.184+07:00] PID t=77010ms adc=805,1925,784,1981,981,741,589,602,1232,1386,2652,1489,1699,1318,839,1474 cal=0,0,0,0,0,0,0,0,343,774,805,831,65,0,0,0 logic=0000000001110000 pwm=(155,104) enc=(11268,12136) err=25.237 p=58.721 i=0.000 d=-33.149 out=25.571
+[2026-11-12T10:13:46.231+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10610 t_ms=77002 dur_ms=0 mask=FFFF bits=1E00 pwmL=-1 pwmR=255 err10=283 extra=0
+[2026-11-12T10:13:46.232+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=10657 t_ms=77076 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=-113 err10=200 extra=0
+[2026-11-12T10:13:46.277+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=10686 t_ms=77113 dur_ms=0 mask=FFFF bits=0700 pwmL=-35 pwmR=255 err10=166 extra=0
+[2026-11-12T10:13:46.278+07:00] RX < HS_STAGE BOOST map=1 runEnc=10696 base=130 peak=240 start=10500 t_ms=77125
+[2026-11-12T10:13:46.279+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=10696 t_ms=77125 dur_ms=0 mask=FFFF bits=0700 pwmL=51 pwmR=208 err10=147 extra=0
+[2026-11-12T10:13:46.279+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=10707 t_ms=77135 dur_ms=0 mask=FFFF bits=0700 pwmL=255 pwmR=121 err10=152 extra=0
+[2026-11-12T10:13:46.280+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=10707 t_ms=77135 dur_ms=0 mask=FFFF bits=0700 pwmL=255 pwmR=-25 err10=152 extra=0
+[2026-11-12T10:13:46.280+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=10756 t_ms=77185 dur_ms=0 mask=FFFF bits=0200 pwmL=83 pwmR=176 err10=150 extra=0
+[2026-11-12T10:13:46.281+07:00] PID t=77212ms adc=873,2032,841,2032,998,753,589,571,1088,1361,2075,435,1360,1173,749,1403 cal=0,0,0,0,0,0,0,0,153,742,282,0,0,0,0,0 logic=0000000001000000 pwm=(255,209) enc=(11508,12242) err=15.000 p=30.480 i=0.000 d=-0.000 out=30.480
+[2026-11-12T10:13:46.325+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=10806 t_ms=77226 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=209 err10=183 extra=0
+[2026-11-12T10:13:46.372+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=10806 t_ms=77226 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=-109 err10=183 extra=0
+[2026-11-12T10:13:46.372+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=10839 t_ms=77252 dur_ms=0 mask=FFFF bits=0200 pwmL=95 pwmR=164 err10=150 extra=0
+[2026-11-12T10:13:46.373+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=11086 t_ms=77392 dur_ms=0 mask=FFFF bits=0B00 pwmL=255 pwmR=212 err10=155 extra=0
+[2026-11-12T10:13:46.374+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=11086 t_ms=77392 dur_ms=0 mask=FFFF bits=0B00 pwmL=255 pwmR=-101 err10=155 extra=0
+[2026-11-12T10:13:46.374+07:00] PID t=77421ms adc=784,1852,746,1920,941,649,511,511,647,475,1504,449,1410,1232,822,1535 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(11900,12540) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:46.419+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=11095 t_ms=77397 dur_ms=0 mask=FFFF bits=3300 pwmL=255 pwmR=-86 err10=0 extra=0
+[2026-11-12T10:13:46.465+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=CENTROID dir=1 runEnc=11104 t_ms=77402 dur_ms=0 mask=FFFF bits=8000 pwmL=255 pwmR=-255 err10=0 extra=0
+[2026-11-12T10:13:46.514+07:00] PID t=77622ms adc=797,1896,774,1968,976,672,511,503,614,440,1476,460,1485,1280,865,1515 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-100) enc=(12237,12553) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:46.706+07:00] TX > DIAG
+[2026-11-12T10:13:46.840+07:00] PID t=77831ms adc=775,1807,727,1910,927,624,498,496,620,445,1468,426,1375,1213,816,1898 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,161 logic=0000000000000000 pwm=(90,-100) enc=(12418,12525) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:46.979+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=CENTROID dir=0 runEnc=11401 t_ms=77892 dur_ms=490 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:47.027+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=11401 t_ms=77892 dur_ms=495 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=0 extra=0
+[2026-11-12T10:13:47.105+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=11401 t_ms=77892 dur_ms=0 mask=FFFF bits=0200 pwmL=90 pwmR=-100 err10=150 extra=0
+[2026-11-12T10:13:47.107+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=552.0Hz pid=552.0Hz queued=92.9Hz sent=93.4Hz drop=0 failed=0 missed=14 pending=0 encL=12508 encR=12516 case=2 line=1 lost=1 reacq=40 map=1 runEnc=11425 hs=0 peak=240 route=0 rf=0 clu=000C
+[2026-11-12T10:13:47.199+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=11401 t_ms=77892 dur_ms=0 mask=FFFF bits=0200 pwmL=255 pwmR=209 err10=150 extra=0
+[2026-11-12T10:13:47.247+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=11402 t_ms=77896 dur_ms=0 mask=FFFF bits=0000 pwmL=104 pwmR=85 err10=150 extra=0
+[2026-11-12T10:13:47.293+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=11403 t_ms=77897 dur_ms=0 mask=FFFF bits=0100 pwmL=104 pwmR=85 err10=50 extra=0
+[2026-11-12T10:13:47.294+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=11410 t_ms=77911 dur_ms=0 mask=FFFF bits=0060 pwmL=10 pwmR=255 err10=-196 extra=0
+[2026-11-12T10:13:47.386+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=11410 t_ms=77911 dur_ms=0 mask=FFFF bits=0060 pwmL=-112 pwmR=255 err10=-196 extra=0
+[2026-11-12T10:13:47.386+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=11423 t_ms=77936 dur_ms=0 mask=FFFF bits=000C pwmL=66 pwmR=123 err10=0 extra=0
+[2026-11-12T10:13:47.387+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=DIRECT_EDGE dir=-1 runEnc=11425 t_ms=77938 dur_ms=0 mask=FFFF bits=000C pwmL=-22 pwmR=255 err10=0 extra=0
+[2026-11-12T10:13:47.388+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=DIRECT_EDGE dir=0 runEnc=11470 t_ms=78109 dur_ms=171 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:47.388+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=11470 t_ms=78109 dur_ms=173 mask=FFFF bits=0060 pwmL=-100 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:47.389+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=11470 t_ms=78109 dur_ms=0 mask=FFFF bits=0060 pwmL=82 pwmR=177 err10=-212 extra=0
+[2026-11-12T10:13:47.390+07:00] PID t=78041ms adc=986,3134,1978,2096,1041,779,573,559,633,456,1473,452,1432,1256,851,1533 cal=0,742,736,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0110000000000000 pwm=(-100,90) enc=(12520,12565) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:47.433+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=11472 t_ms=78116 dur_ms=0 mask=FFFF bits=0060 pwmL=255 pwmR=-7 err10=-198 extra=0
+[2026-11-12T10:13:47.433+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=11473 t_ms=78118 dur_ms=0 mask=FFFF bits=0040 pwmL=255 pwmR=-7 err10=-150 extra=0
+[2026-11-12T10:13:47.434+07:00] PID t=78241ms adc=787,1792,722,1921,932,640,511,654,1463,1072,1477,430,1343,1145,716,1363 cal=0,0,0,0,0,0,0,0,648,375,0,0,0,0,0,0 logic=0000000010000000 pwm=(48,255) enc=(12581,12739) err=5.000 p=8.720 i=0.000 d=-200.000 out=-191.280
+[2026-11-12T10:13:47.527+07:00] PID t=78442ms adc=848,1769,738,1886,944,683,1053,1384,816,528,1599,509,1429,1195,757,1483 cal=0,0,0,0,0,0,235,525,0,0,0,0,0,0,0,0 logic=0000000100000000 pwm=(231,248) enc=(12920,13123) err=-5.000 p=-8.720 i=-0.000 d=0.000 out=-8.720
+[2026-11-12T10:13:47.711+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=12234 t_ms=78565 dur_ms=0 mask=FFFF bits=0000 pwmL=92 pwmR=97 err10=-50 extra=0
+[2026-11-12T10:13:47.712+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=NORMAL_SEARCH dir=-1 runEnc=12306 t_ms=78596 dur_ms=0 mask=FFFF bits=0000 pwmL=92 pwmR=97 err10=0 extra=0
+[2026-11-12T10:13:47.806+07:00] RX < MAP1_EVT type=TURN_ENTER src=NORMAL_SEARCH dir=-1 runEnc=12306 t_ms=78596 dur_ms=0 mask=FFFF bits=0000 pwmL=92 pwmR=97 err10=0 extra=0
+[2026-11-12T10:13:47.929+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=12306 t_ms=78596 dur_ms=0 mask=FFFF bits=0000 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:47.930+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=NORMAL_SEARCH dir=0 runEnc=12331 t_ms=78608 dur_ms=12 mask=FFFF bits=0180 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:47.930+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=12331 t_ms=78608 dur_ms=12 mask=FFFF bits=0180 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:47.931+07:00] PID t=78651ms adc=835,1942,798,1974,959,699,550,549,1226,1040,1498,452,1410,1232,816,1479 cal=0,0,0,0,0,0,0,0,335,335,0,0,0,0,0,0 logic=0000000000000000 pwm=(90,-90) enc=(13391,13630) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:47.975+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=12331 t_ms=78608 dur_ms=0 mask=FFFF bits=0180 pwmL=-90 pwmR=90 err10=2 extra=0
+[2026-11-12T10:13:47.976+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=12341 t_ms=78613 dur_ms=0 mask=FFFF bits=0000 pwmL=95 pwmR=94 err10=5 extra=0
+[2026-11-12T10:13:47.977+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=NORMAL_SEARCH dir=1 runEnc=12407 t_ms=78643 dur_ms=0 mask=FFFF bits=0000 pwmL=95 pwmR=94 err10=0 extra=0
+[2026-11-12T10:13:47.977+07:00] RX < MAP1_EVT type=TURN_ENTER src=NORMAL_SEARCH dir=1 runEnc=12407 t_ms=78643 dur_ms=0 mask=FFFF bits=0000 pwmL=95 pwmR=94 err10=0 extra=0
+[2026-11-12T10:13:47.978+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=12407 t_ms=78643 dur_ms=0 mask=FFFF bits=0000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.022+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=NORMAL_SEARCH dir=0 runEnc=12436 t_ms=78658 dur_ms=15 mask=FFFF bits=0200 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.023+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=12436 t_ms=78658 dur_ms=15 mask=FFFF bits=0200 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.069+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=12436 t_ms=78658 dur_ms=0 mask=FFFF bits=0200 pwmL=90 pwmR=-90 err10=150 extra=0
+[2026-11-12T10:13:48.070+07:00] PID t=78851ms adc=881,2017,848,2035,1488,1865,754,552,646,463,1487,447,1438,1257,851,1513 cal=0,0,0,0,227,818,0,0,0,0,0,0,0,0,0,0 logic=0000010000000000 pwm=(-90,90) enc=(13774,13966) err=0.000 p=0.000 i=0.000 d=0.000 out=0.000
+[2026-11-12T10:13:48.115+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=12451 t_ms=78665 dur_ms=0 mask=FFFF bits=0000 pwmL=104 pwmR=85 err10=150 extra=0
+[2026-11-12T10:13:48.115+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=NORMAL_SEARCH dir=1 runEnc=12512 t_ms=78695 dur_ms=0 mask=FFFF bits=0000 pwmL=104 pwmR=85 err10=0 extra=0
+[2026-11-12T10:13:48.116+07:00] RX < MAP1_EVT type=TURN_ENTER src=NORMAL_SEARCH dir=1 runEnc=12512 t_ms=78695 dur_ms=0 mask=FFFF bits=0000 pwmL=104 pwmR=85 err10=0 extra=0
+[2026-11-12T10:13:48.117+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=12512 t_ms=78695 dur_ms=0 mask=FFFF bits=0000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.117+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=NORMAL_SEARCH dir=0 runEnc=12548 t_ms=78716 dur_ms=21 mask=FFFF bits=0200 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.118+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=12548 t_ms=78716 dur_ms=21 mask=FFFF bits=0200 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.223+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=12548 t_ms=78716 dur_ms=0 mask=FFFF bits=0200 pwmL=90 pwmR=-90 err10=150 extra=0
+[2026-11-12T10:13:48.225+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=12568 t_ms=78726 dur_ms=0 mask=FFFF bits=0000 pwmL=75 pwmR=114 err10=99 extra=0
+[2026-11-12T10:13:48.226+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=NORMAL_SEARCH dir=1 runEnc=12623 t_ms=78756 dur_ms=0 mask=FFFF bits=0000 pwmL=75 pwmR=114 err10=0 extra=0
+[2026-11-12T10:13:48.271+07:00] RX < MAP1_EVT type=TURN_ENTER src=NORMAL_SEARCH dir=1 runEnc=12623 t_ms=78756 dur_ms=0 mask=FFFF bits=0000 pwmL=75 pwmR=114 err10=0 extra=0
+[2026-11-12T10:13:48.272+07:00] PID t=79051ms adc=849,2024,870,2046,1022,773,1273,1740,749,464,1478,441,1402,1245,857,1490 cal=0,0,0,0,0,0,469,890,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(255,135) enc=(14083,14320) err=-8.451 p=-15.579 i=-0.000 d=119.721 out=104.142
+[2026-11-12T10:13:48.318+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=12623 t_ms=78756 dur_ms=0 mask=FFFF bits=0000 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.319+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=NORMAL_SEARCH dir=0 runEnc=12645 t_ms=78770 dur_ms=14 mask=FFFF bits=0080 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.320+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=12645 t_ms=78770 dur_ms=14 mask=FFFF bits=0080 pwmL=90 pwmR=-90 err10=0 extra=0
+[2026-11-12T10:13:48.320+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=12645 t_ms=78770 dur_ms=0 mask=FFFF bits=0080 pwmL=90 pwmR=-90 err10=-50 extra=0
+[2026-11-12T10:13:48.321+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=12688 t_ms=78792 dur_ms=0 mask=FFFF bits=0000 pwmL=92 pwmR=97 err10=-50 extra=0
+[2026-11-12T10:13:48.321+07:00] RX < MAP1_EVT type=SEARCH_ENTER src=NORMAL_SEARCH dir=-1 runEnc=12740 t_ms=78823 dur_ms=0 mask=FFFF bits=0000 pwmL=92 pwmR=97 err10=0 extra=0
+[2026-11-12T10:13:48.321+07:00] RX < MAP1_EVT type=TURN_ENTER src=NORMAL_SEARCH dir=-1 runEnc=12740 t_ms=78823 dur_ms=0 mask=FFFF bits=0000 pwmL=92 pwmR=97 err10=0 extra=0
+[2026-11-12T10:13:48.365+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=12740 t_ms=78823 dur_ms=0 mask=FFFF bits=0000 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:48.412+07:00] RX < MAP1_EVT type=SEARCH_EXIT src=NORMAL_SEARCH dir=0 runEnc=12797 t_ms=78863 dur_ms=40 mask=FFFF bits=0030 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:48.413+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=12797 t_ms=78863 dur_ms=40 mask=FFFF bits=0030 pwmL=-90 pwmR=90 err10=0 extra=0
+[2026-11-12T10:13:48.414+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=12797 t_ms=78863 dur_ms=0 mask=FFFF bits=0030 pwmL=61 pwmR=198 err10=-283 extra=0
+[2026-11-12T10:13:48.414+07:00] PID t=79261ms adc=1535,2906,943,2060,987,699,560,547,640,448,1481,439,1352,1183,774,1460 cal=382,568,0,0,0,0,0,0,0,0,0,0,0,0,0,0 logic=0100000000000000 pwm=(-96,255) enc=(14463,14832) err=-65.000 p=-225.680 i=-0.000 d=-0.819 out=-226.499
+[2026-11-12T10:13:48.505+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=12812 t_ms=78873 dur_ms=0 mask=FFFF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:48.506+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=12903 t_ms=78934 dur_ms=0 mask=FFFF bits=0040 pwmL=198 pwmR=61 err10=-150 extra=0
+[2026-11-12T10:13:48.506+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=13410 t_ms=79181 dur_ms=0 mask=FFFF bits=0060 pwmL=177 pwmR=255 err10=-191 extra=0
+[2026-11-12T10:13:48.507+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=13410 t_ms=79181 dur_ms=0 mask=FFFF bits=0060 pwmL=-111 pwmR=255 err10=-191 extra=0
+[2026-11-12T10:13:48.552+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=-1 runEnc=13489 t_ms=79218 dur_ms=0 mask=FFFF bits=0018 pwmL=36 pwmR=223 err10=0 extra=0
+[2026-11-12T10:13:48.554+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=13653 t_ms=79332 dur_ms=0 mask=FFFF bits=0003 pwmL=68 pwmR=191 err10=-715 extra=0
+[2026-11-12T10:13:48.555+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=13718 t_ms=79381 dur_ms=0 mask=FFFF bits=0004 pwmL=-13 pwmR=255 err10=-550 extra=0
+[2026-11-12T10:13:48.555+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=13774 t_ms=79425 dur_ms=0 mask=FFFF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:48.556+07:00] PID t=79472ms adc=818,1949,786,1989,967,733,1489,1446,627,451,1473,436,1395,1211,800,1469 cal=0,0,0,0,0,0,699,588,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(254,225) enc=(14526,15308) err=-10.431 p=-19.824 i=-0.000 d=34.178 out=14.355
+[2026-11-12T10:13:48.599+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=13785 t_ms=79435 dur_ms=217 mask=FFFF bits=0060 pwmL=255 pwmR=-22 err10=-215 extra=0
+[2026-11-12T10:13:48.600+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=13806 t_ms=79453 dur_ms=0 mask=FFFF bits=0040 pwmL=255 pwmR=-24 err10=-150 extra=0
+[2026-11-12T10:13:48.694+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=14045 t_ms=79612 dur_ms=0 mask=FFFF bits=0060 pwmL=177 pwmR=255 err10=-185 extra=0
+[2026-11-12T10:13:48.741+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=14045 t_ms=79612 dur_ms=0 mask=FFFF bits=0060 pwmL=-109 pwmR=255 err10=-185 extra=0
+[2026-11-12T10:13:48.742+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=14114 t_ms=79653 dur_ms=0 mask=FFFF bits=0020 pwmL=40 pwmR=220 err10=-250 extra=0
+[2026-11-12T10:13:48.742+07:00] PID t=79672ms adc=813,1901,774,1939,1883,1859,678,565,655,462,1487,435,1388,1199,775,1426 cal=0,0,0,0,562,813,0,0,0,0,0,0,0,0,0,0 logic=0000110000000000 pwm=(13,246) enc=(14808,15654) err=-29.087 p=-70.906 i=-0.000 d=-45.983 out=-116.889
+[2026-11-12T10:13:48.746+07:00] TX > DIAG
+[2026-11-12T10:13:48.788+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=14257 t_ms=79741 dur_ms=0 mask=FFFF bits=0030 pwmL=-18 pwmR=255 err10=-306 extra=0
+[2026-11-12T10:13:48.834+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=14401 t_ms=79829 dur_ms=0 mask=FFFF bits=0020 pwmL=255 pwmR=-12 err10=-250 extra=0
+[2026-11-12T10:13:48.881+07:00] PID t=79881ms adc=880,2010,838,2059,1023,1745,1535,608,653,463,1488,445,1489,1301,880,1481 cal=0,0,0,0,0,712,748,0,0,0,0,0,0,0,0,0 logic=0000011000000000 pwm=(117,142) enc=(15056,16085) err=-19.877 p=-43.181 i=-0.000 d=30.368 out=-12.813
+[2026-11-12T10:13:48.959+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=14499 t_ms=79891 dur_ms=0 mask=FFFF bits=0040 pwmL=233 pwmR=26 err10=-150 extra=0
+[2026-11-12T10:13:49.006+07:00] RX < DIAG: bt=1 auto=1 target=100 loop=581.2Hz pid=581.2Hz queued=98.6Hz sent=98.6Hz drop=0 failed=0 missed=3 pending=0 encL=15222 encR=16262 case=1 line=1 lost=6 reacq=47 map=1 runEnc=14655 hs=0 peak=240 route=0 rf=0 clu=00C0
+[2026-11-12T10:13:49.147+07:00] PID t=80082ms adc=886,2039,869,2069,1009,720,559,1472,1399,560,1489,448,1461,1286,880,1530 cal=0,0,0,0,0,0,0,615,564,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(255,41) enc=(15454,16501) err=-0.216 p=-0.347 i=-0.000 d=198.659 out=198.312
+[2026-11-12T10:13:49.194+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=14956 t_ms=80110 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=207 err10=192 extra=0
+[2026-11-12T10:13:49.195+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=14956 t_ms=80110 dur_ms=0 mask=FFFF bits=0600 pwmL=255 pwmR=-111 err10=192 extra=0
+[2026-11-12T10:13:49.241+07:00] RX < MAP1_EVT type=TURN_ENTER src=SHARP dir=1 runEnc=15015 t_ms=80137 dur_ms=0 mask=FFFF bits=1800 pwmL=255 pwmR=-119 err10=0 extra=0
+[2026-11-12T10:13:49.288+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=15173 t_ms=80262 dur_ms=0 mask=FFFF bits=C000 pwmL=193 pwmR=66 err10=718 extra=0
+[2026-11-12T10:13:49.335+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=15232 t_ms=80310 dur_ms=0 mask=FFFF bits=3000 pwmL=255 pwmR=-1 err10=503 extra=0
+[2026-11-12T10:13:49.336+07:00] PID t=80290ms adc=878,1893,807,1990,1040,713,578,592,690,533,1556,496,1454,2079,1886,1878 cal=0,0,0,0,0,0,0,0,0,0,0,0,0,461,682,146 logic=0000000000000110 pwm=(184,75) enc=(16028,16561) err=60.967 p=204.595 i=0.000 d=-149.738 out=54.857
+[2026-11-12T10:13:49.384+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=15272 t_ms=80344 dur_ms=0 mask=FFFF bits=0400 pwmL=-12 pwmR=255 err10=250 extra=0
+[2026-11-12T10:13:49.384+07:00] RX < MAP1_EVT type=TURN_EXIT src=NONE dir=0 runEnc=15287 t_ms=80356 dur_ms=219 mask=FFFF bits=0600 pwmL=-23 pwmR=255 err10=210 extra=0
+[2026-11-12T10:13:49.385+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15299 t_ms=80367 dur_ms=0 mask=FFFF bits=0300 pwmL=-28 pwmR=255 err10=112 extra=0
+[2026-11-12T10:13:49.431+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=15372 t_ms=80428 dur_ms=0 mask=FFFF bits=00E0 pwmL=11 pwmR=255 err10=-152 extra=0
+[2026-11-12T10:13:49.432+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=15372 t_ms=80428 dur_ms=0 mask=FFFF bits=00E0 pwmL=-101 pwmR=255 err10=-152 extra=0
+[2026-11-12T10:13:49.433+07:00] PID t=80492ms adc=910,2063,886,2077,1300,1996,1596,586,660,486,1523,467,1477,1279,852,1471 cal=0,0,0,0,67,934,812,0,0,0,0,0,0,0,0,0 logic=0000011000000000 pwm=(81,178) enc=(16275,16772) err=-20.349 p=-44.485 i=-0.000 d=-3.689 out=-48.174
+[2026-11-12T10:13:49.477+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15512 t_ms=80566 dur_ms=0 mask=FFFF bits=0040 pwmL=252 pwmR=7 err10=-150 extra=0
+[2026-11-12T10:13:49.524+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=15615 t_ms=80641 dur_ms=0 mask=FFFF bits=00F0 pwmL=54 pwmR=255 err10=-176 extra=0
+[2026-11-12T10:13:49.525+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=15615 t_ms=80641 dur_ms=0 mask=FFFF bits=00F0 pwmL=-107 pwmR=255 err10=-176 extra=0
+[2026-11-12T10:13:49.526+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=15624 t_ms=80648 dur_ms=0 mask=FFFF bits=08F4 pwmL=255 pwmR=-32 err10=-177 extra=0
+[2026-11-12T10:13:49.526+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15626 t_ms=80650 dur_ms=0 mask=FFFF bits=0CE4 pwmL=255 pwmR=-32 err10=-95 extra=0
+[2026-11-12T10:13:49.527+07:00] PID t=80692ms adc=912,2065,886,2077,1041,784,1459,1717,719,479,1523,481,1499,1307,912,1590 cal=0,0,0,0,0,0,667,866,0,0,0,0,0,0,0,0 logic=0000001100000000 pwm=(255,183) enc=(16488,17074) err=-9.351 p=-17.480 i=-0.000 d=73.599 out=56.119
+[2026-11-12T10:13:49.571+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=15642 t_ms=80660 dur_ms=0 mask=FFFF bits=20C3 pwmL=56 pwmR=255 err10=-175 extra=0
+[2026-11-12T10:13:49.572+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15645 t_ms=80662 dur_ms=0 mask=FFFF bits=20C1 pwmL=-106 pwmR=255 err10=-105 extra=0
+[2026-11-12T10:13:49.573+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=15650 t_ms=80665 dur_ms=0 mask=FFFF bits=C0C0 pwmL=255 pwmR=34 err10=177 extra=0
+[2026-11-12T10:13:49.618+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15654 t_ms=80668 dur_ms=0 mask=FFFF bits=80C0 pwmL=255 pwmR=-109 err10=101 extra=0
+[2026-11-12T10:13:49.619+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=15894 t_ms=80797 dur_ms=0 mask=FFFF bits=8180 pwmL=255 pwmR=30 err10=187 extra=0
+[2026-11-12T10:13:49.620+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=1 runEnc=15894 t_ms=80797 dur_ms=0 mask=FFFF bits=8180 pwmL=255 pwmR=-110 err10=187 extra=0
+[2026-11-12T10:13:49.666+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15898 t_ms=80799 dur_ms=0 mask=FFFF bits=0180 pwmL=255 pwmR=-110 err10=-4 extra=0
+[2026-11-12T10:13:49.667+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=15900 t_ms=80801 dur_ms=0 mask=FFFF bits=0181 pwmL=39 pwmR=255 err10=-162 extra=0
+[2026-11-12T10:13:49.713+07:00] RX < MAP1_EVT type=PWM_REVERSAL src=NONE dir=-1 runEnc=15900 t_ms=80801 dur_ms=0 mask=FFFF bits=0181 pwmL=-103 pwmR=255 err10=-162 extra=0
+[2026-11-12T10:13:49.714+07:00] RX < MAP1_EVT type=BOOST_ON src=NONE dir=0 runEnc=15904 t_ms=80802 dur_ms=0 mask=FFFF bits=0180 pwmL=-103 pwmR=255 err10=-4 extra=0
+[2026-11-12T10:13:49.714+07:00] PID t=80901ms adc=850,1987,841,2032,1040,790,624,1776,1452,478,1511,461,1471,1272,853,1523 cal=0,0,0,0,0,0,0,927,634,0,0,0,0,0,0,0 logic=0000000110000000 pwm=(241,238) enc=(16916,17507) err=-0.939 p=-1.527 i=-0.000 d=2.915 out=1.388
+[2026-11-12T10:13:49.852+07:00] RX < MAP1_EVT type=BOOST_OFF src=NONE dir=0 runEnc=16455 t_ms=81032 dur_ms=0 mask=FFFF bits=3FF4 pwmL=91 pwmR=91 err10=0 extra=0
+[2026-11-12T10:13:49.854+07:00] RX < MAP1_EVT type=FINISH_CANDIDATE src=NONE dir=0 runEnc=16476 t_ms=81040 dur_ms=0 mask=FFFF bits=FFFF pwmL=91 pwmR=91 err10=0 extra=1
+[2026-11-12T10:13:49.855+07:00] RX < MAP1_EVT type=FINISH_CONFIRMED src=NONE dir=0 runEnc=16485 t_ms=81044 dur_ms=0 mask=FFFF bits=FFFF pwmL=91 pwmR=91 err10=0 extra=3
+[2026-11-12T10:13:49.856+07:00] RX < AUTO_FINISHED: FULL_BLACK_3 map=1 runEnc=16485 route_fault=0 t_ms=81045
+[2026-11-12T10:13:49.857+07:00] CSV đang chốt (ESP32 ĐÃ XÁC NHẬN DỪNG: AUTO_FINISHED: FULL_BLACK_3 map=1 runEnc=16485 route_fault=0 t_ms=81045): D:\EC\doline17s\logs\map_01\linerobot_map01_20261112_101332_458421.csv
