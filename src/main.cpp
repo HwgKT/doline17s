@@ -50,6 +50,7 @@ enum PhysicalSide : uint8_t { SIDE_NONE, SIDE_LEFT, SIDE_RIGHT };
 PhysicalPhase physicalPhase=PHYS_NEED_WHITE;
 PhysicalSide physicalSide=SIDE_NONE;
 bool physicalRunInProgress=false;
+bool map1StartModePreconfigured=false; // SIDE_START supplied TICK/FULL16.
 struct PhysicalButton {
   explicit PhysicalButton(uint8_t gpio) : pin(gpio) {}
   uint8_t pin;
@@ -459,11 +460,26 @@ void command(const String &raw) {
     if(pid_get_selected_map()==0){
       reply("ERR: MAP_NOT_SELECTED");return;
     }
+    // All Map 1 AUTO entry points require the same confirmed side.
+    // Raw AUTO:1 uses TICK; SIDE_START:FULL retains its preconfigured mask.
+    if(pid_get_selected_map()==1){
+      if(physicalPhase!=PHYS_READY || physicalSide==SIDE_NONE){
+        reply("ERR: SIDE_CONFIRM_REQUIRED");return;
+      }
+      if(!map1StartModePreconfigured &&
+         !pid_set_map1_button_mode(physicalSide==SIDE_LEFT,false)){
+        reply("ERR: SIDE_MASK_SETUP_FAILED");return;
+      }
+    }
     // Start is permitted from BLACK, WHITE, or a narrow line.
     // PID initially coasts straight until the center line is confirmed;
     // the full-black FINISH detector remains disarmed during acquisition.
     manualActive=false;
     pid_set_auto_mode(true);
+    if(pid_get_selected_map()==1){
+      physicalRunInProgress=true;
+      physicalPhase=PHYS_RUNNING;
+    }
     reply("MODE: AUTO PID");
     reply(String("ADC_RUN_MODE: ")+sensor_get_adc_mode()+
           " method="+sensor_adc_mode());
@@ -675,7 +691,9 @@ void startPhysicalMap1(bool fullEyes) {
     reply("ERR: BUTTON_MAP1_MODE_FAILED");
     return;
   }
-  command("AUTO:1"); // existing validation, telemetry, RUN_ORIGIN and logs
+  map1StartModePreconfigured=true;
+  command("AUTO:1"); // shared validation, telemetry, RUN_ORIGIN and logs
+  map1StartModePreconfigured=false;
   if(pid_is_auto_mode()){
     physicalRunInProgress=true;
     physicalPhase=PHYS_RUNNING;
