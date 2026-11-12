@@ -593,6 +593,9 @@ void command(const String &raw) {
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
     safeStop();clearPhysicalSide();
+    // A new WHITE attempt invalidates this boot's previous readiness,
+    // even if ADC capture is rejected.
+    setButton34Phase(BUTTON34_WHITE_NEXT);
     if(sensor_capture_white()){
       setButton34Phase(BUTTON34_WHITE_CAPTURING);
       reportPhysicalSide();
@@ -733,7 +736,10 @@ void startPhysicalMap1(bool fullEyes) {
   map1StartModePreconfigured=true;
   command("AUTO:1");
   map1StartModePreconfigured=false;
-  if(!pid_is_auto_mode()) map1RunFullEyes=false;
+  if(!pid_is_auto_mode()){
+    map1RunFullEyes=false;
+    pid_clear_map1_button_mode();
+  }
   if(pid_is_auto_mode()){
     reply(String("BUTTON_RUN map=1 side=")+
           (physicalSide==SIDE_LEFT?"LEFT":"RIGHT")+
