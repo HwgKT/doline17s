@@ -548,7 +548,7 @@ void setup() {
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
   pid_init(1.6f,0.0f,0.8f,100); // default PID gains for MAP 1/2/3
-  pid_select_map(1); // physical GPIO34 START works without a connected app
+  pid_select_map(1); // default MAP 1; selectable through SPP commands
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
