@@ -10,7 +10,9 @@
 // GPIO34 is input-only, with NO internal pull-up/down: install an external
 // pullup to 3.3V, button from GPIO34 to GND (active LOW).
 #define PIN_START_BUTTON   34
-#define PIN_UNUSED_BUTTON  35  // Not used by this firmware.
+#define PIN_UNUSED_BUTTON  35  // GPIO35 SELECT; external pull-up required.
+#define PIN_CAL_BUTTON PIN_START_BUTTON
+#define PIN_SELECT_BUTTON PIN_UNUSED_BUTTON
 
 // Quadrature channels A/B per wheel, inherited from mainv2.
 #define PIN_ENCODER_L1     21
