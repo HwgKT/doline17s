@@ -59,7 +59,7 @@ class PhysicalButtonsMap1Tests(unittest.TestCase):
         self.assertIn("if (!enabled) map1ButtonOverride = false;", PID)
         self.assertIn("if (map1ButtonFullEyes) return 0xFFFFU;", PID)
         self.assertIn("MAP1_BUTTON_TICK1 = 650", PID)
-        self.assertIn("MAP1_BUTTON_TICK2 = 1500", PID)
+        self.assertIn("MAP1_BUTTON_TICK2 = 1800", PID)
         self.assertIn("map1ButtonLeft ? 0x03FFU : 0xFFC0U", PID)
         self.assertIn("map1ButtonLeft ? 0xFFC0U : 0x03FFU", PID)
         self.assertIn("map1SensorStageMasks[0] = mask1;", PID)
