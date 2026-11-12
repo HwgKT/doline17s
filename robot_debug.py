@@ -1189,13 +1189,16 @@ class App(tk.Tk):
                    command=lambda: choose_preset("left")).pack(side="left", padx=(0, 8))
         ttk.Button(preset_bar, text="Phải (S7-S15 / S0-S9 / Full)",
                    command=lambda: choose_preset("right")).pack(side="left")
-        feedback = tk.StringVar(value="Áp dụng khi robot đã STOP; không thay đổi PID gains.")
+        feedback = tk.StringVar(value="Cấu hình chung. Khi chọn Trái/Phải, preset hướng có ưu tiên lúc START.")
         self.label(win, textvariable=feedback, bg=PANEL, fg=AMBER).pack(
             anchor="w", padx=12, pady=(7, 2))
         actions = tk.Frame(win, bg=PANEL, padx=12, pady=4)
         actions.pack(fill="x")
 
         def apply():
+            if self.map1_side is not None:
+                feedback.set("Đang chọn Trái/Phải: mask lúc START theo preset hướng. Hãy hủy bên trước khi sửa cấu hình chung.")
+                return
             if (self.reader is None or not self.reader.is_alive()
                     or self.auto_running or self.start_pending
                     or self.stop_ack_deadline is not None
@@ -1726,6 +1729,14 @@ class App(tk.Tk):
                 f"MAP 1: {'TRÁI' if side == 'LEFT' else 'PHẢI'} | "
                 f"{t1}/{t2} | {m1}/{m2}/{m3} | "
                 + ("ESP32 OK" if confirmed == "1" else "Chưa xác nhận"))
+            # The effective mask reported by ESP32 wins over the generic
+            # Map 1 editor profile and remains correct for FULL16 runs.
+            self.sensor_profile = (
+                int(t1), int(t2), int(m1, 16), int(m2, 16), int(m3, 16))
+            self.sensor_profile_confirmed = confirmed == "1"
+            self.sensor_profile_status.set(
+                f"PID mắt đang chọn: {side} | {t1}/{t2} | {m1}/{m2}/{m3}"
+                + (" (ESP32 OK)" if confirmed == "1" else " (chưa xác nhận)"))
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
