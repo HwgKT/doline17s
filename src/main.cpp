@@ -11,6 +11,8 @@
 #include "adc_bench.h"
 #include "spp_debug.h"
 
+void startPhysicalMap1(bool fullEyes);
+
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
@@ -85,17 +87,30 @@ void announcePhysical(uint8_t pulses,uint16_t rhythmMs) {
   ledPulseLastMs=millis();
   ledWrite(true);
 }
+void reply(const String &line);
 void resetPhysicalSelection() {
   if(physicalPhase>=PHYS_SELECT_SIDE)physicalPhase=PHYS_SELECT_SIDE;
   physicalSide=SIDE_NONE;
   physicalRunInProgress=false;
+}
+void reportPhysicalSide() {
+  const char* phase=physicalPhase==PHYS_READY?"READY":
+                    physicalPhase==PHYS_RUNNING?"RUNNING":
+                    physicalPhase==PHYS_SELECT_SIDE?"SELECT":"CALIB";
+  const char* side=physicalSide==SIDE_LEFT?"LEFT":
+                   physicalSide==SIDE_RIGHT?"RIGHT":"NONE";
+  reply(String("BUTTON_STATE phase=")+phase+" side="+side+
+        " confirmed="+(physicalPhase==PHYS_READY||physicalPhase==PHYS_RUNNING?"1":"0"));
 }
 
 void reply(const String &line) { btSendLine(line); }
 void safeStop() {
   pid_set_auto_mode(false); motor_stop(); manualActive=false;
   // A completed/interrupted physical run always requires fresh side selection.
-  if(physicalRunInProgress)resetPhysicalSelection();
+  if(physicalRunInProgress){
+    resetPhysicalSelection();
+    reportPhysicalSide();
+  }
 }
 bool parseGain(const String &s,float &val) {
   if(!s.length())return false;
@@ -135,6 +150,34 @@ void command(const String &raw) {
   }
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
+  // GUI and physical buttons share one selected/confirmed side state.
+  if(s=="SIDE:STATUS"){reportPhysicalSide();return;}
+  if(s=="SIDE:CLEAR"){
+    if(pid_is_auto_mode()||manualActive||adcBenchActive()||
+       physicalPhase<PHYS_SELECT_SIDE){reply("ERR: SIDE_NOT_READY");return;}
+    resetPhysicalSelection();
+    announcePhysical(3,500);
+    reply("BUTTON_SIDE_CLEARED");
+    reportPhysicalSide();
+    return;
+  }
+  if(s=="SIDE:LEFT"||s=="SIDE:RIGHT"){
+    if(pid_is_auto_mode()||manualActive||adcBenchActive()||
+       estopLatched||physicalPhase<PHYS_SELECT_SIDE){
+      reply("ERR: SIDE_NOT_READY");return;
+    }
+    physicalSide=s=="SIDE:LEFT"?SIDE_LEFT:SIDE_RIGHT;
+    physicalPhase=PHYS_READY; // a GUI click is explicit confirmation
+    announcePhysical(3,500);
+    reply(String("BUTTON_SIDE_CONFIRMED: ")+
+          (physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
+    reportPhysicalSide();
+    return;
+  }
+  if(s=="SIDE_START:TICK"||s=="SIDE_START:FULL"){
+    startPhysicalMap1(s=="SIDE_START:FULL");
+    return;
+  }
   if(s=="?"||s=="HELP"){
     reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
@@ -635,6 +678,7 @@ void startPhysicalMap1(bool fullEyes) {
     reply(String("BUTTON_RUN map=1 side=")+
           (physicalSide==SIDE_LEFT?"LEFT":"RIGHT")+
           " eyes="+(fullEyes?"FULL16":"TICK_MASK"));
+    reportPhysicalSide();
   }
 }
 void handlePhysicalButtons(uint32_t now) {
@@ -653,18 +697,21 @@ void handlePhysicalButtons(uint32_t now) {
       physicalSide=physicalSide==SIDE_LEFT?SIDE_RIGHT:SIDE_LEFT;
       announcePhysical(physicalSide==SIDE_LEFT?1:2,1000);
       reply(String("BUTTON_SIDE: ")+(physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
+      reportPhysicalSide();
     }
     if(cal.longPress && physicalSide!=SIDE_NONE) {
       physicalPhase=PHYS_READY;
       announcePhysical(3,500);
       reply(String("BUTTON_SIDE_CONFIRMED: ")+
             (physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
+      reportPhysicalSide();
     }
   } else if(physicalPhase==PHYS_READY) {
     if(side.longPress) {
       resetPhysicalSelection();
       announcePhysical(3,500);
       reply("BUTTON_SIDE_CLEARED");
+      reportPhysicalSide();
     } else if(cal.shortPress) startPhysicalMap1(false);
     else if(side.shortPress) startPhysicalMap1(true);
   }
@@ -719,11 +766,13 @@ void loop() {
       physicalPhase=PHYS_SELECT_SIDE;
       physicalSide=SIDE_NONE;
       announcePhysical(2,500);
-      reply("CAL_OK_SAVED");showCalib();break;
+      reply("CAL_OK_SAVED");showCalib();
+      reportPhysicalSide();break;
     case CAL_ERROR:
       physicalPhase=PHYS_NEED_WHITE;
       physicalSide=SIDE_NONE;
-      reply("CAL_FAILED");showCalib();break;
+      reply("CAL_FAILED");showCalib();
+      reportPhysicalSide();break;
     default: break;
   }
   updateLedIndicator(now);
