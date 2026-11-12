@@ -40,7 +40,7 @@ void ledWrite(bool on) {
 }
 // Two physical buttons, Map 1 only. Long-press classification is on press
 // duration; release never generates a short event after a recognized hold.
-constexpr uint32_t BUTTON_DEBOUNCE_MS=50;
+constexpr uint32_t PHYSICAL_SIDE_BUTTON_DEBOUNCE_MS=50;
 constexpr uint32_t BUTTON_HOLD_MS=1000;
 enum PhysicalPhase : uint8_t {
   PHYS_NEED_WHITE, PHYS_WAIT_WHITE, PHYS_NEED_BLACK, PHYS_WAIT_BLACK,
@@ -64,7 +64,7 @@ PhysicalButtonEvent pollPhysicalButton(PhysicalButton &b,uint32_t now) {
   PhysicalButtonEvent result{};
   const uint8_t current=(uint8_t)digitalRead(b.pin);
   if(current!=b.sample){b.sample=current;b.changeMs=now;}
-  if((uint32_t)(now-b.changeMs)>=BUTTON_DEBOUNCE_MS && current!=b.stable){
+  if((uint32_t)(now-b.changeMs)>=PHYSICAL_SIDE_BUTTON_DEBOUNCE_MS && current!=b.stable){
     b.stable=current;
     if(current==LOW){b.pressedMs=now;b.holdSent=false;}
     else if(!b.holdSent && (uint32_t)(now-b.pressedMs)<BUTTON_HOLD_MS)
@@ -102,6 +102,12 @@ void reportPhysicalSide() {
                    physicalSide==SIDE_RIGHT?"RIGHT":"NONE";
   reply(String("BUTTON_STATE phase=")+phase+" side="+side+
         " confirmed="+(physicalPhase==PHYS_READY||physicalPhase==PHYS_RUNNING?"1":"0"));
+  if(physicalSide!=SIDE_NONE){
+    reply(String("BUTTON_PROFILE side=")+side+
+          " T1=650 T2=1500 M1="+(physicalSide==SIDE_LEFT?"03FF":"FF80")+
+          " M2="+(physicalSide==SIDE_LEFT?"FF80":"03FF")+
+          " M3=FFFF confirmed="+(physicalPhase==PHYS_READY||physicalPhase==PHYS_RUNNING?"1":"0"));
+  }
 }
 
 void reply(const String &line) { btSendLine(line); }
@@ -492,7 +498,7 @@ void command(const String &raw) {
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
     if(pid_is_auto_mode()){reply("ERR: AUTO_ALREADY_RUNNING");return;}
     if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
-    if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()==CAL_WHITE_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
+    if(sensor_is_calibrating()||!calibrationReady||sensor_calibration_state()!=CAL_READY){reply("ERR: CALIB_REQUIRED_OR_PENDING");return;}
     // AUTO:1/2/3 sets the firmware track atomically with START, avoiding
     // a mismatch between the Python logging MAP and the active controller.
     if(s.startsWith("AUTO:")){
@@ -627,6 +633,9 @@ void command(const String &raw) {
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(estopLatched){reply("ERR: ESTOP_LATCHED");return;}
     if(!sensor_adc_ready()){reply("ERR: ADC_NOT_READY");return;}
+    if(!calibrationReady || sensor_is_calibrating() || sensor_calibration_state()!=CAL_READY){
+      reply("ERR: CALIB_REQUIRED_OR_PENDING");return;
+    }
     safeStop();
     if(s=="F")motor_forward(manualSpeed);
     if(s=="B")motor_backward(manualSpeed);
@@ -708,12 +717,20 @@ void startPhysicalMap1(bool fullEyes) {
     reply("ERR: BUTTON_START_NOT_READY");
     return;
   }
-  // Force Map 1 only; a GUI-selected Map 2/3 is never started by hardware.
-  if(!pid_select_map(1) ||
+  // Both physical buttons and GUI SIDE_START always launch MAP 1.
+  if(!pid_select_map(1)){
+    reply("ERR: BUTTON_MAP1_MODE_FAILED");
+    return;
+  }
+  // Fixed MAP1 starting speed and 140->180 CODE_MAT envelope (v6).
+  // PURE_PID uses BASE=140 throughout; no boost/envelope in that mode.
+  pid_set_base_speed(140);
+  if(!pid_set_high_speed_peak(180) ||
      !pid_set_map1_button_mode(physicalSide==SIDE_LEFT,fullEyes)){
     reply("ERR: BUTTON_MAP1_MODE_FAILED");
     return;
   }
+  command("HS_PEAK"); // Synchronize the GUI's peak readback before START.
   map1StartModePreconfigured=true;
   command("AUTO:1"); // shared validation, telemetry, RUN_ORIGIN and logs
   map1StartModePreconfigured=false;
@@ -722,7 +739,9 @@ void startPhysicalMap1(bool fullEyes) {
     physicalPhase=PHYS_RUNNING;
     reply(String("BUTTON_RUN map=1 side=")+
           (physicalSide==SIDE_LEFT?"LEFT":"RIGHT")+
-          " eyes="+(fullEyes?"FULL16":"TICK_MASK"));
+          " eyes="+(fullEyes?"FULL16":"TICK_MASK")+
+          " mode="+(fullEyes?"PURE_PID":"CODE_MAT")+
+          " base=140 peak=180");
     reportPhysicalSide();
   }
 }

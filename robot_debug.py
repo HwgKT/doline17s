@@ -165,9 +165,13 @@ class App(tk.Tk):
         self.stop_verify_retries = 0
         self.start_confirmed = False
         self.csv_status = tk.StringVar(value="CSV: chờ START")
-        self.selected_map = None  # Require explicit choice to avoid mislabeled experiments.
-        self.map_status = tk.StringVar(value="Chưa chọn")
+        self.selected_map = 1  # v7 defaults AUTO to MAP 1; MAP 2/3 remain selectable explicitly.
+        self.map_status = tk.StringVar(value="Đã chọn 1 (mặc định)")
         self.map_buttons = {}
+        self.map1_side = None
+        self.map1_side_confirmed = False
+        self.map1_side_status = tk.StringVar(value="MAP 1: chưa xác nhận bên")
+        self.map1_eye_mode = tk.StringVar(value="TICK")
         self.run_txt_file = None
         self.run_txt_path = None
         self.session_log_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8")
@@ -195,25 +199,25 @@ class App(tk.Tk):
         self.last_diag_rx = None
         self.loop_debug = tk.StringVar(
             value="LOOP: -- Hz    PID: -- Hz    SPP TX: -- Hz    (chưa có DIAG)")
-        self.high_speed_peak = 220  # Expected startup default; read back from firmware.
+        self.high_speed_peak = 180  # MAP1 CODE_MAT peak; PURE_PID disables late boost.
         self.hs_brake_start = 1800  # Readback from legacy first-straight mode.
-        self.hs_late_start = 10500
+        self.hs_late_start = 8000
         self.hs_late_mode = False
         self.hs_peak_confirmed = None
         self.hs_peak_pending = None
         self.hs_peak_pending_at = None
         self.hs_peak_dirty = False
-        self.hs_peak_var = tk.DoubleVar(value=220)
-        self.hs_peak_value_text = tk.StringVar(value="220 (chưa xác nhận)")
+        self.hs_peak_var = tk.DoubleVar(value=180)
+        self.hs_peak_value_text = tk.StringVar(value="180 (chưa xác nhận)")
         self.hs_peak_feedback = tk.StringVar(value="Đọc HS từ ESP32 trước khi START")
         self.high_speed_status = tk.StringVar(
-            value="HS: MAP 1 từ 10500 tick | chờ ESP32 xác nhận")
+            value="HS: MAP 1 từ 8000 tick | chờ ESP32 xác nhận")
         self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
         self.sensor_profile = (650, 1500, 0x03FF, 0xFF80, 0xFFFF)
         self.sensor_profile_confirmed = False
         self.sensor_profile_status = tk.StringVar(
-            value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
+            value="PID mắt: chờ ESP32 (mặc định 650 / 1500 ticks)")
         self.sensor_profile_window = None
         self.map2_sensor_profile = (1000, 2000, 3000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF)
         self.map2_sensor_confirmed = False
@@ -286,7 +290,8 @@ class App(tk.Tk):
         for map_id in (1, 2, 3):
             button = tk.Button(map_bar, text=f"MAP {map_id}", width=6,
                                command=lambda selected=map_id: self.select_map(selected),
-                               bg=GREY, fg=FG, relief="flat", height=1,
+                               bg=CYAN if map_id == 1 else GREY, fg=BG if map_id == 1 else FG,
+                               relief="flat", height=1,
                                font=("Segoe UI", 9, "bold"))
             button.pack(side="left", padx=2)
             self.map_buttons[map_id] = button
@@ -300,6 +305,26 @@ class App(tk.Tk):
                    font=("Consolas", 8, "bold")).pack(anchor="w", padx=8, pady=(0, 1))
         self.label(diag_bar, textvariable=self.csv_status, fg=GREEN, bg=PANEL,
                    font=("Consolas", 8)).pack(anchor="w", padx=8, pady=(0, 1))
+
+        side_bar = tk.Frame(self, bg=PANEL, padx=8, pady=2)
+        side_bar.pack(fill="x", padx=8, pady=(0, 2))
+        self.label(side_bar, "MAP 1 — Chọn bên / chế độ:", bg=PANEL, fg=CYAN).pack(side="left", padx=(0, 6))
+        self.map1_left_btn = ttk.Button(side_bar, text="TRÁI",
+                                        command=lambda: self.choose_map1_side("LEFT"))
+        self.map1_left_btn.pack(side="left", padx=2)
+        self.map1_right_btn = ttk.Button(side_bar, text="PHẢI",
+                                         command=lambda: self.choose_map1_side("RIGHT"))
+        self.map1_right_btn.pack(side="left", padx=2)
+        self.map1_clear_btn = ttk.Button(side_bar, text="Hủy bên", command=self.clear_map1_side)
+        self.map1_clear_btn.pack(side="left", padx=2)
+        self.map1_eye_combo = ttk.Combobox(side_bar, textvariable=self.map1_eye_mode,
+                                           values=("TICK", "FULL16"),
+                                           state="readonly", width=8)
+        self.map1_eye_combo.pack(side="left", padx=5)
+        self.label(side_bar, "TICK: 140→180 | FULL16: PID 140",
+                   bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(side="left", padx=4)
+        self.label(side_bar, textvariable=self.map1_side_status,
+                   bg=PANEL, fg=AMBER).pack(side="left", padx=6)
 
         sensor_profile_bar = tk.Frame(self, bg=PANEL, padx=8, pady=3)
         sensor_profile_bar.pack(fill="x", padx=8, pady=(0, 2))
@@ -468,7 +493,7 @@ class App(tk.Tk):
         pwm_row.pack(fill="x", pady=(1, 0))
         self.label(pwm_row, "PWM", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
-        self.pwm_var = tk.DoubleVar(value=120)
+        self.pwm_var = tk.DoubleVar(value=140)
         self.pwm_text = tk.StringVar(value="120 / 255")
         self.label(pwm_row, textvariable=self.pwm_text, bg=PANEL, fg=CYAN,
                    font=("Consolas", 9), width=9, anchor="e").pack(side="right")
@@ -498,7 +523,7 @@ class App(tk.Tk):
         ttk.Button(pid_row, text="Áp dụng", width=7,
                    command=self.apply_pid).pack(side="right", padx=(2, 0))
         for key, initial in (("Kp", "1.6"), ("Ki", "0"),
-                             ("Kd", "0.8"), ("Base", "120")):
+                             ("Kd", "0.8"), ("Base", "140")):
             field = tk.Frame(pid_row, bg=PANEL)
             field.pack(side="left", padx=(0, 4))
             self.label(field, key, bg=PANEL, fg=MUTED,
@@ -507,10 +532,10 @@ class App(tk.Tk):
             self.pid_vars[key] = var
             ttk.Entry(field, textvariable=var, width=5).pack(side="left")
 
-        # MAP 1: HS_PEAK becomes straight-line BASE from 10500 ticks; other maps unchanged.
+        # MAP 1: HS_PEAK late boost starts at 8000 ticks.
         hs_row = tk.Frame(panel, bg=PANEL)
         hs_row.pack(fill="x", pady=(1, 0))
-        self.label(hs_row, "HS_PEAK (10500+)", bg=PANEL,
+        self.label(hs_row, "HS_PEAK (8000+)", bg=PANEL,
                    font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 5))
         self.label(hs_row, textvariable=self.hs_peak_value_text,
                    bg=PANEL, fg=CYAN, font=("Consolas", 9),
@@ -771,6 +796,10 @@ class App(tk.Tk):
         self.send_command("STATUS")
         self.send_command("CAL_STATUS")
         self.send_command("CAL_DUMP")
+        self.map1_side = None
+        self.map1_side_confirmed = False
+        self.map1_side_status.set("MAP 1: đang đọc trạng thái nút...")
+        self.send_command("SIDE:STATUS")
         self.send_command("HS_PEAK")
         self.send_command("ROUTE_LOCK")
         self.sensor_profile_confirmed = False
@@ -803,6 +832,9 @@ class App(tk.Tk):
         self.route_status.set("ROUTE: mất kết nối ESP32")
         self.sensor_profile_confirmed = False
         self.sensor_profile_status.set("PID mắt: mất kết nối ESP32")
+        self.map1_side = None
+        self.map1_side_confirmed = False
+        self.map1_side_status.set("MAP 1: mất kết nối")
         self.map2_sensor_confirmed = False
         self.map2_sensor_status.set("MAP 2 mắt PID: mất kết nối ESP32")
         self.map3_profile_confirmed = False
@@ -1324,6 +1356,21 @@ class App(tk.Tk):
         self.log(f"Đã chọn MAP {map_id}; các lượt START kế tiếp lưu trong logs/map_{map_id:02d}/")
         self.update_control_buttons()
 
+    def choose_map1_side(self, side):
+        if self.selected_map != 1:
+            self.log("Chọn MAP 1 trước khi đặt bên.")
+            return
+        if self.send_command("SIDE:" + side):
+            self.map1_side_confirmed = False
+            self.map1_side_status.set("MAP 1: chờ ESP32 xác nhận...")
+            self.update_control_buttons()
+
+    def clear_map1_side(self):
+        if self.send_command("SIDE:CLEAR"):
+            self.map1_side_confirmed = False
+            self.map1_side_status.set("MAP 1: chờ ESP32 hủy bên...")
+            self.update_control_buttons()
+
     def update_control_buttons(self):
         connected = self.reader is not None and self.reader.is_alive()
         can_start = (connected and self.estop_latched is False
@@ -1336,6 +1383,7 @@ class App(tk.Tk):
                      and self.hs_peak_confirmed is not None
                      and not self.hs_peak_dirty
                      and self.calibration_ok and self.selected_map is not None
+                     and (self.selected_map != 1 or self.map1_side_confirmed)
                      and all(v is not None for v in self.cal_thresholds))
         self.start_btn.configure(state="normal" if can_start else "disabled")
         self.stop_btn.configure(state="normal" if connected else "disabled")
@@ -1344,6 +1392,10 @@ class App(tk.Tk):
                   or self.stop_verify_pending)
         for button in self.map_buttons.values():
             button.configure(state="disabled" if locked else "normal")
+        side_editable = connected and self.selected_map == 1 and not locked
+        for button in (self.map1_left_btn, self.map1_right_btn, self.map1_clear_btn):
+            button.configure(state="normal" if side_editable else "disabled")
+        self.map1_eye_combo.configure(state="readonly" if side_editable else "disabled")
         if hasattr(self,"map2_sensor_btn"):
             self.map2_sensor_btn.configure(
                 state="normal" if self.selected_map == 2 else "disabled")
@@ -1458,8 +1510,10 @@ class App(tk.Tk):
         self.start_confirmed = False
         self.csv_status.set(f"CSV GHI: {recorder.path.name}")
         self.log(f"CSV BẮT ĐẦU: {recorder.path}")
-        # Firmware receives the same MAP ID as the CSV recorder in one START command.
-        if self.send_command(f"AUTO:{self.selected_map}"):
+        # GUI and physical START share the firmware's confirmed side state.
+        auto_command = ("SIDE_START:FULL" if self.map1_eye_mode.get()=="FULL16"
+                        else "SIDE_START:TICK") if self.selected_map == 1 else f"AUTO:{self.selected_map}"
+        if self.send_command(auto_command):
             self.start_pending = True
             self.control_state.set("Đã gửi AUTO — chờ ESP32 xác nhận.")
             self.update_control_buttons()
@@ -1601,6 +1655,62 @@ class App(tk.Tk):
         self.prev = (t, left, right)
 
     def on_text(self, message):
+        side_state = re.fullmatch(
+            r"BUTTON_STATE phase=(CALIB|SELECT|READY|RUNNING) "
+            r"side=(LEFT|RIGHT|NONE) confirmed=([01])", message)
+        if side_state:
+            phase, side, confirmed = side_state.groups()
+            self.map1_side = None if side == "NONE" else side
+            self.map1_side_confirmed = confirmed == "1"
+            names = {"LEFT": "TRÁI", "RIGHT": "PHẢI", "NONE": "chưa chọn"}
+            self.map1_side_status.set(
+                f"MAP 1: {names[side]} | "+(
+                    "Đã xác nhận" if self.map1_side_confirmed
+                    else "Chờ hiệu chuẩn" if phase == "CALIB"
+                    else "Chưa xác nhận"))
+            self.update_control_buttons()
+        elif message.startswith("BUTTON_SIDE_CONFIRMED: "):
+            side=message.partition(": ")[2]
+            if side in ("LEFT","RIGHT"):
+                self.map1_side=side
+                self.map1_side_confirmed=True
+                self.map1_side_status.set(
+                    f"MAP 1: {'TRÁI' if side=='LEFT' else 'PHẢI'} | Đã xác nhận")
+                self.update_control_buttons()
+        elif message.startswith("BUTTON_SIDE: "):
+            side=message.partition(": ")[2]
+            if side in ("LEFT","RIGHT"):
+                self.map1_side=side
+                self.map1_side_confirmed=False
+                self.map1_side_status.set(
+                    f"MAP 1: {'TRÁI' if side=='LEFT' else 'PHẢI'} | Chưa xác nhận")
+                self.update_control_buttons()
+        elif message=="BUTTON_SIDE_CLEARED":
+            self.map1_side=None
+            self.map1_side_confirmed=False
+            self.map1_side_status.set("MAP 1: đã hủy bên — chọn lại")
+            self.update_control_buttons()
+        elif message.startswith("BUTTON_RUN "):
+            eye=re.search(r"eyes=(FULL16|TICK_MASK)", message)
+            if eye:
+                self.map1_eye_mode.set("FULL16" if eye.group(1)=="FULL16" else "TICK")
+        elif message=="ERR: SIDE_NOT_READY" or message=="ERR: BUTTON_START_NOT_READY":
+            self.map1_side_status.set("MAP 1: ESP32 từ chối — kiểm tra hiệu chuẩn/chọn bên")
+            if self.start_pending:
+                self.start_pending=False
+                self.set_auto_running(False)
+                self.finish_run_csv("AUTO BỊ TỪ CHỐI: "+message)
+            self.update_control_buttons()
+        profile = re.fullmatch(
+            r"BUTTON_PROFILE side=(LEFT|RIGHT) T1=(\d+) T2=(\d+) "
+            r"M1=([0-9A-Fa-f]{4}) M2=([0-9A-Fa-f]{4}) "
+            r"M3=([0-9A-Fa-f]{4}) confirmed=([01])", message)
+        if profile:
+            side, t1, t2, m1, m2, m3, confirmed = profile.groups()
+            self.map1_side_status.set(
+                f"MAP 1: {'TRÁI' if side == 'LEFT' else 'PHẢI'} | "
+                f"{t1}/{t2} | {m1}/{m2}/{m3} | "
+                + ("ESP32 OK" if confirmed == "1" else "Chưa xác nhận"))
         # Hardware START has no GUI callback, so RUN_ORIGIN opens its log.
         # Do this before mirroring RUN_ORIGIN to TXT.
         if message.startswith("RUN_ORIGIN "):
@@ -1904,7 +2014,7 @@ class App(tk.Tk):
                         and getattr(self, "selected_map", None) == 1):
                     self.high_speed_status.set(
                         f"HS: {title} | ENC={tick.group(1) if tick else '--'} "
-                        f"| 10k+ BASE→{self.high_speed_peak}"
+                        f"| {self.hs_late_start}+ BASE→{self.high_speed_peak}"
                     )
                 else:
                     self.high_speed_status.set(

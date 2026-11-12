@@ -92,7 +92,7 @@ constexpr int32_t HS_BRAKE_END_ENC = 2300;
 constexpr int32_t HS_HOLD_MIN_END_ENC = 3100;
 constexpr float HS_CORNER_HOLD_PWM = 110.0f;
 constexpr float HS_HOLD_CENTER_ERROR = 15.0f; // valid line position near center
-int16_t highSpeedPeakPwm = 240; // All three MAPs default to peak PWM 240.
+int16_t highSpeedPeakPwm = 180; // MAP1 CODE_MAT default: BASE 140 -> 180 after 8000 ticks.
 enum HighSpeedStage : uint8_t {
     HS_DISABLED=0, HS_ACCEL=1, HS_CRUISE=2, HS_BRAKE=3,
     HS_FINISHED=4, HS_ABORTED=5, HS_CORNER_HOLD=6
@@ -141,7 +141,7 @@ constexpr GapWindow GAP_WINDOWS[3] = {
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
 constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150};
-constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
+constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 180; // Map 2/3 keep peak=240.
 // MAP 1 and MAP 2 use their selected fixed BASE. MAP 3 has an independent,
 // configurable four-stage BASE schedule selected by encoder travel.
 // Map 1 only: arm the late BASE boost after 8,000 forward-progress ticks.
@@ -265,9 +265,9 @@ static uint16_t map1PidSensorMask() {
     if (map1ButtonOverride) {
         if (map1ButtonFullEyes) return 0xFFFFU;
         if (map1SensorMaxTicks < MAP1_BUTTON_TICK1)
-            return map1ButtonLeft ? 0x03FFU : 0xFFC0U;
+            return map1ButtonLeft ? 0x03FFU : 0xFF80U;
         if (map1SensorMaxTicks < MAP1_BUTTON_TICK2)
-            return map1ButtonLeft ? 0xFFC0U : 0x03FFU;
+            return map1ButtonLeft ? 0xFF80U : 0x03FFU;
         return 0xFFFFU;
     }
     if (map1SensorMaxTicks < map1SensorStage2Ticks)
@@ -734,7 +734,7 @@ void pid_set_auto_mode(bool enabled) {
     autoStartedMs = millis();
     if (enabled) {
         encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
-        highSpeedStage = ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED;
+        highSpeedStage = ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 2 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED; // MAP1 never uses the first-straight trapezoid.
     }
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
@@ -764,7 +764,7 @@ bool pid_select_map(uint8_t mapId) {
     // app resends AUTO:<same map> after an intentional manual adjustment.
     if (selectedMap != mapId) {
         pidConfig.baseSpeed = MAP_DEFAULT_BASE_PWM[mapId - 1];
-        highSpeedPeakPwm = MAP_DEFAULT_HS_PEAK_PWM;
+        highSpeedPeakPwm = mapId == 1 ? MAP_DEFAULT_HS_PEAK_PWM : 240;
     }
     selectedMap = mapId;
     return true;
@@ -937,7 +937,7 @@ LineCase_t pid_detect_case(float position, uint8_t blackCount) {
     const uint16_t mask = sensor_get_line_bits();
     // Stage uses monotonic maximum forward progress, not time or raw encoder
     // sum; wheel reversal during SEARCH must not reactivate earlier zones.
-    if (ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 && !highSpeedAborted) {
+    if (ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 2 && selectedMap <= 3 && !highSpeedAborted) {
         const int32_t progress = runEncoderProgress();
         if (progress > highSpeedMaxProgress) highSpeedMaxProgress = progress;
         if (isSearchTurn() && highSpeedMaxProgress < HS_BRAKE_END_ENC) {
@@ -1508,7 +1508,9 @@ void pid_line_follow_step(void) {
         // The boost remains armed until the next AUTO start, but is applied
         // only while the line is centered; corners retain the configured BASE.
         // MAP 2 keeps its selected BASE; MAP 3 uses its independent tick schedule.
+        // A FULL16 start is pure PID: no encoder speed shaping or MAP1 late boost.
         const bool map1ReadyForBoost = selectedMap == 1 &&
+            !(map1ButtonOverride && map1ButtonFullEyes) &&
             map1MaxProgress >= MAP1_LATE_BOOST_START_TICKS;
         const bool centeredForBoost = pidMeasurementGood &&
             fabsf(pidPosition) <= MAP1_LATE_BOOST_CENTER_ERROR;
