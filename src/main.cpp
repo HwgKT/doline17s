@@ -48,6 +48,7 @@ PhysicalSide physicalSide = SIDE_NONE;
 bool physicalSideConfirmed = false;
 bool physicalRunInProgress = false;
 bool map1StartModePreconfigured = false;
+bool map1RunFullEyes = false; // True only for a confirmed FULL16 run.
 constexpr uint32_t PHYSICAL_SIDE_BUTTON_DEBOUNCE_MS = 50;
 constexpr uint32_t BUTTON_HOLD_MS = 1000;
 struct PhysicalButton {
@@ -116,9 +117,10 @@ void reportPhysicalSide() {
   reply(String("BUTTON_STATE phase=")+phase+" side="+side+
         " confirmed="+(physicalSideConfirmed?"1":"0"));
   if(physicalSide!=SIDE_NONE) {
+    const bool full=pid_is_auto_mode() && map1RunFullEyes;
     reply(String("BUTTON_PROFILE side=")+side+
-          " T1=650 T2=1500 M1="+(physicalSide==SIDE_LEFT?"03FF":"FF80")+
-          " M2="+(physicalSide==SIDE_LEFT?"FF80":"03FF")+
+          " T1=650 T2=1500 M1="+(full?"FFFF":physicalSide==SIDE_LEFT?"03FF":"FF80")+
+          " M2="+(full?"FFFF":physicalSide==SIDE_LEFT?"FF80":"03FF")+
           " M3=FFFF confirmed="+(physicalSideConfirmed?"1":"0"));
   }
 }
@@ -126,6 +128,7 @@ void clearPhysicalSide() {
   physicalSide=SIDE_NONE;physicalSideConfirmed=false;
   physicalRunInProgress=false;
   map1StartModePreconfigured=false;
+  map1RunFullEyes=false;
   pid_clear_map1_button_mode(); // No previous run's FULL16/mask override leaks.
 }
 void safeStop() {
@@ -364,8 +367,9 @@ void command(const String &raw) {
     // generic editor's unused mask. This keeps SPP/web readbacks aligned.
     if(physicalCalibrationReady() && physicalSide!=SIDE_NONE) {
       t1=650;t2=1500;
-      m1=physicalSide==SIDE_LEFT?0x03FFU:0xFF80U;
-      m2=physicalSide==SIDE_LEFT?0xFF80U:0x03FFU;
+      const bool full=pid_is_auto_mode() && map1RunFullEyes;
+      m1=full?0xFFFFU:(physicalSide==SIDE_LEFT?0x03FFU:0xFF80U);
+      m2=full?0xFFFFU:(physicalSide==SIDE_LEFT?0xFF80U:0x03FFU);
       m3=0xFFFFU;
     }
     char b[130];
@@ -534,9 +538,11 @@ void command(const String &raw) {
       if(!physicalSideConfirmed || physicalSide==SIDE_NONE){
         reply("ERR: SIDE_CONFIRM_REQUIRED");return;
       }
-      if(!map1StartModePreconfigured &&
-         !pid_set_map1_button_mode(physicalSide==SIDE_LEFT,false)){
-        reply("ERR: SIDE_MASK_SETUP_FAILED");return;
+      if(!map1StartModePreconfigured) {
+        map1RunFullEyes=false;
+        if(!pid_set_map1_button_mode(physicalSide==SIDE_LEFT,false)){
+          reply("ERR: SIDE_MASK_SETUP_FAILED");return;
+        }
       }
     }
     // Start is permitted from BLACK, WHITE, or a narrow line.
@@ -723,9 +729,11 @@ void startPhysicalMap1(bool fullEyes) {
      !pid_set_map1_button_mode(physicalSide==SIDE_LEFT,fullEyes)){
     reply("ERR: BUTTON_MAP1_MODE_FAILED");return;
   }
+  map1RunFullEyes=fullEyes;
   map1StartModePreconfigured=true;
   command("AUTO:1");
   map1StartModePreconfigured=false;
+  if(!pid_is_auto_mode()) map1RunFullEyes=false;
   if(pid_is_auto_mode()){
     reply(String("BUTTON_RUN map=1 side=")+
           (physicalSide==SIDE_LEFT?"LEFT":"RIGHT")+
