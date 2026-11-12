@@ -1172,8 +1172,8 @@
           'Chưa hoàn tất CAL phiên hiện tại — không được START';
       document.getElementById('map1SideState').textContent =
         'Bên: ' + sideName + ' | ' + (
-          webV6State.confirmed ? 'ESP32 OK' :
-          webV6State.phase === 'RUNNING' ? 'RUNNING' : 'chưa xác nhận'
+          webV6State.phase === 'RUNNING' ? 'ĐANG CHẠY' :
+          webV6State.confirmed ? 'ESP32 OK' : 'chưa xác nhận'
         );
       document.getElementById('map1SensorProfile').textContent =
         'Mắt PID: ' + (webV6State.mask || 'chưa đọc profile') +
@@ -1233,6 +1233,7 @@
         webV6State.confirmed = webV6State.calReady && state[3] === '1';
         if(webV6State.side === 'NONE' || previousSide !== webV6State.side)
           webV6State.mask = null;
+        if(webV6State.side === 'NONE') webV6State.eyeMode = 'TICK_MASK';
         renderWebV6State();
         return true;
       }
