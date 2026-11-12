@@ -171,9 +171,10 @@ static int32_t runEncoderProgress() {
 // User-configurable through SENSOR_PROFILE SPP commands while stopped.
 // Values persist across AUTO runs but return to defaults after reboot.
 int32_t map1SensorStage2Ticks = 650;
-int32_t map1SensorStage3Ticks = 1350;
+int32_t map1SensorStage3Ticks = 1500;
 // Stage 1: disable S0..S4; stage 2: disable S9..S15; stage 3: all sensors.
-uint16_t map1SensorStageMasks[3] = {0xFFE0U, 0x01FFU, 0xFFFFU};
+// Default LEFT preset: stage1 S0-S9, stage2 S7-S15, stage3 all 16.
+uint16_t map1SensorStageMasks[3] = {0x03FFU, 0xFF80U, 0xFFFFU};
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
