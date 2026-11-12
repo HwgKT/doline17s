@@ -96,6 +96,12 @@ void reportPhysicalSide() {
   const char* side=physicalSide==SIDE_LEFT?"LEFT":physicalSide==SIDE_RIGHT?"RIGHT":"NONE";
   reply(String("BUTTON_STATE phase=")+phase+" side="+side+
         " confirmed="+(physicalSideConfirmed?"1":"0"));
+  if(physicalSide!=SIDE_NONE) {
+    reply(String("BUTTON_PROFILE side=")+side+
+          " T1=650 T2=1500 M1="+(physicalSide==SIDE_LEFT?"03FF":"FF80")+
+          " M2="+(physicalSide==SIDE_LEFT?"FF80":"03FF")+
+          " M3=FFFF confirmed="+(physicalSideConfirmed?"1":"0"));
+  }
 }
 void clearPhysicalSide() {
   physicalSide=SIDE_NONE;physicalSideConfirmed=false;
