@@ -790,7 +790,7 @@ void setup() {
   calButton.pressedMs=selectButton.pressedMs=buttonInitMs;
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
-  pid_init(1.6f,0.0f,0.8f,130); // default PID gains for MAP 1/2/3
+  pid_init(1.6f,0.0f,0.8f,140); // default PID gains for MAP 1/2/3
   pid_select_map(1); // physical GPIO34 START works without a connected app
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
