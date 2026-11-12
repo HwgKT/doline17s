@@ -73,26 +73,6 @@ bool parseSpeed(const String &s,int &val) {
   if(end==s.c_str()||*end||v<0||v>255)return false;
   val=(int)v;return true;
 }
-bool parseMapProfileCsv(const String &csv,long *values,uint8_t capacity,
-                         uint8_t *parsedCount,bool alternatingHex) {
-  if(!values || !parsedCount || csv.length()>=220U) return false;
-  char buffer[220];
-  csv.toCharArray(buffer,sizeof(buffer));
-  char *save=nullptr;
-  char *token=strtok_r(buffer,",",&save);
-  uint8_t count=0;
-  while(token){
-    if(count>=capacity || !*token) return false;
-    char *end=nullptr;
-    const int base=(alternatingHex && count>=3U && (count%2U)==1U)?16:10;
-    const long value=strtol(token,&end,base);
-    if(end==token || !end || *end!='\0') return false;
-    values[count++]=value;
-    token=strtok_r(nullptr,",",&save);
-  }
-  *parsedCount=count;
-  return true;
-}
 void showPid() {
   char b[100];
   snprintf(b,sizeof(b),"PID: Kp=%.2f Ki=%.2f Kd=%.2f Base=%d",
@@ -118,7 +98,7 @@ void command(const String &raw) {
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP_SPEED_PROFILE_V2 MAP_SPEED_PROFILE_V2:map,count,endTick,base,... MAP2_PID_TEST MAP_SENSOR_PROFILE_V2:2 MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_SENSOR_PROFILE MAP3_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_PROFILE MAP3_PROFILE:sT1,sT2,sT3,sM1,sM2,sM3,sM4,bT1,bT2,bT3,b1,b2,b3,b4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -198,120 +178,8 @@ void command(const String &raw) {
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
   if(s=="PID"){showPid();return;}
-  if(s=="MAP2_PID_TEST"){
-    char b[240];
-    snprintf(b,sizeof(b),
-      "MAP2_PID_TEST: ENABLED=%u BASE=%d MASK=FFFF STAGES=OFF "
-      "CHECKPOINT=OFF EARLY_TURN=OFF "
-      "SEARCH=FORWARD_ONLY_90 SEARCH_MS=2000 REACQ_FRAMES=3 "
-      "START=BASE_UNTIL_LINE PWM=0..255 LOSS_MS=30 "
-      "START_TIMEOUT_MS=5000 V4_BASELINE=130",
-      pid_map2_pure_pid_test_enabled()?1U:0U,pid_get_base_speed());
-    reply(b);return;
-  }
-  // Variable-length BASE profile; the final stage uses endTick=0 (FINISH).
-  if(s.startsWith("MAP_SPEED_PROFILE_V2:")){
-    const String payload=s.substring(String("MAP_SPEED_PROFILE_V2:").length());
-    if(payload.indexOf(',')<0){
-      int mapId=payload.toInt();
-      if(payload!=String(mapId) || mapId<1 || mapId>3){reply("ERR: MAP_SPEED_PROFILE_V2_MAP");return;}
-      uint8_t stages=0;int32_t ticks[PID_MAP_PROFILE_MAX_STAGES-1]={0};
-      uint8_t bases[PID_MAP_PROFILE_MAX_STAGES]={0};
-      pid_get_map_speed_profile_v2((uint8_t)mapId,&stages,ticks,bases);
-      char out[240];int used=snprintf(out,sizeof(out),"MAP_SPEED_PROFILE_V2:%d,%u",mapId,(unsigned)stages);
-      for(uint8_t i=0;i<stages && used>0 && used<(int)sizeof(out);++i){
-        const long endTick=(i+1U<stages)?(long)ticks[i]:0L;
-        used+=snprintf(out+used,sizeof(out)-(size_t)used,",%ld,%u",endTick,(unsigned)bases[i]);
-      }
-      reply(out);return;
-    }
-    if(pid_is_auto_mode() || manualActive){reply("ERR: MAP_SPEED_PROFILE_V2_STOP_REQUIRED");return;}
-    long values[2U+2U*PID_MAP_PROFILE_MAX_STAGES]={0};uint8_t parsed=0;
-    if(!parseMapProfileCsv(payload,values,2U+2U*PID_MAP_PROFILE_MAX_STAGES,&parsed,false) ||
-       parsed<4U || (parsed%2U)!=0U){reply("ERR: MAP_SPEED_PROFILE_V2_FORMAT");return;}
-    const int mapId=(int)values[0],stages=(int)values[1];
-    if(mapId<1 || mapId>3 || pid_get_selected_map()!=mapId){reply("ERR: MAP_SPEED_PROFILE_V2_SELECT_MAP");return;}
-    if(stages<1 || stages>PID_MAP_PROFILE_MAX_STAGES || parsed!=(uint8_t)(2+2*stages)){
-      reply("ERR: MAP_SPEED_PROFILE_V2_STAGE_COUNT_1_8");return;
-    }
-    int32_t ticks[PID_MAP_PROFILE_MAX_STAGES-1]={0};
-    uint8_t bases[PID_MAP_PROFILE_MAX_STAGES]={0};
-    for(int i=0;i<stages;++i){
-      const long endTick=values[2+2*i],base=values[3+2*i];
-      if(i+1==stages){if(endTick!=0){reply("ERR: MAP_SPEED_PROFILE_V2_LAST_STAGE_MUST_FINISH");return;}}
-      else {if(endTick<=0 || endTick>10000000L){reply("ERR: MAP_SPEED_PROFILE_V2_TICK_RANGE");return;}ticks[i]=(int32_t)endTick;}
-      if(base<45 || base>255){reply("ERR: MAP_SPEED_PROFILE_V2_BASE_RANGE_45_255");return;}
-      bases[i]=(uint8_t)base;
-    }
-    if(!pid_set_map_speed_profile_v2((uint8_t)mapId,(uint8_t)stages,ticks,bases)){
-      reply("ERR: MAP_SPEED_PROFILE_V2_INVALID_OR_UNSORTED_TICKS");return;
-    }
-    command(String("MAP_SPEED_PROFILE_V2:")+String(mapId));return;
-  }
-
-  // Map 2 variable-length PID sensor stages. Protocol is identical to v5:
-  // MAP_SENSOR_PROFILE_V2:2,N,endTick1,mask1,...,0,lastMask
-  // MAP_SENSOR_PROFILE_V2:2 reads the entire active profile.
-  if(s.startsWith("MAP_SENSOR_PROFILE_V2:")){
-    const String payload=s.substring(String("MAP_SENSOR_PROFILE_V2:").length());
-    if(payload.indexOf(',')<0){
-      if(payload!="2"){reply("ERR: MAP_SENSOR_PROFILE_V2_MAP2_ONLY");return;}
-      uint8_t stages=0;
-      int32_t ticks[PID_MAP2_SENSOR_MAX_STAGES-1]={0};
-      uint16_t masks[PID_MAP2_SENSOR_MAX_STAGES]={0};
-      pid_get_map2_sensor_profile_v2(&stages,ticks,masks);
-      char out[240];
-      int used=snprintf(out,sizeof(out),"MAP_SENSOR_PROFILE_V2:2,%u",(unsigned)stages);
-      for(uint8_t i=0;i<stages && used>0 && used<(int)sizeof(out);++i){
-        const long endTick=(i+1U<stages)?(long)ticks[i]:0L;
-        used+=snprintf(out+used,sizeof(out)-(size_t)used,",%ld,%04X",
-                       endTick,(unsigned)masks[i]);
-      }
-      reply(out);return;
-    }
-    if(pid_is_auto_mode() || manualActive){
-      reply("ERR: MAP_SENSOR_PROFILE_V2_STOP_REQUIRED");return;
-    }
-    long values[2U+2U*PID_MAP2_SENSOR_MAX_STAGES]={0};
-    uint8_t parsed=0;
-    if(!parseMapProfileCsv(payload,values,2U+2U*PID_MAP2_SENSOR_MAX_STAGES,
-                           &parsed,true) || parsed<4U || (parsed%2U)!=0U){
-      reply("ERR: MAP_SENSOR_PROFILE_V2_FORMAT");return;
-    }
-    const int mapId=(int)values[0],stages=(int)values[1];
-    if(mapId!=2){reply("ERR: MAP_SENSOR_PROFILE_V2_MAP2_ONLY");return;}
-    if(stages<1 || stages>PID_MAP2_SENSOR_MAX_STAGES ||
-       parsed!=(uint8_t)(2+2*stages)){
-      reply("ERR: MAP_SENSOR_PROFILE_V2_STAGE_COUNT_1_8");return;
-    }
-    int32_t ticks[PID_MAP2_SENSOR_MAX_STAGES-1]={0};
-    uint16_t masks[PID_MAP2_SENSOR_MAX_STAGES]={0};
-    for(int i=0;i<stages;++i){
-      const long endTick=values[2+2*i],mask=values[3+2*i];
-      if(i+1==stages){
-        if(endTick!=0){reply("ERR: MAP_SENSOR_PROFILE_V2_LAST_STAGE_MUST_FINISH");return;}
-      }else{
-        if(endTick<=0 || endTick>10000000L){
-          reply("ERR: MAP_SENSOR_PROFILE_V2_TICK_RANGE");return;
-        }
-        ticks[i]=(int32_t)endTick;
-      }
-      if(mask<=0 || mask>0xFFFFL){
-        reply("ERR: MAP_SENSOR_PROFILE_V2_MASK_RANGE");return;
-      }
-      masks[i]=(uint16_t)mask;
-    }
-    if(!pid_set_map2_sensor_profile_v2((uint8_t)stages,ticks,masks)){
-      reply("ERR: MAP_SENSOR_PROFILE_V2_INVALID_OR_UNSORTED_TICKS");return;
-    }
-    command("MAP_SENSOR_PROFILE_V2:2");return;
-  }
-
   // MAP 2: four masks, three tick boundaries; HEX masks like SENSOR_PROFILE.
   if(s=="MAP2_SENSOR_PROFILE"){
-    uint8_t count=0;
-    pid_get_map2_sensor_profile_v2(&count,nullptr,nullptr);
-    if(count!=4){reply("ERR: MAP2_SENSOR_PROFILE_USE_MAP_SENSOR_PROFILE_V2:2");return;}
     int32_t t[3]={}; uint16_t m[4]={};
     pid_get_map2_sensor_profile(t,m);
     char b[165];
@@ -342,37 +210,53 @@ void command(const String &raw) {
     }
     command("MAP2_SENSOR_PROFILE");return;
   }
-  // MAP 3: four PID sensor-mask stages, selected continuously by encoder ticks.
-  if(s=="MAP3_SENSOR_PROFILE"){
-    int32_t t[3]={}; uint16_t m[4]={};
-    pid_get_map3_sensor_profile(t,m);
-    char b[165];
+  // MAP 3: independent four-stage sensor masks and four-stage BASE PWM.
+  if(s=="MAP3_PROFILE"){
+    int32_t sensorTicks[3]={},baseTicks[3]={};
+    uint16_t sensorMasks[4]={};
+    uint8_t basePwms[4]={};
+    pid_get_map3_profile(sensorTicks,sensorMasks,baseTicks,basePwms);
+    char b[240];
     snprintf(b,sizeof(b),
-      "MAP3_SENSOR_PROFILE T1=%ld T2=%ld T3=%ld M1=%04X M2=%04X M3=%04X M4=%04X STAGE=%u",
-      (long)t[0],(long)t[1],(long)t[2],
-      (unsigned)m[0],(unsigned)m[1],(unsigned)m[2],(unsigned)m[3],
-      (unsigned)pid_get_map3_sensor_stage());
+      "MAP3_PROFILE ST1=%ld ST2=%ld ST3=%ld SM1=%04X SM2=%04X SM3=%04X SM4=%04X BT1=%ld BT2=%ld BT3=%ld B1=%u B2=%u B3=%u B4=%u S_STAGE=%u B_STAGE=%u",
+      (long)sensorTicks[0],(long)sensorTicks[1],(long)sensorTicks[2],
+      (unsigned)sensorMasks[0],(unsigned)sensorMasks[1],
+      (unsigned)sensorMasks[2],(unsigned)sensorMasks[3],
+      (long)baseTicks[0],(long)baseTicks[1],(long)baseTicks[2],
+      (unsigned)basePwms[0],(unsigned)basePwms[1],
+      (unsigned)basePwms[2],(unsigned)basePwms[3],
+      (unsigned)pid_get_map3_sensor_stage(),
+      (unsigned)pid_get_map3_base_stage());
     reply(b);return;
   }
-  if(s.startsWith("MAP3_SENSOR_PROFILE:")){
+  if(s.startsWith("MAP3_PROFILE:")){
     if(pid_is_auto_mode() || manualActive){
-      reply("ERR: MAP3_SENSOR_PROFILE_REQUIRES_STOPPED");return;
+      reply("ERR: MAP3_PROFILE_REQUIRES_STOPPED");return;
     }
-    long t1=0,t2=0,t3=0;
-    unsigned m1=0,m2=0,m3=0,m4=0;
-    char tail=0;
-    const int n=sscanf(s.c_str()+20,"%ld,%ld,%ld,%x,%x,%x,%x %c",
-      &t1,&t2,&t3,&m1,&m2,&m3,&m4,&tail);
-    const int32_t ticks[3]={(int32_t)t1,(int32_t)t2,(int32_t)t3};
-    const uint16_t masks[4]={(uint16_t)m1,(uint16_t)m2,
-                             (uint16_t)m3,(uint16_t)m4};
-    if(n!=7 || t1<=0 || t2<=t1 || t3<=t2 || t3>10000000L ||
-       m1==0 || m2==0 || m3==0 || m4==0 ||
-       m1>0xFFFFU || m2>0xFFFFU || m3>0xFFFFU || m4>0xFFFFU ||
-       !pid_set_map3_sensor_profile(ticks,masks)){
-      reply("ERR: MAP3_SENSOR_PROFILE_INVALID");return;
+    long st1=0,st2=0,st3=0,bt1=0,bt2=0,bt3=0;
+    unsigned sm1=0,sm2=0,sm3=0,sm4=0,b1=0,b2=0,b3=0,b4=0;
+    char trailing=0;
+    const int n=sscanf(s.c_str()+13,
+      "%ld,%ld,%ld,%x,%x,%x,%x,%ld,%ld,%ld,%u,%u,%u,%u %c",
+      &st1,&st2,&st3,&sm1,&sm2,&sm3,&sm4,
+      &bt1,&bt2,&bt3,&b1,&b2,&b3,&b4,&trailing);
+    const int32_t sensorTicks[3]={(int32_t)st1,(int32_t)st2,(int32_t)st3};
+    const uint16_t sensorMasks[4]={(uint16_t)sm1,(uint16_t)sm2,
+                                   (uint16_t)sm3,(uint16_t)sm4};
+    const int32_t baseTicks[3]={(int32_t)bt1,(int32_t)bt2,(int32_t)bt3};
+    const uint8_t basePwms[4]={(uint8_t)b1,(uint8_t)b2,
+                               (uint8_t)b3,(uint8_t)b4};
+    if(n!=14 || st1<=0 || st1>10000000L ||
+       st2<=0 || st2>10000000L || st3<=0 || st3>10000000L ||
+       bt1<=0 || bt1>10000000L || bt2<=0 || bt2>10000000L ||
+       bt3<=0 || bt3>10000000L ||
+       sm1==0 || sm2==0 || sm3==0 || sm4==0 ||
+       sm1>0xFFFFU || sm2>0xFFFFU || sm3>0xFFFFU || sm4>0xFFFFU ||
+       b1>255U || b2>255U || b3>255U || b4>255U ||
+       !pid_set_map3_profile(sensorTicks,sensorMasks,baseTicks,basePwms)){
+      reply("ERR: MAP3_PROFILE_INVALID");return;
     }
-    command("MAP3_SENSOR_PROFILE");return;
+    command("MAP3_PROFILE");return;
   }
   // Read/update all three Map 1 PID sensor masks without opening a terminal.
   // SENSOR_PROFILE:350,1500,01FF,FF80,FFFF (masks are hexadecimal).
@@ -554,7 +438,7 @@ void command(const String &raw) {
     snprintf(runInfo,sizeof(runInfo),
        "RUN_ORIGIN map=%u encL0=%ld encR0=%ld base=%d peak=%d kp=%.2f ki=%.2f kd=%.2f t_ms=%lu",
        (unsigned)pid_get_selected_map(),(long)runL,(long)runR,
-       pid_get_base_speed(),pid_get_high_speed_peak(),
+       pid_get_active_base_speed(),pid_get_high_speed_peak(),
        pid_get_kp(),pid_get_ki(),pid_get_kd(),
        (unsigned long)millis());
     reply(runInfo);
@@ -630,7 +514,9 @@ void command(const String &raw) {
   if(s.startsWith("V:")||s.startsWith("BASE:")||s.startsWith("SPEED:")){
     int v;int sep=s.indexOf(':');
     if(sep<0||!parseSpeed(s.substring(sep+1),v)){reply("ERR: SPEED_0_255");return;}
-    // BASE and per-map staged BASE no longer depend on HS_PEAK.
+    // A BASE above HS_PEAK makes the trapezoid undefined. Reject instead
+    // of silently turning a supposedly lower peak into a higher target.
+    if(v>pid_get_high_speed_peak()){reply("ERR: BASE_GT_HS_PEAK");return;}
     pid_set_base_speed(v);manualSpeed=(uint8_t)v;
     reply(String("SPEED SET: ")+v);return;
   }
@@ -654,7 +540,7 @@ void connectionState(uint32_t now) {
     if(connected){
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
       reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
-      // No automatic HS_PEAK handshake for normal operation.
+      command("HS_PEAK");
     }else{
       safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
       btDropPendingTelemetry(); // no replay after reconnect
@@ -789,7 +675,8 @@ void loop() {
     const bool oldMap1Boost=pid_is_map1_late_boost_engaged();
     const uint8_t oldMap2Stage=pid_get_map2_sensor_stage();
     const uint8_t oldMap2Hold=pid_get_map2_hold_state();
-    const uint8_t oldMap3Stage=pid_get_map3_sensor_stage();
+    const uint8_t oldMap3SensorStage=pid_get_map3_sensor_stage();
+    const uint8_t oldMap3BaseStage=pid_get_map3_base_stage();
     const bool wasFinishArmed=pid_finish_detection_armed();
     pid_line_follow_step();++pidCount;
     if(!wasFinishArmed && pid_finish_detection_armed()){
@@ -823,13 +710,15 @@ void loop() {
       }
     }
     if(pid_get_selected_map()==3 && newCase!=LINE_CASE_STOPPED){
-      const uint8_t newMap3Stage=pid_get_map3_sensor_stage();
-      if(newMap3Stage!=oldMap3Stage){
-        char msg[100];
+      const uint8_t sensorStage=pid_get_map3_sensor_stage();
+      const uint8_t baseStage=pid_get_map3_base_stage();
+      if(sensorStage!=oldMap3SensorStage || baseStage!=oldMap3BaseStage){
+        char msg[150];
         snprintf(msg,sizeof(msg),
-          "MAP3_STAGE stage=%u runEnc=%ld t_ms=%lu",
-          (unsigned)newMap3Stage,(long)pid_get_run_encoder_progress(),
-          (unsigned long)millis());
+          "MAP3_STAGE sensor=%u base=%u travel=%ld basePWM=%d t_ms=%lu",
+          (unsigned)sensorStage,(unsigned)baseStage,
+          (long)pid_get_map3_travel_ticks(),
+          pid_get_active_base_speed(),(unsigned long)millis());
         reply(msg);
       }
     }

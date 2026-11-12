@@ -75,32 +75,23 @@ bool pid_set_map1_sensor_profile(int32_t stage2, int32_t stage3,
 void pid_get_map1_sensor_profile(int32_t *stage2, int32_t *stage3,
                                  uint16_t *mask1, uint16_t *mask2,
                                  uint16_t *mask3);
-// Map 2: 1..8 PID mask stages, N-1 strictly increasing encoder ticks.
-// Last stage continues until FINISH. Configure only while AUTO is stopped.
-// Legacy four-stage API remains for older SPP clients.
-#define PID_MAP2_SENSOR_MAX_STAGES 8
-bool pid_set_map2_sensor_profile_v2(uint8_t stageCount, const int32_t *endTicks,
-                                    const uint16_t *masks);
-void pid_get_map2_sensor_profile_v2(uint8_t *stageCount, int32_t *endTicks,
-                                    uint16_t *masks);
+// Map 2: 4 PID eye-mask stages selected by three encoder thresholds.
+// 3 ordered positive ticks and 4 nonzero masks. AUTO must be off.
 bool pid_set_map2_sensor_profile(const int32_t *ticks, const uint16_t *masks);
 void pid_get_map2_sensor_profile(int32_t *ticks, uint16_t *masks);
 uint8_t pid_get_map2_sensor_stage(void);
-// True when Map 2 bypasses all route modifiers and uses the full-16 line PID.
-bool pid_map2_pure_pid_test_enabled(void);
-// Map 3: four continuously selected PID eye-mask stages, no checkpoint stops.
-// Three ordered positive encoder thresholds and four nonzero masks; AUTO must be off to edit.
-bool pid_set_map3_sensor_profile(const int32_t *ticks, const uint16_t *masks);
-void pid_get_map3_sensor_profile(int32_t *ticks, uint16_t *masks);
+// Map 3: four independent PID masks and four independent BASE PWM stages.
+// Sensor and BASE tick boundaries are separate; all values are editable while stopped.
+bool pid_set_map3_profile(const int32_t *sensorTicks, const uint16_t *sensorMasks,
+                          const int32_t *baseTicks, const uint8_t *basePwms);
+void pid_get_map3_profile(int32_t *sensorTicks, uint16_t *sensorMasks,
+                          int32_t *baseTicks, uint8_t *basePwms);
 uint8_t pid_get_map3_sensor_stage(void);
+uint8_t pid_get_map3_base_stage(void);
+int32_t pid_get_map3_travel_ticks(void);
+int16_t pid_get_active_base_speed(void);
 // Map2 checkpoint: 0=RUN, 1=ALIGN, 2=HOLD_10MS, 3=FAULT.
 uint8_t pid_get_map2_hold_state(void);
-// Map-specific BASE schedules: 1..8 stages, last continues to FINISH.
-#define PID_MAP_PROFILE_MAX_STAGES 8
-bool pid_set_map_speed_profile_v2(uint8_t mapId, uint8_t stageCount,
-                                  const int32_t *endTicks, const uint8_t *basePwm);
-void pid_get_map_speed_profile_v2(uint8_t mapId, uint8_t *stageCount,
-                                  int32_t *endTicks, uint8_t *basePwm);
 // High-speed stage: 0 disabled, 1 ramp, 2 cruise, 3 brake,
 // 4 complete after first right corner recovery, 5 aborted, 6 corner HOLD.
 uint8_t pid_get_high_speed_stage(void);
