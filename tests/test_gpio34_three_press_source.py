@@ -79,7 +79,7 @@ class Map1TwoButtonTests(unittest.TestCase):
         self.assertIn('command("AUTO:1")', MAIN)
         self.assertIn('fullEyes?"FULL16":"TICK_MASK"', MAIN)
         self.assertIn("pid_set_map1_button_mode(physicalSide==SIDE_LEFT,fullEyes)", MAIN)
-        self.assertIn("void pid_clear_map1_button_mode(void)", MAIN)
+        self.assertIn("pid_clear_map1_button_mode();", MAIN)
         self.assertIn("void pid_clear_map1_button_mode(void)", PID_H)
         self.assertIn("if (map1ButtonFullEyes) return 0xFFFFU", PID)
         self.assertIn("map1ButtonLeft ? 0x03FFU : 0xFF80U", PID)
