@@ -1674,6 +1674,8 @@ class App(tk.Tk):
             phase, side, confirmed = side_state.groups()
             self.physical_calib_ready = phase in ("SELECT", "READY", "RUNNING")
             self.map1_side = None if side == "NONE" else side
+            if side == "NONE":
+                self.map1_eye_mode.set("TICK")  # No stale FULL16 choice after STOP.
             self.map1_side_confirmed = self.physical_calib_ready and confirmed == "1"
             names = {"LEFT": "TRÁI", "RIGHT": "PHẢI", "NONE": "chưa chọn"}
             self.map1_side_status.set(
