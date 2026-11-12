@@ -194,6 +194,8 @@ uint8_t map3BasePwms[4] = {140, 210, 140, 255};
 int32_t map3MaxTravelTicks = 0;
 uint32_t map2HoldStartMs = 0, map2StableSinceMs = 0;
 int32_t map2StableEncL = 0, map2StableEncR = 0;
+// Checkpoint hold disabled: MAP2 stage transitions do not stop for line alignment.
+constexpr bool MAP2_CHECKPOINT_ENABLED = false;
 constexpr uint32_t MAP2_STABLE_LINE_MS = 10;
 constexpr uint32_t MAP2_HOLD_TIMEOUT_MS = 1500;
 constexpr float MAP2_STABLE_LINE_ERROR = 12.0f;
@@ -1334,7 +1336,7 @@ void pid_line_follow_step(void) {
         const int32_t progress = runEncoderProgress();
         if (progress > map2MaxProgress) map2MaxProgress = progress;
     }
-    if (selectedMap == 2 && map2HoldState != 0) {
+    if (MAP2_CHECKPOINT_ENABLED && selectedMap == 2 && map2HoldState != 0) {
         // Preserve FINISH detection even during checkpoint pauses.
         if (finishDetectionArmed && sensor_get_line_bits() == 0xFFFFU) {
             currentCase = pid_detect_case(pos, blackCount);
@@ -1353,7 +1355,7 @@ void pid_line_follow_step(void) {
             : calculateMaskedPidPosition(pidSensorMask, &pidPosition);
     const LineCase_t prev = currentCase;
     currentCase = pid_detect_case(pos, blackCount);
-    if (selectedMap == 2 && map2HoldState == 0 &&
+    if (MAP2_CHECKPOINT_ENABLED && selectedMap == 2 && map2HoldState == 0 &&
         map2SensorActiveStage < 3 && finishDetectionArmed &&
         currentCase == LINE_CASE_NORMAL_PID && lineLocked &&
         turnState == TURN_NONE &&
