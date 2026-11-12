@@ -214,10 +214,10 @@ class App(tk.Tk):
             value="HS: MAP 1 từ 10500 tick | chờ ESP32 xác nhận")
         self.route_status = tk.StringVar(value="ROUTE: chờ ESP32 xác nhận")
         # Three-stage sensor selection, stored in ESP32 RAM until power-off.
-        self.sensor_profile = (350, 1500, 0x01FF, 0xFF80, 0xFFFF)
+        self.sensor_profile = (650, 1600, 0xFFE0, 0x01FF, 0xFFFF)
         self.sensor_profile_confirmed = False
         self.sensor_profile_status = tk.StringVar(
-            value="PID mắt: chờ ESP32 (mặc định 350 / 1500 ticks)")
+            value="PID mắt: chờ ESP32 (mặc định 650 / 1600 ticks)")
         self.sensor_profile_window = None
         self.map2_sensor_profile = (1000, 2000, 3000, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF)
         self.map2_sensor_confirmed = False
