@@ -1443,7 +1443,7 @@ void pid_line_follow_step(void) {
             // First-order low-pass: alpha=0.6 balances responsiveness vs noise
             d = 0.6f * rawD + 0.4f * lastDTerm;
             // Hard clamp: prevents catastrophic D-spikes when re-entering PID after a turn
-            constexpr float D_CLAMP = 200.0f;
+            const float D_CLAMP = selectedMap == 1 ? 90.0f : 200.0f;
             if (d >  D_CLAMP) d =  D_CLAMP;
             if (d < -D_CLAMP) d = -D_CLAMP;
         }
@@ -1477,11 +1477,29 @@ void pid_line_follow_step(void) {
             }
         }
         governedForwardSpeed = base;
-        const float correction = lastCorrection;
+        float correction = lastCorrection;
+        if (selectedMap == 1) {
+            // Near-center PID must not command saturated/reversed wheels.
+            // Permit progressively more steering as the line moves outward.
+            constexpr float CENTER_BAND = 15.0f;
+            constexpr float OUTER_BAND = 30.0f;
+            constexpr float CENTER_CORRECTION_LIMIT = 90.0f;
+            constexpr float OUTER_CORRECTION_LIMIT = 120.0f;
+            const float weight = fminf(1.0f,
+                fmaxf(0.0f, (absErr - CENTER_BAND) / (OUTER_BAND - CENTER_BAND)));
+            float correctionLimit = CENTER_CORRECTION_LIMIT +
+                (OUTER_CORRECTION_LIMIT - CENTER_CORRECTION_LIMIT) * weight;
+            // Leave PWM headroom without changing the configured base/HS peak.
+            // At HS peak=240, the correction limit is 15 while centered.
+            correctionLimit = fminf(correctionLimit,
+                fmaxf(0.0f, fminf(base, 255.0f - base)));
+            correction = fmaxf(-correctionLimit,
+                fminf(correction, correctionLimit));
+        }
 
         // Preserve the current governed forward PWM for map-specific gaps.
         lastNormalForwardPwm = clampPwm(base);
-        // Save correction for dashed-line coast
+        // Save the command correction actually applied to motor outputs.
         lastDashedCorrection = correction;
 
         float leftCommand = base + correction;
