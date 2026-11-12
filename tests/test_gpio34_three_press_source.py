@@ -1,72 +1,52 @@
-"""Regression checks for the physical GPIO34 WHITE/BLACK/START workflow.
+"""Regression checks: physical GPIO34 button removal must preserve SPP control.
 
-These are source-level invariants; they do not replace an ESP32 build or a
-hardware-in-the-loop test. Run with:
-python -m unittest discover -s tests -p 'test_gpio34_three_press_source.py'
+These source-level invariants do not replace an ESP32 build.
+Run: python -m unittest discover -s tests -p 'test_gpio34_three_press_source.py'
 """
-import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "src" / "main.cpp").read_text(encoding="utf-8")
 SENSOR = (ROOT / "src" / "sensor.cpp").read_text(encoding="utf-8")
+HEADER = (ROOT / "include" / "sensor.h").read_text(encoding="utf-8")
 PINOUT = (ROOT / "include" / "pinout.h").read_text(encoding="utf-8")
 PID = (ROOT / "src" / "pid_controller.cpp").read_text(encoding="utf-8")
 
 
-class GPIO34ThreePressSourceTests(unittest.TestCase):
-    def test_gpio34_active_low_and_debounced(self):
-        self.assertRegex(PINOUT, r"#define PIN_START_BUTTON\s+34")
-        self.assertIn("pressed = buttonState == LOW", SENSOR)
-        self.assertIn("BUTTON_DEBOUNCE_MS", SENSOR)
+class NoPhysicalButtonSourceTests(unittest.TestCase):
+    def test_no_gpio_button_input_or_button_state_machine(self):
+        for content in (MAIN, SENSOR, HEADER, PINOUT):
+            self.assertNotIn("PIN_START_BUTTON", content)
+            self.assertNotIn("BUTTON34_", content)
+            self.assertNotIn("sensor_start_button_pressed", content)
+        self.assertNotIn("button34Phase", MAIN)
+        self.assertNotIn("lastButtonRead", SENSOR)
+        self.assertNotIn("BUTTON_DEBOUNCE_MS", HEADER)
+        self.assertNotIn("pinMode(34", MAIN + SENSOR)
+        self.assertNotIn("pinMode(35", MAIN + SENSOR)
 
-    def test_three_phases_and_boot_resets_to_white(self):
-        self.assertIn("button34Phase=BUTTON34_WHITE_NEXT;", MAIN)
-        self.assertIn("button34Phase==BUTTON34_WHITE_NEXT", MAIN)
-        self.assertIn("button34Phase==BUTTON34_BLACK_NEXT", MAIN)
-        self.assertIn("button34Phase==BUTTON34_BLACK_CAPTURING", MAIN)
-        self.assertIn("BUTTON34_START_NEXT", MAIN)
-        self.assertIn("BUTTON34_START_REUSE", MAIN)
-        self.assertLess(MAIN.index('reply("BUTTON34: CAL_WHITE_REQUEST")'),
-                        MAIN.index('reply("BUTTON34: CAL_BLACK_REQUEST")'))
-        self.assertLess(MAIN.index('reply("BUTTON34: CAL_BLACK_REQUEST")'),
-                        MAIN.index('reply("BUTTON34: START_REQUEST")'))
+    def test_spp_calibration_and_auto_remain_available(self):
+        for command in ('s=="CAL_WHITE"', 's=="CAL_BLACK"', 's=="AUTO"',
+                        's=="STOP"', 's=="ESTOP"', 's=="RESET_ESTOP"'):
+            self.assertIn(command, MAIN)
+        for event in ("CAL_WHITE_DONE", "CAL_OK_SAVED", "CAL_FAILED"):
+            self.assertIn(event, MAIN)
+        self.assertIn("sensor_update_calibration_loop()", MAIN)
+        self.assertIn("sensor_read_all()", MAIN)
+        self.assertIn("pid_set_auto_mode(true);", MAIN)
 
-    def test_waits_until_white_and_black_complete(self):
-        self.assertIn("sensor_calibration_state()!=CAL_WHITE_READY", MAIN)
-        self.assertIn("ERR: BUTTON34_WAIT_CAL_WHITE_DONE", MAIN)
-        self.assertIn("ERR: BUTTON34_WAIT_CAL_BLACK_DONE", MAIN)
-        self.assertIn("case CAL_SAVED:", MAIN)
-        self.assertIn("setButton34Phase(BUTTON34_START_NEXT);", MAIN)
-        self.assertIn("case CAL_ERROR:", MAIN)
-        self.assertIn("setButton34Phase(BUTTON34_WHITE_NEXT);", MAIN)
-
-    def test_led_fast_then_slow_then_bt(self):
+    def test_led_and_finish_detection_are_preserved(self):
+        self.assertIn("PIN_DEBUG_LED", MAIN)
+        self.assertIn("void updateLedIndicator(uint32_t now)", MAIN)
         self.assertIn("CAL_WHITE_LED_BLINK_MS=40", MAIN)
         self.assertIn("CAL_BLACK_LED_BLINK_MS=90", MAIN)
-        self.assertIn("void updateLedIndicator(uint32_t now)", MAIN)
+        self.assertIn("state==CAL_WHITE_RUNNING", MAIN)
+        self.assertIn("state==CAL_BLACK_RUNNING", MAIN)
         self.assertIn("updateLedIndicator(now);", MAIN)
-        self.assertIn("BUTTON34_WHITE_CAPTURING", MAIN)
-        self.assertIn("setButton34Phase(BUTTON34_BLACK_NEXT); // LED OFF", MAIN)
-        self.assertIn("setButton34Phase(BUTTON34_START_NEXT);", MAIN)
-        self.assertIn("if(button34Phase!=BUTTON34_START_REUSE)", MAIN)
-        self.assertIn("ledWrite(phase==BUTTON34_WHITE_CAPTURING ||", MAIN)
-        self.assertIn("setButton34Phase(BUTTON34_START_REUSE)", MAIN)
-
-    def test_start_accepts_any_pattern_and_finish_arms_only_on_line(self):
-        self.assertNotIn("if(sensor_get_line_bits()!=0xFFFFU)", MAIN)
-        self.assertNotIn("ERR: START_REQUIRES_ALL_BLACK_16", MAIN)
-        self.assertIn('command("AUTO");', MAIN)
-        self.assertNotIn("BUTTON34_ALL_BLACK_16_CHECK_CALIBRATION", MAIN)
-        self.assertNotIn("BUTTON34_START_CENTER_MASK", MAIN)
         self.assertIn("START_PAD_EXIT_CONFIRM_MS = 30", PID)
         self.assertIn("finishDetectionArmed = false;", PID)
-        self.assertIn("startPadExitCandidate", PID)
-        self.assertIn("if (finishDetectionArmed && bitCount16(mask) == FULL_LINE_MIN_SENSORS)", PID)
         self.assertIn("FINISH_CONFIRM_FRAMES = 3", PID)
-        self.assertIn("FULL_LINE_MIN_SENSORS = N_SENSORS", PID)
-        self.assertIn("FINISH_ARMED: LINE_CONFIRMED", MAIN)
 
 
 if __name__ == "__main__":
