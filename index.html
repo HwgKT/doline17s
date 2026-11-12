@@ -1228,9 +1228,11 @@
       if(state) {
         webV6State.phase = state[1];
         webV6State.calReady = state[1] !== 'CALIB';
+        const previousSide = webV6State.side;
         webV6State.side = state[2];
         webV6State.confirmed = webV6State.calReady && state[3] === '1';
-        if(webV6State.side === 'NONE') webV6State.mask = null;
+        if(webV6State.side === 'NONE' || previousSide !== webV6State.side)
+          webV6State.mask = null;
         renderWebV6State();
         return true;
       }
@@ -1387,10 +1389,15 @@
           const { value, done } = await serialReader.read();
           if (done) break;
           lineBuffer += value;
+          // Ignore binary telemetry bytes buffered before STREAM:0 is ACKed.
+          // Never interpret binary noise as a side/START confirmation.
+          if(lineBuffer.length > 8192) lineBuffer = lineBuffer.slice(-8192);
           const lines = lineBuffer.split('\n');
-          lineBuffer = lines.pop(); // giữ lại phần chưa đủ dòng
+          lineBuffer = lines.pop();
           for (const line of lines) {
-            handleIncomingData(line.trim());
+            const clean = line.replace(/[^\x20-\x7e]/g, '').trim();
+            const accepted = clean.search(/BUTTON_STATE |BUTTON_PROFILE |BUTTON_RUN |BUTTON_SIDE|CAL_|SENSOR_PROFILE|SENSORS:|MODE:|MOTOR:|AUTO_|PID:|HS_PEAK:|STREAM |STATUS:|ERR:|MAP:|DIAG:|ROUTE_|FINISH_|SPEED SET:/);
+            if(accepted >= 0) handleIncomingData(clean.slice(accepted));
           }
         }
       } catch (err) {
@@ -1413,6 +1420,17 @@
     async function sendCommand(cmd) {
       if (!isConnected) {
         log(`Chưa kết nối! Không thể gửi: "${cmd}"`, 'err');
+        return false;
+      }
+      // Fail closed for motion; all clients still rely on firmware validation.
+      if(/^(?:F|B|L|R|A|AUTO|AUTO:[123]|START|SIDE_START:(?:TICK|FULL))$/.test(cmd) &&
+         !webV6State.calReady) {
+        log('Cần hoàn tất CAL trắng/đen trong phiên hiện tại.', 'err');
+        return false;
+      }
+      if(/^(?:A|AUTO|AUTO:1|START|SIDE_START:(?:TICK|FULL))$/.test(cmd) &&
+         (!webV6State.confirmed || webV6State.side === 'NONE')) {
+        log('Chưa xác nhận bên Trái/Phải từ ESP32.', 'err');
         return false;
       }
 
