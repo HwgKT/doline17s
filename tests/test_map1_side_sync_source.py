@@ -26,6 +26,9 @@ class SideSyncTests(unittest.TestCase):
         self.assertIn('if(physicalRunInProgress)',MAIN)
         self.assertIn('0xFFC0U',PID)
         self.assertIn('MAP1_BUTTON_TICK2 = 1500',PID)
+    def test_recalibration_clears_gui_side_immediately(self):
+        self.assertIn('physicalPhase=PHYS_WAIT_WHITE;\n      physicalSide=SIDE_NONE;\n      reply("CAL_WHITE_ACCEPTED");\n      reportPhysicalSide();',MAIN)
+        self.assertIn('physicalPhase=PHYS_WAIT_BLACK;\n      physicalSide=SIDE_NONE;\n      reply("CAL_BLACK_ACCEPTED");\n      reportPhysicalSide();',MAIN)
     def test_other_maps_unchanged(self):
         self.assertIn('else f"AUTO:{self.selected_map}"',APP)
 if __name__=="__main__": unittest.main()
