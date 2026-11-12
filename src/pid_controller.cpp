@@ -234,9 +234,9 @@ static uint16_t map1PidSensorMask() {
     if (map1ButtonOverride) {
         if (map1ButtonFullEyes) return 0xFFFFU;
         if (map1SensorMaxTicks < MAP1_BUTTON_TICK1)
-            return map1ButtonLeft ? 0x03FFU : 0xFF80U;
+            return map1ButtonLeft ? 0x03FFU : 0xFFC0U;
         if (map1SensorMaxTicks < MAP1_BUTTON_TICK2)
-            return map1ButtonLeft ? 0xFF80U : 0x03FFU;
+            return map1ButtonLeft ? 0xFFC0U : 0x03FFU;
         return 0xFFFFU;
     }
     if (map1SensorMaxTicks < map1SensorStage2Ticks)
