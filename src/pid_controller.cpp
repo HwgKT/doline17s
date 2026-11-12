@@ -333,6 +333,7 @@ uint8_t map1EarlySource=MAP1_SOURCE_NONE, map1SearchSource=MAP1_SOURCE_NONE;
 bool map1SearchWasActive=false,map1TurnWasActive=false,map1BoostWasActive=false;
 uint32_t map1SearchStartMs=0,map1TurnStartMs=0;
 int8_t map1PreviousPwmSignL=0,map1PreviousPwmSignR=0;
+uint32_t map1LastPwmReverseL=0,map1LastPwmReverseR=0;
 static int8_t map1PwmSign(int16_t x){return (x>0)-(x<0);}
 static void map1PushLog(uint8_t type,uint8_t source=MAP1_SOURCE_NONE,
                         int8_t dir=0,uint16_t duration=0,uint8_t extra=0){
@@ -504,6 +505,7 @@ static void resetLineTracking() {
     map1SearchWasActive=map1TurnWasActive=map1BoostWasActive=false;
     map1EarlySource=map1SearchSource=MAP1_SOURCE_NONE;
     map1PreviousPwmSignL=map1PreviousPwmSignR=0;
+    map1LastPwmReverseL=map1LastPwmReverseR=0;
     map1SensorMaxTicks = 0;
     map2MaxProgress = 0;
     map2SensorMaxTravel = 0;
@@ -1451,10 +1453,17 @@ void pid_line_follow_step(void) {
         const int8_t sl=map1PwmSign(pl),sr=map1PwmSign(pr);
         // A reversal is emitted only for a direct nonzero + to - (or - to +)
         // transition; zero crossings are tracked via the last nonzero sign.
-        if(sl && map1PreviousPwmSignL && sl!=map1PreviousPwmSignL)
+        const uint32_t nowMs=millis();
+        if(sl && map1PreviousPwmSignL && sl!=map1PreviousPwmSignL &&
+           (uint32_t)(nowMs-map1LastPwmReverseL)>=40U){
+            map1LastPwmReverseL=nowMs;
             map1PushLog(MAP1_LOG_PWM_REVERSE,MAP1_SOURCE_NONE,-1);
-        if(sr && map1PreviousPwmSignR && sr!=map1PreviousPwmSignR)
+        }
+        if(sr && map1PreviousPwmSignR && sr!=map1PreviousPwmSignR &&
+           (uint32_t)(nowMs-map1LastPwmReverseR)>=40U){
+            map1LastPwmReverseR=nowMs;
             map1PushLog(MAP1_LOG_PWM_REVERSE,MAP1_SOURCE_NONE,1);
+        }
         if(sl)map1PreviousPwmSignL=sl;
         if(sr)map1PreviousPwmSignR=sr;
     }
