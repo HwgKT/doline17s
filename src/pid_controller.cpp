@@ -728,7 +728,7 @@ void pid_set_auto_mode(bool enabled) {
     autoStartedMs = millis();
     if (enabled) {
         encoder_get_counts(&runEncoderOriginL, &runEncoderOriginR);
-        highSpeedStage = ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 1 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED;
+        highSpeedStage = ENCODER_SPEED_PROFILE_ENABLED && selectedMap >= 2 && selectedMap <= 3 ? HS_ACCEL : HS_DISABLED; // Map 1 uses only the 8000-tick late boost.
     }
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
