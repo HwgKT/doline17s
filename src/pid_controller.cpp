@@ -14,7 +14,7 @@ static const float SENSOR_WEIGHTS[N_SENSORS] = {
 
 // Optimised tune for sharp-turn responsiveness.  Gains are still live-tuneable
 // via the SPP KP:/KI:/KD: commands.
-static PID_Config_t pidConfig = {1.6f, 0.0f, 0.8f, 100, 255, -100};
+static PID_Config_t pidConfig = {1.6f, 0.0f, 0.8f, 140, 255, -100};
 static bool autoMode = false;
 static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0, integralError = 0, lastCorrection = 0;
@@ -140,7 +140,7 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1000, 1700}  // MAP 3
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
-constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 240;
 // MAP 1 and MAP 2 use their selected fixed BASE. MAP 3 has an independent,
 // configurable four-stage BASE schedule selected by encoder travel.
@@ -175,6 +175,12 @@ int32_t map1SensorStage3Ticks = 1500;
 // Stage 1: disable S0..S4; stage 2: disable S9..S15; stage 3: all sensors.
 // Default LEFT preset: stage1 S0-S9, stage2 S7-S15, stage3 all 16.
 uint16_t map1SensorStageMasks[3] = {0x03FFU, 0xFF80U, 0xFFFFU};
+// Temporary run-scoped physical button override, independent of SPP SENSOR_PROFILE.
+bool map1ButtonOverride = false;
+bool map1ButtonLeft = true;
+bool map1ButtonFullEyes = false;
+constexpr int32_t MAP1_BUTTON_TICK1 = 650;
+constexpr int32_t MAP1_BUTTON_TICK2 = 1500;
 constexpr uint16_t MAP1_SENSOR_MASK_STAGE3 = 0xFFFFU;
 int32_t map1SensorMaxTicks = 0;
 int32_t map2MaxProgress = 0; // Retained for Map 2 early-turn recognition.
@@ -256,6 +262,14 @@ static uint16_t map1PidSensorMask() {
     const int32_t traveled = map1SensorTravelTicks();
     // A pivot or a temporary reversal must not reactivate a previous group.
     if (traveled > map1SensorMaxTicks) map1SensorMaxTicks = traveled;
+    if (map1ButtonOverride) {
+        if (map1ButtonFullEyes) return 0xFFFFU;
+        if (map1SensorMaxTicks < MAP1_BUTTON_TICK1)
+            return map1ButtonLeft ? 0x03FFU : 0xFFC0U;
+        if (map1SensorMaxTicks < MAP1_BUTTON_TICK2)
+            return map1ButtonLeft ? 0xFFC0U : 0x03FFU;
+        return 0xFFFFU;
+    }
     if (map1SensorMaxTicks < map1SensorStage2Ticks)
         return map1SensorStageMasks[0];
     if (map1SensorMaxTicks < map1SensorStage3Ticks)
@@ -710,6 +724,8 @@ void pid_set_base_speed(int16_t speed) {
     pidConfig.baseSpeed = speed < 0 ? 0 : (speed > 255 ? 255 : speed);
  }
 void pid_set_auto_mode(bool enabled) {
+    // Physical-button eye overrides apply only to one AUTO run.
+    if (!enabled) map1ButtonOverride = false;
     autoMode = enabled;
     currentCase = LINE_CASE_STOPPED;
     resetLineTracking();
@@ -723,6 +739,13 @@ void pid_set_auto_mode(bool enabled) {
     motor_stop(); // Never start blind; wait for stable black-line detection.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
+bool pid_set_map1_button_mode(bool left, bool fullEyes) {
+    if (autoMode || selectedMap != 1) return false;
+    map1ButtonOverride = true;
+    map1ButtonLeft = left;
+    map1ButtonFullEyes = fullEyes;
+    return true;
+}
 bool pid_set_map1_route_lock(bool enabled) {
     if (autoMode) return false;
     map1RouteLockEnabled = enabled;

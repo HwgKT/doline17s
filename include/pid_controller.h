@@ -60,6 +60,11 @@ void pid_set_base_speed(int16_t speed);
  * @brief Bật hoặc tắt chế độ tự động dò line
  */
 void pid_set_auto_mode(bool enable);
+// Map 1 physical-button run: override only PID sensor masks for this AUTO.
+// left=true uses S0..S9 then S7..S15; right=true reverses those stages.
+// fullEyes=true uses all 16 sensors throughout; SPP profiles are untouched.
+bool pid_set_map1_button_mode(bool left, bool fullEyes);
+
 
 /**
  * @brief Kiểm tra xem đang chạy tự động dò line hay lái tay
