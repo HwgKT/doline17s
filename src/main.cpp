@@ -11,6 +11,7 @@
 #include "adc_bench.h"
 #include "spp_debug.h"
 
+void startPhysicalMap1(bool fullEyes);
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
@@ -41,6 +42,38 @@ enum Button34Phase : uint8_t {
   BUTTON34_START_REUSE
 };
 Button34Phase button34Phase=BUTTON34_WHITE_NEXT;
+enum PhysicalSide : uint8_t { SIDE_NONE, SIDE_LEFT, SIDE_RIGHT };
+PhysicalSide physicalSide = SIDE_NONE;
+bool physicalSideConfirmed = false;
+bool physicalRunInProgress = false;
+bool map1StartModePreconfigured = false;
+constexpr uint32_t BUTTON_DEBOUNCE_MS = 50;
+constexpr uint32_t BUTTON_HOLD_MS = 1000;
+struct PhysicalButton {
+  explicit PhysicalButton(uint8_t gpio) : pin(gpio) {}
+  uint8_t pin, sample=HIGH, stable=HIGH;
+  uint32_t changeMs=0, pressedMs=0;
+  bool holdSent=false;
+};
+PhysicalButton calButton{PIN_CAL_BUTTON}, selectButton{PIN_SELECT_BUTTON};
+struct PhysicalButtonEvent { bool shortPress=false, longPress=false; };
+PhysicalButtonEvent pollPhysicalButton(PhysicalButton &b, uint32_t now) {
+  PhysicalButtonEvent e{};
+  const uint8_t current=(uint8_t)digitalRead(b.pin);
+  if(current!=b.sample){b.sample=current;b.changeMs=now;}
+  if((uint32_t)(now-b.changeMs)>=BUTTON_DEBOUNCE_MS && current!=b.stable){
+    b.stable=current;
+    if(current==LOW){b.pressedMs=now;b.holdSent=false;}
+    else if(!b.holdSent && (uint32_t)(now-b.pressedMs)<BUTTON_HOLD_MS) e.shortPress=true;
+  }
+  if(b.stable==LOW && !b.holdSent &&
+     (uint32_t)(now-b.pressedMs)>=BUTTON_HOLD_MS){
+    b.holdSent=true;e.longPress=true;
+  }
+  return e;
+}
+void reportPhysicalSide();
+void handlePhysicalButtons(uint32_t now);
 uint32_t lastButton34LedMs=0;
 
 void ledWrite(bool on) {
@@ -56,8 +89,22 @@ void setButton34Phase(Button34Phase phase) {
            phase==BUTTON34_BLACK_CAPTURING);
 }
 void reply(const String &line) { btSendLine(line); }
+void reportPhysicalSide() {
+  const char* phase=pid_is_auto_mode()?"RUNNING":
+    (physicalSideConfirmed?"READY":
+     (button34Phase==BUTTON34_START_NEXT || button34Phase==BUTTON34_START_REUSE)?"SELECT":"CALIB");
+  const char* side=physicalSide==SIDE_LEFT?"LEFT":physicalSide==SIDE_RIGHT?"RIGHT":"NONE";
+  reply(String("BUTTON_STATE phase=")+phase+" side="+side+
+        " confirmed="+(physicalSideConfirmed?"1":"0"));
+}
+void clearPhysicalSide() {
+  physicalSide=SIDE_NONE;physicalSideConfirmed=false;
+  physicalRunInProgress=false;
+  map1StartModePreconfigured=false;
+}
 void safeStop() {
   pid_set_auto_mode(false); motor_stop(); manualActive=false;
+  if(physicalRunInProgress){clearPhysicalSide();reportPhysicalSide();}
 }
 bool parseGain(const String &s,float &val) {
   if(!s.length())return false;
@@ -97,8 +144,29 @@ void command(const String &raw) {
   }
   // USB command echo intentionally disabled.
   if(s=="PING"){reply("PONG");return;}
+  if(s=="SIDE:STATUS"){reportPhysicalSide();return;}
+  if(s=="SIDE:CLEAR"){
+    if(pid_is_auto_mode()||manualActive||adcBenchActive()||
+       (!physicalSideConfirmed && physicalSide==SIDE_NONE)){
+      reply("ERR: SIDE_NOT_READY");return;
+    }
+    clearPhysicalSide();reply("BUTTON_SIDE_CLEARED");reportPhysicalSide();return;
+  }
+  if(s=="SIDE:LEFT"||s=="SIDE:RIGHT"){
+    if(pid_is_auto_mode()||manualActive||adcBenchActive()||estopLatched||
+       !calibrationReady||sensor_calibration_state()!=CAL_READY){
+      reply("ERR: SIDE_NOT_READY");return;
+    }
+    physicalSide=s=="SIDE:LEFT"?SIDE_LEFT:SIDE_RIGHT;
+    physicalSideConfirmed=true;
+    reply(String("BUTTON_SIDE_CONFIRMED: ")+(physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
+    reportPhysicalSide();return;
+  }
+  if(s=="SIDE_START:TICK"||s=="SIDE_START:FULL"){
+    startPhysicalMap1(s=="SIDE_START:FULL");return;
+  }
   if(s=="?"||s=="HELP"){
-    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_PROFILE MAP3_PROFILE:sT1,sT2,sT3,sM1,sM2,sM3,sM4,bT1,bT2,bT3,b1,b2,b3,b4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
+    reply("HELP: PING STATUS DIAG PERF ADC_MODE ADC_MODE:0/1 PID SIDE:STATUS SIDE:LEFT SIDE:RIGHT SIDE:CLEAR SIDE_START:TICK SIDE_START:FULL MAP2_SENSOR_PROFILE MAP2_SENSOR_PROFILE:t1,t2,t3,m1,m2,m3,m4 MAP3_PROFILE MAP3_PROFILE:sT1,sT2,sT3,sM1,sM2,sM3,sM4,bT1,bT2,bT3,b1,b2,b3,b4 HS_PEAK HS_PEAK:100-255 ROUTE_LOCK ROUTE_LOCK:0/1 SENSOR_PROFILE SENSOR_PROFILE:t1,t2,m1,m2,m3 AUTO AUTO:1/2/3 MAP MAP:1/2/3 START STOP ESTOP RESET_ESTOP PWM ENC ENC_RESET P CAL_WHITE CAL_BLACK CAL_STATUS CAL_DUMP KP:x KI:x KD:x BASE:n STREAM:0/20/50/100/200/300 F B L R");
     return;
   }
   if(s=="STREAM"){
@@ -424,11 +492,21 @@ void command(const String &raw) {
     if(pid_get_selected_map()==0){
       reply("ERR: MAP_NOT_SELECTED");return;
     }
+    if(pid_get_selected_map()==1){
+      if(!physicalSideConfirmed || physicalSide==SIDE_NONE){
+        reply("ERR: SIDE_CONFIRM_REQUIRED");return;
+      }
+      if(!map1StartModePreconfigured &&
+         !pid_set_map1_button_mode(physicalSide==SIDE_LEFT,false)){
+        reply("ERR: SIDE_MASK_SETUP_FAILED");return;
+      }
+    }
     // Start is permitted from BLACK, WHITE, or a narrow line.
     // PID initially coasts straight until the center line is confirmed;
     // the full-black FINISH detector remains disarmed during acquisition.
     manualActive=false;
     pid_set_auto_mode(true);
+    if(pid_get_selected_map()==1)physicalRunInProgress=true;
     reply("MODE: AUTO PID");
     reply(String("ADC_RUN_MODE: ")+sensor_get_adc_mode()+
           " method="+sensor_adc_mode());
@@ -470,7 +548,7 @@ void command(const String &raw) {
   if(s=="C"||s=="W"||s=="CALIB"||s=="CAL_WHITE"){
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(sensor_is_calibrating()){reply("CAL_BUSY");return;}
-    safeStop();
+    safeStop();clearPhysicalSide();reportPhysicalSide();
     if(sensor_capture_white()){
       setButton34Phase(BUTTON34_WHITE_CAPTURING);
       reply("CAL_WHITE_ACCEPTED");
@@ -480,7 +558,7 @@ void command(const String &raw) {
   if(s=="CAL_BLACK"){
     if(adcBenchActive()){reply("ERR: ADC_BENCH_ACTIVE");return;}
     if(sensor_calibration_state()!=CAL_WHITE_READY){reply("CAL_NEED_WHITE");return;}
-    safeStop();
+    safeStop();clearPhysicalSide();reportPhysicalSide();
     if(sensor_capture_black()){
       setButton34Phase(BUTTON34_BLACK_CAPTURING);
       reply("CAL_BLACK_ACCEPTED");
@@ -539,7 +617,7 @@ void connectionState(uint32_t now) {
   if(connected!=btPrevious){
     if(connected){
       ledWrite(true);reply("[BT] CONNECTED: Windows SPP");
-      reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();
+      reply("READY: LineRobot SPP v1 (72-byte frame)");showPid();reportPhysicalSide();
       command("HS_PEAK");
     }else{
       safeStop();adcBenchCancel();ledWrite(false);lastBlink=now;
@@ -592,12 +670,69 @@ void sendFrame(){
 }
 } // namespace
 
+void startPhysicalMap1(bool fullEyes) {
+  if(!physicalSideConfirmed || physicalSide==SIDE_NONE ||
+     pid_is_auto_mode() || manualActive || adcBenchActive() ||
+     estopLatched || !sensor_adc_ready() || !calibrationReady ||
+     sensor_is_calibrating() || sensor_calibration_state()!=CAL_READY){
+    reply("ERR: BUTTON_START_NOT_READY");return;
+  }
+  if(!pid_select_map(1) ||
+     !pid_set_map1_button_mode(physicalSide==SIDE_LEFT,fullEyes)){
+    reply("ERR: BUTTON_MAP1_MODE_FAILED");return;
+  }
+  map1StartModePreconfigured=true;
+  command("AUTO:1");
+  map1StartModePreconfigured=false;
+  if(pid_is_auto_mode()){
+    reply(String("BUTTON_RUN map=1 side=")+
+          (physicalSide==SIDE_LEFT?"LEFT":"RIGHT")+
+          " eyes="+(fullEyes?"FULL16":"TICK_MASK"));
+    reportPhysicalSide();
+  }
+}
+void handlePhysicalButtons(uint32_t now) {
+  const PhysicalButtonEvent cal=pollPhysicalButton(calButton,now);
+  const PhysicalButtonEvent side=pollPhysicalButton(selectButton,now);
+  if(pid_is_auto_mode()||manualActive||adcBenchActive()||estopLatched)return;
+  if(button34Phase==BUTTON34_WHITE_NEXT) {
+    if(cal.shortPress) command("CAL_WHITE");
+  }else if(button34Phase==BUTTON34_BLACK_NEXT) {
+    if(cal.shortPress) command("CAL_BLACK");
+  }else if(button34Phase==BUTTON34_START_NEXT ||
+           button34Phase==BUTTON34_START_REUSE){
+    if(!physicalSideConfirmed){
+      if(side.shortPress){
+        physicalSide=physicalSide==SIDE_LEFT?SIDE_RIGHT:SIDE_LEFT;
+        reply(String("BUTTON_SIDE: ")+(physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
+        reportPhysicalSide();
+      }
+      if(cal.longPress && physicalSide!=SIDE_NONE){
+        physicalSideConfirmed=true;
+        reply(String("BUTTON_SIDE_CONFIRMED: ")+
+              (physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
+        reportPhysicalSide();
+      }
+    }else if(side.longPress){
+      clearPhysicalSide();reply("BUTTON_SIDE_CLEARED");reportPhysicalSide();
+    }else if(cal.shortPress) startPhysicalMap1(false);
+    else if(side.shortPress) startPhysicalMap1(true);
+  }
+}
+
 void setup() {
   // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
+  pinMode(PIN_CAL_BUTTON,INPUT);
+  pinMode(PIN_SELECT_BUTTON,INPUT);
+  const uint32_t buttonInitMs=millis();
+  calButton.sample=calButton.stable=(uint8_t)digitalRead(PIN_CAL_BUTTON);
+  selectButton.sample=selectButton.stable=(uint8_t)digitalRead(PIN_SELECT_BUTTON);
+  calButton.changeMs=selectButton.changeMs=buttonInitMs;
+  calButton.pressedMs=selectButton.pressedMs=buttonInitMs;
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
-  pid_init(1.6f,0.0f,0.8f,100); // default PID gains for MAP 1/2/3
+  pid_init(1.6f,0.0f,0.8f,130); // default PID gains for MAP 1/2/3
   pid_select_map(1); // physical GPIO34 START works without a connected app
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
@@ -612,35 +747,7 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  // GPIO34 physical 3-press workflow: WHITE -> BLACK -> START.
-  // GPIO34 itself is debounced once per LOW press in sensor.cpp.
-  if(sensor_start_button_pressed()){
-    if(pid_is_auto_mode() || manualActive){
-      reply("ERR: BUTTON34_REQUIRES_STOPPED");
-    }else if(adcBenchActive()){
-      reply("ERR: ADC_BENCH_ACTIVE");
-    }else if(button34Phase==BUTTON34_WHITE_NEXT){
-      reply("BUTTON34: CAL_WHITE_REQUEST");
-      command("CAL_WHITE"); // changes phase only on accepted capture
-    }else if(button34Phase==BUTTON34_WHITE_CAPTURING){
-      reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
-    }else if(button34Phase==BUTTON34_BLACK_NEXT){
-      if(sensor_is_calibrating() ||
-         sensor_calibration_state()!=CAL_WHITE_READY){
-        reply("ERR: BUTTON34_WAIT_CAL_WHITE_DONE");
-      }else{
-        reply("BUTTON34: CAL_BLACK_REQUEST");
-        command("CAL_BLACK");
-      }
-    }else if(button34Phase==BUTTON34_BLACK_CAPTURING){
-      reply("ERR: BUTTON34_WAIT_CAL_BLACK_DONE");
-    }else{
-      // Reuse the same AUTO validation as the GUI (no black-pad requirement).
-      reply("BUTTON34: START_REQUEST");
-      command("AUTO");
-      if(pid_is_auto_mode()) setButton34Phase(BUTTON34_START_REUSE);
-    }
-  }
+  handlePhysicalButtons(now);
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
   if(adcBenchActive())adcBenchStep();
@@ -659,11 +766,13 @@ void loop() {
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
     case CAL_SAVED:
       setButton34Phase(BUTTON34_START_NEXT);
-      reply("CAL_OK_SAVED");showCalib();break;
+      clearPhysicalSide();
+      reply("CAL_OK_SAVED");showCalib();reportPhysicalSide();break;
     case CAL_ERROR:
       // An invalid black profile cannot advance to START. Redo WHITE first.
       setButton34Phase(BUTTON34_WHITE_NEXT);
-      reply("CAL_FAILED");showCalib();break;
+      clearPhysicalSide();
+      reply("CAL_FAILED");showCalib();reportPhysicalSide();break;
     default: break;
   }
   updateLedIndicator(now);
