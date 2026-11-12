@@ -80,6 +80,18 @@ void ledWrite(bool on) {
   ledOn=on;
   digitalWrite(PIN_DEBUG_LED,on==(DEBUG_LED_ACTIVE_HIGH!=0)?HIGH:LOW);
 }
+// Same nonblocking GPIO2 acknowledgement pulses as mainHighSpeedv2.
+// One flash=LEFT / WHITE done; two=RIGHT / BLACK done;
+// three=side confirmation or clear.
+uint8_t ledPulseSteps=0;
+uint16_t ledPulseHalfMs=250;
+uint32_t ledPulseLastMs=0;
+void announcePhysical(uint8_t pulses,uint16_t rhythmMs) {
+  ledPulseSteps=(uint8_t)(pulses*2U);
+  ledPulseHalfMs=rhythmMs/2U;
+  ledPulseLastMs=millis();
+  ledWrite(true);
+}
 void setButton34Phase(Button34Phase phase) {
   button34Phase=phase;
   lastButton34LedMs=millis();
@@ -156,7 +168,8 @@ void command(const String &raw) {
        (!physicalSideConfirmed && physicalSide==SIDE_NONE)){
       reply("ERR: SIDE_NOT_READY");return;
     }
-    clearPhysicalSide();reply("BUTTON_SIDE_CLEARED");reportPhysicalSide();return;
+    clearPhysicalSide();announcePhysical(3,500);
+    reply("BUTTON_SIDE_CLEARED");reportPhysicalSide();return;
   }
   if(s=="SIDE:LEFT"||s=="SIDE:RIGHT"){
     if(pid_is_auto_mode()||manualActive||adcBenchActive()||estopLatched||
@@ -165,6 +178,7 @@ void command(const String &raw) {
     }
     physicalSide=s=="SIDE:LEFT"?SIDE_LEFT:SIDE_RIGHT;
     physicalSideConfirmed=true;
+    announcePhysical(3,500);
     reply(String("BUTTON_SIDE_CONFIRMED: ")+(physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
     reportPhysicalSide();return;
   }
@@ -632,23 +646,28 @@ void connectionState(uint32_t now) {
     btPrevious=connected;
   }
 }
-// Calibration indicator has priority over the Bluetooth LED:
-// blink only while capturing; OFF after each completed calibration step.
+// Match v2 LED priority: acknowledgement pulses > calibration blinking
+// > Bluetooth connected (steady ON) / disconnected (blinking).
+// Everything is driven by millis() and never blocks the PID loop.
 void updateLedIndicator(uint32_t now) {
-  const uint32_t blinkMs =
-    button34Phase==BUTTON34_WHITE_CAPTURING ? CAL_WHITE_LED_BLINK_MS :
-    button34Phase==BUTTON34_BLACK_CAPTURING ? CAL_BLACK_LED_BLINK_MS : 0U;
-  if(blinkMs) {
-    if((uint32_t)(now-lastButton34LedMs)>=blinkMs) {
-      lastButton34LedMs=now;
-      ledWrite(!ledOn);
+  if(ledPulseSteps){
+    if((uint32_t)(now-ledPulseLastMs)>=ledPulseHalfMs){
+      ledPulseLastMs=now;
+      --ledPulseSteps;
+      if(ledPulseSteps==0) ledWrite(false);
+      else ledWrite((ledPulseSteps & 1U)==0);
     }
     return;
   }
-  // Do not let a connected Bluetooth SPP session relight GPIO2 while
-  // waiting for CAL_WHITE, CAL_BLACK or START.
-  if(button34Phase!=BUTTON34_START_REUSE){
-    if(ledOn) ledWrite(false);
+  const CalState state=sensor_calibration_state();
+  const uint32_t blinkMs =
+    state==CAL_WHITE_RUNNING ? CAL_WHITE_LED_BLINK_MS :
+    state==CAL_BLACK_RUNNING ? CAL_BLACK_LED_BLINK_MS : 0U;
+  if(blinkMs){
+    if((uint32_t)(now-lastButton34LedMs)>=blinkMs){
+      lastButton34LedMs=now;
+      ledWrite(!ledOn);
+    }
     return;
   }
   if(sppStarted && btConnected()){
@@ -710,17 +729,20 @@ void handlePhysicalButtons(uint32_t now) {
     if(!physicalSideConfirmed){
       if(side.shortPress){
         physicalSide=physicalSide==SIDE_LEFT?SIDE_RIGHT:SIDE_LEFT;
+        announcePhysical(physicalSide==SIDE_LEFT?1:2,1000);
         reply(String("BUTTON_SIDE: ")+(physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
         reportPhysicalSide();
       }
       if(cal.longPress && physicalSide!=SIDE_NONE){
         physicalSideConfirmed=true;
+        announcePhysical(3,500);
         reply(String("BUTTON_SIDE_CONFIRMED: ")+
               (physicalSide==SIDE_LEFT?"LEFT":"RIGHT"));
         reportPhysicalSide();
       }
     }else if(side.longPress){
-      clearPhysicalSide();reply("BUTTON_SIDE_CLEARED");reportPhysicalSide();
+      clearPhysicalSide();announcePhysical(3,500);
+      reply("BUTTON_SIDE_CLEARED");reportPhysicalSide();
     }else if(cal.shortPress) startPhysicalMap1(false);
     else if(side.shortPress) startPhysicalMap1(true);
   }
@@ -767,12 +789,14 @@ void loop() {
   switch(sensor_take_calibration_event()){
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
     case CAL_WHITE_DONE:
-      setButton34Phase(BUTTON34_BLACK_NEXT); // LED OFF, ready for BLACK press
+      setButton34Phase(BUTTON34_BLACK_NEXT);
+      announcePhysical(1,500);
       reply("CAL_WHITE_DONE");break;
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
     case CAL_SAVED:
       setButton34Phase(BUTTON34_START_NEXT);
       clearPhysicalSide();
+      announcePhysical(2,500);
       reply("CAL_OK_SAVED");showCalib();reportPhysicalSide();break;
     case CAL_ERROR:
       // An invalid black profile cannot advance to START. Redo WHITE first.
