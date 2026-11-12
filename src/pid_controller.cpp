@@ -140,7 +140,7 @@ constexpr GapWindow GAP_WINDOWS[3] = {
     {1000, 1700}  // MAP 3
 };
 uint8_t selectedMap = 0;  // setup() selects MAP 1; MAP:2/3 may override.
-constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {140, 160, 150};
+constexpr int16_t MAP_DEFAULT_BASE_PWM[3] = {130, 160, 150};
 constexpr int16_t MAP_DEFAULT_HS_PEAK_PWM = 180;
 // MAP 1 and MAP 2 use their selected fixed BASE. MAP 3 has an independent,
 // configurable four-stage BASE schedule selected by encoder travel.
@@ -739,6 +739,13 @@ bool pid_set_map1_button_mode(bool left, bool fullEyes) {
     map1ButtonLeft = left;
     map1ButtonFullEyes = fullEyes;
     return true;
+}
+void pid_clear_map1_button_mode(void) {
+    // No stale LEFT/RIGHT or FULL16 choice after STOP or recalibration.
+    if (!autoMode) {
+        map1ButtonOverride = false;
+        map1ButtonFullEyes = false;
+    }
 }
 bool pid_set_map1_route_lock(bool enabled) {
     if (autoMode) return false;
